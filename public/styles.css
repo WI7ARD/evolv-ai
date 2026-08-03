@@ -791,6 +791,14 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .pack-chat-active small { margin-top: 3px; color: var(--muted); font-size: 8px; }
 .pack-chat-exit { border: 1px solid var(--line); border-radius: 6px; background: #0b0e0d; color: var(--muted); padding: 6px 8px; font-size: 8px; }
 .pack-chat-exit:hover { border-color: var(--acid-dim); color: var(--text); }
+.profile-privacy-note {
+  margin: 12px 0; padding: 9px 10px; border: 1px solid var(--acid-dim); border-radius: 7px;
+  color: var(--acid); background: var(--acid-soft); font: 8px/1.5 "DM Mono", monospace;
+}
+.adaptive-profile-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 9px; }
+.adaptive-profile-item { padding: 11px; border: 1px solid var(--line-soft); border-radius: 7px; background: #0a0d0c; }
+.adaptive-profile-item strong { color: var(--text); font-size: 11px; }
+.adaptive-profile-item p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 /* The app's permanent sidebar reduces usable workspace width by roughly
    250px, so collapse before the browser viewport itself becomes narrow. */
 @media (max-width: 1400px) {

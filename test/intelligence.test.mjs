@@ -108,6 +108,15 @@ test("memory proposals deduplicate creates and turn changed titles into updates"
   assert.equal(proposals[0].targetId, "m1");
 });
 
+test("adaptive preference proposals require confidence and reject sensitive trait inference", () => {
+  const proposals = sanitizeMemoryProposals({ proposals: [
+    { action: "create", type: "preference", title: "Learning style", body: "Use worked examples first.", rationale: "The user explicitly asked for examples.", confidence: .9 },
+    { action: "create", type: "preference", title: "Communication style", body: "Probably likes terse answers.", rationale: "Guess from one message.", confidence: .4 },
+    { action: "create", type: "preference", title: "Political identity", body: "Infer politics from wording.", rationale: "Model guess.", confidence: .99 }
+  ] }, []);
+  assert.deepEqual(proposals.map((item) => item.title), ["Learning style"]);
+});
+
 test("feedback cases and blind summaries require a real win without regressions", () => {
   const item = evaluationCaseFromFeedback({ id: "f1", rating: "down", note: "Too vague", userMessage: "Explain it", assistantMessage: "Maybe", model: "test" });
   assert.equal(item.feedbackId, "f1");

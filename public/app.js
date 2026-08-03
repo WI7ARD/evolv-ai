@@ -3195,6 +3195,19 @@ function renderMemory() {
   const nodes = app.memory?.nodes || [];
   const edges = app.memory?.edges || [];
   const proposed = nodes.filter((node) => node.status === "proposed");
+  const profile = nodes.filter((node) => node.status === "active" && node.type === "preference");
+  for (const prefix of [""]) {
+    const count = $(`#${prefix}adaptive-profile-count`);
+    const list = $(`#${prefix}adaptive-profile-list`);
+    if (!count || !list) continue;
+    count.textContent = `${profile.length} approved`;
+    list.innerHTML = profile.length ? profile.map((node) => `
+      <article class="adaptive-profile-item">
+        <strong>${escapeHtml(node.title)}</strong>
+        <p>${escapeHtml(node.body)}</p>
+      </article>
+    `).join("") : '<p class="settings-note">No preferences are active yet. State a preference in chat, then approve its proposal in Intelligence.</p>';
+  }
   const activeCount = nodes.filter((node) => node.status === "active").length;
   $("#memory-count").textContent = `${activeCount} active${proposed.length ? ` · ${proposed.length} proposed` : ""}`;
   const linkCount = (node) => edges.filter((edge) => edge.fromId === node.id || edge.toId === node.id).length;

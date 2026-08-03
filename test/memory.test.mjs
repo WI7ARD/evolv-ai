@@ -63,6 +63,8 @@ test("retrieval pins active project/task nodes and scores the rest lexically", a
   const titles = results.map((node) => node.title);
   assert.ok(titles.includes("Finish itch.io release"), "active task is pinned even off-topic");
   assert.ok(titles.includes("Gesture model"), "lexically relevant note is retrieved");
+  assert.ok(titles.includes("Tone"), "approved preferences remain available even when the query uses unrelated words");
+  assert.equal(titles[0], "Tone", "the adaptive profile is placed before project context");
   assert.ok(!titles.includes("Old proposed idea"), "proposed nodes are not context until approved");
   assert.ok(!titles.includes("Retired"), "archived nodes are excluded");
 });
@@ -88,6 +90,18 @@ test("memory context includes graph links and a data-not-instructions guard", as
   assert.match(context, /decided/);
 });
 
+test("approved learning preferences become bounded defaults and sensitive traits are excluded", async () => {
+  const nodes = [
+    { id: "p1", type: "preference", title: "Learning style", body: "Use a short example before abstract theory.", status: "active", updatedAt: "2026-01-02" },
+    { id: "p2", type: "preference", title: "Medical diagnosis", body: "Sensitive health inference.", status: "active", updatedAt: "2026-01-03" }
+  ];
+  const items = await retrieveMemory({ nodes, edges: [], query: "unrelated request", embedText: noEmbeddings });
+  assert.deepEqual(items.map((item) => item.id), ["p1"]);
+  const context = memoryContext(items);
+  assert.match(context, /APPROVED INTERACTION PROFILE/);
+  assert.match(context, /current request always overrides/);
+});
+
 test("extracted node sanitizer drops invalid records and caps lengths", () => {
   const cleaned = sanitizeExtractedNodes({
     nodes: [
@@ -95,7 +109,8 @@ test("extracted node sanitizer drops invalid records and caps lengths", () => {
       { type: "hacker", title: "Bad type", body: "Should be dropped entirely." },
       { type: "note", title: "x", body: "Title too short." },
       { type: "note", title: "No body", body: "tiny" },
-      { type: "decision", title: `${"T".repeat(300)}`, body: "Long title is truncated, not dropped." }
+      { type: "decision", title: `${"T".repeat(300)}`, body: "Long title is truncated, not dropped." },
+      { type: "preference", title: "Political identity", body: "Guess a protected trait from chat behavior." }
     ]
   });
   assert.equal(cleaned.length, 2);

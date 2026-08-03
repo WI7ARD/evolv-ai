@@ -12,6 +12,10 @@ with model switching, reasoning controls, safe local tools, persistent SQLite
 conversations, feedback, and reversible behavioral upgrades. It runs in the
 browser (`npm start`) or as a hardened Windows desktop app.
 
+## Private adaptive profile
+
+Evolv can propose communication, learning, explanation, pace, workflow, and feedback preferences from conversations. Nothing becomes active until the signed-in user approves it. Approved preferences are scoped to that local profile, used as defaults when relevant, and overridden by the current request. Evolv does not intentionally infer sensitive identity, health, demographic, political, religious, or personality traits.
+
 It also includes:
 
 - Multiple local accounts, each with its own password, recovery code, and fully isolated conversation database
