@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Unlock Evolv local AI." />
+    <title>Unlock Evolv</title>
+    <link rel="stylesheet" href="/auth.css" />
+  </head>
+  <body>
+    <main class="auth-shell">
+      <section class="auth-card" aria-labelledby="auth-title">
+        <div class="brand" aria-hidden="true">
+          <img class="brand-logo" src="/assets/evolv-logo.png" alt="" />
+          <div><strong>Evolv</strong><small>local intelligence</small></div>
+        </div>
+
+        <div id="loading-view" class="auth-view">
+          <p class="eyebrow">LOCAL ACCESS</p>
+          <h1 id="auth-title">Securing Evolv…</h1>
+          <p class="copy">Checking this local installation.</p>
+        </div>
+
+        <form id="setup-view" class="auth-view hidden">
+          <p class="eyebrow">LOCAL PROFILE</p>
+          <h1>Create your account</h1>
+          <p class="copy">Each account gets private conversations, settings, knowledge, and API connections on this computer.</p>
+          <label>
+            <span>Username</span>
+            <input id="setup-username" name="username" type="text" minlength="3" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{2,31}" autocomplete="username" required />
+            <small>3–32 letters, numbers, dots, underscores, or hyphens.</small>
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="setup-password" name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required />
+            <small>Use at least 12 characters.</small>
+          </label>
+          <label>
+            <span>Confirm password</span>
+            <input id="setup-confirm" name="confirmPassword" type="password" minlength="12" maxlength="256" autocomplete="new-password" required />
+          </label>
+          <button class="primary" type="submit">Create account</button>
+          <button id="back-from-register-button" class="link-button hidden" type="button">Back to login</button>
+        </form>
+
+        <form id="login-view" class="auth-view hidden">
+          <p class="eyebrow">LOCAL ACCESS</p>
+          <h1>Welcome back</h1>
+          <p class="copy">Enter your password to unlock Evolv on this computer.</p>
+          <label>
+            <span>Username</span>
+            <input id="login-username" name="username" type="text" maxlength="32" autocomplete="username" required autofocus />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="login-password" name="password" type="password" maxlength="256" autocomplete="current-password" required />
+          </label>
+          <button class="primary" type="submit">Unlock</button>
+          <button id="forgot-button" class="link-button" type="button">Use recovery code</button>
+          <button id="create-account-button" class="link-button" type="button">Create another local account</button>
+        </form>
+
+        <form id="recovery-view" class="auth-view hidden">
+          <p class="eyebrow">ACCOUNT RECOVERY</p>
+          <h1>Recover Evolv</h1>
+          <p class="copy">Enter the recovery code created during setup. Successful recovery replaces that code and signs out every existing session.</p>
+          <label>
+            <span>Username</span>
+            <input id="recovery-username" name="username" type="text" maxlength="32" autocomplete="username" required />
+          </label>
+          <label>
+            <span>Recovery code</span>
+            <input id="recovery-code" name="recoveryCode" type="text" maxlength="60" autocomplete="off" spellcheck="false" required />
+          </label>
+          <label>
+            <span>New password</span>
+            <input id="recovery-password" name="newPassword" type="password" minlength="12" maxlength="256" autocomplete="new-password" required />
+          </label>
+          <label>
+            <span>Confirm new password</span>
+            <input id="recovery-confirm" name="confirmPassword" type="password" minlength="12" maxlength="256" autocomplete="new-password" required />
+          </label>
+          <button class="primary" type="submit">Recover access</button>
+          <button id="back-login-button" class="link-button" type="button">Back to password</button>
+        </form>
+
+        <section id="recovery-result-view" class="auth-view hidden" aria-live="polite">
+          <p class="eyebrow">SAVE THIS ONCE</p>
+          <h1>Your recovery code</h1>
+          <p class="copy">Store this somewhere private. Evolv only stores a hash and cannot show this code again.</p>
+          <output id="new-recovery-code" class="recovery-output"></output>
+          <button id="copy-recovery-button" class="secondary" type="button">Copy code</button>
+          <label class="check-row">
+            <input id="recovery-saved" type="checkbox" />
+            <span>I saved the recovery code somewhere safe.</span>
+          </label>
+          <button id="continue-button" class="primary" type="button" disabled>Continue to Evolv</button>
+        </section>
+
+        <button id="exit-app-button" class="exit-app hidden" type="button">Exit Evolv</button>
+        <p id="auth-error" class="error hidden" role="alert"></p>
+        <p class="privacy">Bound to 127.0.0.1 · Sessions lock after 30 minutes idle</p>
+      </section>
+    </main>
+    <script type="module" src="/auth.js"></script>
+  </body>
+</html>

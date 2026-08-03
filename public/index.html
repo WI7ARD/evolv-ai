@@ -1,0 +1,923 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Evolv — a local Ollama chat that improves through your feedback." />
+    <title>Evolv · Local AI</title>
+    <link rel="stylesheet" href="/styles.css?v=0.6.3" />
+    <link rel="modulepreload" href="/agent-workspace.js?v=0.6.3" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img class="brand-logo" src="/assets/evolv-logo.png" alt="" aria-hidden="true" />
+          <div>
+            <strong>Evolv</strong>
+            <small>local intelligence</small>
+          </div>
+        </div>
+
+        <button id="new-chat" class="new-chat">
+          <span>＋</span> New conversation
+        </button>
+
+        <nav class="side-nav" aria-label="Workspace">
+          <button class="nav-item active" data-view="chat">
+            <span class="nav-icon">◌</span> Chat
+          </button>
+          <button class="nav-item" data-view="agent">
+            <span class="nav-icon">◎</span> Agent
+            <span id="agent-dot" class="notification-dot hidden"></span>
+          </button>
+          <button class="nav-item" data-view="projects">
+            <span class="nav-icon">▣</span> Projects
+          </button>
+          <button class="nav-item" data-view="evolution">
+            <span class="nav-icon">↗</span> Evolution
+            <span id="proposal-dot" class="notification-dot hidden"></span>
+          </button>
+          <button class="nav-item" data-view="intelligence">
+            <span class="nav-icon">AI</span> Intelligence
+            <span id="intelligence-dot" class="notification-dot hidden"></span>
+          </button>
+          <button class="nav-item" data-view="versions">
+            <span class="nav-icon">⌁</span> Versions
+          </button>
+          <button class="nav-item" data-view="mind">
+            <span class="nav-icon">◇</span> Mind
+          </button>
+          <button class="nav-item" data-view="tools">
+            <span class="nav-icon">⌘</span> Tools
+          </button>
+          <button class="nav-item" data-view="marketplace">
+            <span class="nav-icon">▦</span> Marketplace
+            <span id="marketplace-dot" class="notification-dot hidden"></span>
+          </button>
+        </nav>
+
+        <div class="conversation-section">
+          <div class="conversation-section-head">
+            <span>CONVERSATIONS</span>
+            <select id="conversation-filter" aria-label="Conversation filter">
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+              <option value="trash">Trash</option>
+            </select>
+          </div>
+          <input id="conversation-search" type="search" placeholder="Search chats…" aria-label="Search conversations" />
+          <div id="conversation-list" class="conversation-list"></div>
+        </div>
+
+        <div class="sidebar-spacer"></div>
+        <div class="connection-card">
+          <div class="connection-row">
+            <span id="status-dot" class="status-dot"></span>
+            <span id="status-label">Checking Ollama</span>
+          </div>
+          <small id="status-detail">127.0.0.1:11434</small>
+        </div>
+        <div class="privacy-note">
+          <span>⌂</span>
+          <p><strong>Private by default</strong><br />Chats and feedback stay in local SQLite on this computer.</p>
+        </div>
+      </aside>
+
+      <main id="main-content" class="main" tabindex="-1">
+        <header class="topbar">
+          <div class="mobile-brand"><img src="/assets/evolv-logo.png" alt="" /> Evolv</div>
+          <div class="controls">
+            <label class="control project-control">
+              <span>PROJECT</span>
+              <select id="project-select" aria-label="Active project"><option value="">Loading projects…</option></select>
+            </label>
+            <label class="control">
+              <span>PROVIDER</span>
+              <select id="provider-select" aria-label="AI provider">
+                <option value="ollama">Ollama</option>
+              </select>
+            </label>
+            <label class="control">
+              <span>MODEL</span>
+              <select id="model-select" aria-label="Ollama model">
+                <option value="">Loading models…</option>
+              </select>
+            </label>
+            <label class="control">
+              <span>REASONING</span>
+              <select id="think-select" aria-label="Reasoning level">
+                <option value="false">Off</option>
+                <option value="true">On</option>
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="control">
+              <span>MIND MODE</span>
+              <select id="mode-select" aria-label="Mind mode">
+                <option value="standard">Collaborate</option>
+                <option value="cognitive">Cognitive</option>
+                <option value="creative">Muse</option>
+              </select>
+            </label>
+            <button id="settings-button" class="icon-button" aria-label="Generation settings" title="Generation settings">⚙</button>
+          </div>
+          <div class="version-pill">
+            <span>ACTIVE MIND</span>
+            <strong id="active-version">v1</strong>
+          </div>
+        </header>
+
+        <section id="chat-view" class="view active">
+          <div id="messages" class="messages">
+            <div id="welcome" class="welcome">
+              <div class="orb" aria-hidden="true"><img src="/assets/evolv-logo.png" alt="" /></div>
+              <p class="eyebrow">A LOCAL MIND THAT LEARNS YOUR PREFERENCES</p>
+              <h1>What should we think<br />through together?</h1>
+              <p class="welcome-copy">Chat normally. Rate useful answers. Evolv turns that signal into reviewable, reversible upgrades—not mysterious self-editing.</p>
+              <div class="starters">
+                <button class="starter">Help me plan a focused work week</button>
+                <button class="starter">Explain a hard idea with an analogy</button>
+                <button class="starter">Review a decision I'm considering</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <form id="composer" class="composer">
+              <div id="attachment-strip" class="attachment-strip hidden"></div>
+              <textarea id="prompt" rows="1" placeholder="Message Evolv…" aria-label="Message"></textarea>
+              <div class="composer-footer">
+                <div class="composer-tools">
+                  <button id="attach-button" class="tool-button hidden" type="button" aria-label="Attach an image" title="Attach an image">✚</button>
+                  <input id="attach-input" type="file" accept="image/*" multiple class="hidden" />
+                  <button id="live-listen-button" class="tool-button" type="button" aria-label="Hold to talk" title="Hold to talk · release to send">●</button>
+                  <button id="voice-toggle" class="tool-button" type="button" aria-label="Toggle spoken replies" title="Spoken replies">◖</button>
+                  <button id="gesture-button" class="tool-button" type="button" aria-label="Open hand gestures" title="Hand gestures">✋</button>
+                </div>
+                <span id="composer-hint">Enter to send · Shift+Enter for a new line</span>
+                <span id="voice-listen-status" class="voice-listen-status hidden" aria-live="polite">Hold the microphone button to talk</span>
+                <button id="stop-button" class="stop-button hidden" type="button">Stop</button>
+                <button id="send-button" class="send-button" type="submit" aria-label="Send">↑</button>
+              </div>
+            </form>
+            <p class="disclaimer">Local models can make mistakes. Keep a human in the loop for important decisions.</p>
+          </div>
+        </section>
+
+        <section id="agent-view" class="view panel-view agent-view">
+          <div class="panel-header">
+            <div><p class="eyebrow">VERIFIED GOAL RUNNER</p><h1>Agent</h1><p>Approve the plan once. Evolv runs safe local reads, pauses before every outside request or change, and finishes only after verification.</p></div>
+            <button id="agent-refresh" class="secondary-button" type="button">Refresh runs</button>
+          </div>
+          <div class="agent-layout">
+            <article class="mind-card agent-create-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">NEW GOAL</p><h2>Define the outcome</h2></div><span class="status-pill">Human controlled</span></div>
+              <form id="agent-goal-form" class="stack-form">
+                <label><span class="field-label">GOAL</span><textarea name="objective" rows="4" maxlength="20000" required placeholder="What should Evolv accomplish?"></textarea></label>
+                <label><span class="field-label">SUCCESS CRITERIA · ONE PER LINE</span><textarea name="successCriteria" rows="4" required placeholder="Tests pass&#10;Requested behavior is verified&#10;No unrelated files change"></textarea></label>
+                <div class="agent-form-grid">
+                  <label><span class="field-label">PROJECT</span><select id="agent-project" name="projectId" required></select></label>
+                  <label><span class="field-label">PACK</span><select id="agent-pack" name="packId"><option value="">No pack</option></select></label>
+                  <label><span class="field-label">PROVIDER</span><select id="agent-provider" name="provider"></select></label>
+                  <label><span class="field-label">MODEL</span><select id="agent-model" name="model"></select></label>
+                  <label><span class="field-label">BUDGET</span><select id="agent-budget" name="budget"><option value="balanced">Balanced · 12 steps · 20 min</option><option value="focused">Focused · 8 steps · 10 min</option><option value="small">Small · 5 steps · 5 min</option></select></label>
+                </div>
+                <p class="settings-note">Planning may use the selected model. Cloud providers can create charges. Vault and project excerpts remain withheld unless that provider is separately allowed.</p>
+                <button id="agent-plan-button" class="primary-button" type="submit">Propose plan</button>
+              </form>
+            </article>
+            <article class="mind-card agent-runs-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">DURABLE RUNS</p><h2>Goals</h2></div><span id="agent-run-count" class="status-pill">0</span></div>
+              <div id="agent-run-list" class="agent-run-list"><p class="settings-note">No goal runs yet.</p></div>
+            </article>
+          </div>
+          <article id="agent-run-detail" class="mind-card agent-detail hidden" aria-live="polite"></article>
+        </section>
+
+        <section id="projects-view" class="view panel-view">
+          <div class="panel-header">
+            <div><p class="eyebrow">SCOPED WORKSPACE</p><h1>Projects</h1><p>Each project owns its tasks, indexed sources, artifacts, conversations, and an explicitly connected folder.</p></div>
+            <div class="data-actions">
+              <button id="project-demo" class="secondary-button" type="button">Load verified demo</button>
+              <button id="project-refresh" class="secondary-button" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="projects-grid">
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">ACTIVE PROJECT</p><h2 id="project-detail-name">No project</h2></div><span id="project-folder-status" class="status-pill">Not connected</span></div>
+              <p id="project-detail-description" class="settings-note"></p>
+              <div class="data-actions">
+                <button id="project-connect-folder" class="secondary-button" type="button">Choose project folder</button>
+                <button id="project-sync-files" class="primary-button" type="button">Index project files</button>
+              </div>
+              <p class="settings-note">Folder paths stay in the signed-in profile and are excluded from portable exports. Hidden, secret, binary, oversized, and dependency folders are skipped.</p>
+              <div id="project-counts" class="project-counts"></div>
+            </article>
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">NEW WORKSPACE</p><h2>Create project</h2></div></div>
+              <form id="project-create-form" class="stack-form">
+                <label><span class="field-label">NAME</span><input name="name" minlength="2" maxlength="120" required /></label>
+                <label><span class="field-label">DESCRIPTION</span><textarea name="description" maxlength="2000" rows="3"></textarea></label>
+                <button class="primary-button" type="submit">Create project</button>
+              </form>
+            </article>
+          </div>
+          <div class="projects-grid">
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">TASKS</p><h2>Project tasks</h2></div></div>
+              <form id="project-task-form" class="stack-form compact-form">
+                <input name="title" minlength="2" maxlength="120" required placeholder="Add a task…" />
+                <button class="primary-button" type="submit">Add</button>
+              </form>
+              <div id="project-task-list" class="project-list"></div>
+            </article>
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">KNOWLEDGE</p><h2>Import a source</h2></div></div>
+              <form id="project-source-form" class="stack-form">
+                <label><span class="field-label">TITLE</span><input name="title" minlength="2" maxlength="120" required /></label>
+                <label><span class="field-label">FILE</span><input name="source" type="file" accept=".txt,.md,.markdown,.js,.mjs,.cjs,.ts,.tsx,.jsx,.json,.css,.html,.py,.go,.rs,.java,.c,.cpp,.h,.hpp,.cs,.yaml,.yml,.toml,.sql,.xml,.csv,.pdf,image/png,image/jpeg,image/webp" required /></label>
+                <label><span class="field-label">IMAGE CAPTION (OPTIONAL)</span><textarea name="caption" maxlength="4000" rows="2" placeholder="Describe the image if you want it searchable. Evolv does not claim OCR."></textarea></label>
+                <button class="primary-button" type="submit">Import and index</button>
+              </form>
+              <div id="project-source-list" class="project-list"></div>
+            </article>
+          </div>
+          <article class="mind-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">CITATIONS</p><h2>Search project knowledge</h2></div></div>
+            <form id="project-search-form" class="stack-form compact-form"><input name="query" maxlength="1000" required placeholder="Search indexed project sources…" /><button class="secondary-button" type="submit">Search</button></form>
+            <div id="project-search-results" class="project-list"></div>
+          </article>
+        </section>
+
+        <section id="intelligence-view" class="view panel-view">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">ROUTE · REMEMBER · EVALUATE</p>
+              <h1>Personal intelligence</h1>
+              <p>See why Auto chose a model, review every proposed memory, and test behavioral upgrades before activation.</p>
+            </div>
+            <button id="intelligence-refresh" class="secondary-button" type="button">Refresh</button>
+          </div>
+          <div class="stats-grid intelligence-stats">
+            <article class="stat-card"><span>ROUTED</span><strong id="route-count">0</strong><small>Auto decisions</small></article>
+            <article class="stat-card"><span>ROUTE RATING</span><strong id="route-success">0%</strong><small>helpful rated routes</small></article>
+            <article class="stat-card"><span>MEMORY INBOX</span><strong id="memory-proposal-count">0</strong><small>waiting for review</small></article>
+            <article class="stat-card"><span>EVAL CASES</span><strong id="evaluation-case-count">0</strong><small>from your feedback</small></article>
+          </div>
+          <div class="intelligence-grid">
+            <article class="mind-card intelligence-settings-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">CONTROL</p><h2>Balanced Auto</h2></div><span class="model-badge">REVIEW-ONLY LEARNING</span></div>
+              <p class="settings-note">Local models are preferred for simple work. Cloud providers are considered only when you enable them below.</p>
+              <label class="tool-switch"><input id="auto-routing-enabled" type="checkbox" checked /> Auto model routing</label>
+              <label class="tool-switch"><input id="auto-memory-enabled" type="checkbox" checked /> Inspect every completed turn for memory proposals</label>
+              <div><span class="field-label">CLOUD PROVIDERS ALLOWED IN AUTO</span><div id="auto-cloud-providers" class="provider-capabilities"></div></div>
+              <div>
+                <span class="field-label">CLOUD PROVIDERS ALLOWED TO RECEIVE VAULT EXCERPTS</span>
+                <div id="vault-cloud-providers" class="provider-capabilities"></div>
+                <p class="settings-note">Off by default. A cloud model receives no Obsidian text unless you enable that provider here.</p>
+              </div>
+              <div>
+                <span class="field-label">CLOUD PROVIDERS ALLOWED TO RECEIVE PROJECT SOURCES</span>
+                <div id="project-cloud-providers" class="provider-capabilities"></div>
+                <p class="settings-note">Off by default. Project file excerpts stay local unless you enable a provider here.</p>
+              </div>
+              <label><span class="field-label">EVALUATION CASE LIMIT</span><select id="evaluation-limit"><option>3</option><option>5</option><option selected>10</option></select></label>
+              <label><span class="field-label">MONTHLY CLOUD COST-UNIT SAFEGUARD (0 = UNLIMITED)</span><input id="monthly-cost-limit" type="number" min="0" max="100000" step="1" value="0" /></label>
+              <button id="save-intelligence-settings" class="primary-button" type="button">Save intelligence settings</button>
+            </article>
+            <article class="mind-card intelligence-model-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">MODEL PROFILES</p><h2>Auto preferences</h2></div></div>
+              <p class="settings-note">Rate models from 1–5. Cost may be 0 for local models. Disabling Auto never removes manual selection.</p>
+              <div id="intelligence-models" class="intelligence-models"></div>
+            </article>
+          </div>
+          <article class="mind-card memory-inbox-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">APPROVAL REQUIRED</p><h2>Memory Inbox</h2></div><button id="approve-selected-memories" class="primary-button" type="button">Approve selected</button></div>
+            <p class="settings-note">Edit any proposal before approving it. Rejected proposals never enter Evolv's active context.</p>
+            <div id="memory-proposal-list" class="memory-proposal-list"></div>
+          </article>
+          <div class="intelligence-grid">
+            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">TRANSPARENT ROUTING</p><h2>Recent decisions</h2></div></div><div id="routing-history" class="routing-history"></div></article>
+            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">EVIDENCE</p><h2>Learning runs</h2></div></div><div id="evaluation-history" class="evaluation-history"></div></article>
+          </div>
+          <div class="intelligence-grid">
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">LOCAL · NO JUDGE CALL</p><h2>Run evidence</h2></div><span id="evolution-run-count" class="model-badge">0 RUNS</span></div>
+              <p class="settings-note">Completion, tools, citations, latency, tokens, and cost come from recorded run facts. Quality and factuality stay unscored until you rate the answer.</p>
+              <div id="run-evidence-history" class="routing-history"></div>
+            </article>
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">EXPLICIT FEEDBACK ONLY</p><h2>Recurring failures</h2></div><span id="recurring-failure-count" class="model-badge">0 RECURRING</span></div>
+              <p class="settings-note">Patterns appear only after your negative ratings. Selecting them does not change Evolv; it only links evidence to a reviewable candidate.</p>
+              <div id="failure-pattern-list" class="routing-history"></div>
+            </article>
+          </div>
+          <article class="mind-card strategy-lab-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">BENCHMARK → REVIEW → APPROVE</p><h2>Strategy lab</h2></div><button id="rollback-strategy" class="secondary-button" type="button">Rollback active strategy</button></div>
+            <p class="settings-note">A benchmark runs five fixed cases twice (10 model calls). Cloud models may create provider charges. Evolv will never activate a candidate automatically.</p>
+            <form id="strategy-candidate-form" class="stack-form">
+              <label><span class="field-label">CANDIDATE NAME</span><input name="name" maxlength="100" required placeholder="Evidence and verification discipline" /></label>
+              <label><span class="field-label">GUIDANCE TO TEST</span><textarea name="instruction" rows="4" minlength="20" maxlength="4000" required placeholder="Answer from supplied evidence, follow explicit limits, verify outcomes, and recover honestly from failed operations."></textarea></label>
+              <label><span class="field-label">WHY THIS MAY HELP</span><textarea name="rationale" rows="2" maxlength="1000" placeholder="Link the proposed behavior to observed failures."></textarea></label>
+              <button class="primary-button" type="submit">Create reviewable candidate</button>
+            </form>
+            <div id="strategy-version-list" class="memory-proposal-list"></div>
+          </article>
+        </section>
+
+        <section id="evolution-view" class="view panel-view">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">FEEDBACK → EVIDENCE → PROPOSAL</p>
+              <h1>Evolution lab</h1>
+              <p>Convert your ratings into a better behavioral prompt. Nothing changes until you approve it.</p>
+            </div>
+            <button id="propose-button" class="primary-button">Generate upgrade</button>
+          </div>
+
+          <div class="stats-grid">
+            <article class="stat-card"><span>TOTAL SIGNALS</span><strong id="feedback-total">0</strong><small>ratings collected</small></article>
+            <article class="stat-card"><span>POSITIVE</span><strong id="feedback-positive">0%</strong><small>helpful responses</small></article>
+            <article class="stat-card"><span>MIND VERSION</span><strong id="version-number">1</strong><small>reversible iterations</small></article>
+          </div>
+
+          <div id="no-proposal" class="empty-panel">
+            <div class="empty-glyph">↗</div>
+            <h2>No upgrade waiting</h2>
+            <p>Rate a few chat responses, add notes where useful, then ask an Ollama model to propose the next version.</p>
+          </div>
+
+          <div id="proposal-panel" class="proposal-panel hidden">
+            <div class="proposal-heading">
+              <div>
+                <p class="eyebrow">PROPOSED MIND</p>
+                <h2 id="proposal-summary"></h2>
+              </div>
+              <span id="proposal-model" class="model-badge"></span>
+            </div>
+            <p id="proposal-rationale" class="rationale"></p>
+            <div class="prompt-preview">
+              <div class="preview-label">PROPOSED SYSTEM PROMPT</div>
+              <pre id="proposal-prompt"></pre>
+            </div>
+            <div>
+              <div class="preview-label">ACCEPTANCE TESTS</div>
+              <div id="proposal-tests" class="tests"></div>
+            </div>
+            <div id="proposal-evaluation" class="proposal-evaluation"></div>
+            <div class="proposal-actions">
+              <button id="reject-proposal" class="secondary-button">Discard</button>
+              <button id="evaluate-proposal" class="secondary-button">Run blind evaluation</button>
+              <button id="apply-proposal" class="primary-button">Approve & activate</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="versions-view" class="view panel-view">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">COMPLETE & REVERSIBLE</p>
+              <h1>Mind history</h1>
+              <p>Every approved behavior change is preserved. Return to an earlier version at any time.</p>
+            </div>
+          </div>
+          <div id="versions-list" class="versions-list"></div>
+        </section>
+
+        <section id="mind-view" class="view panel-view">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">GROUNDING · COGNITION · CREATION</p>
+              <h1>Mind studio</h1>
+              <p>Shape what Evolv knows, how it approaches a problem, and what architectural changes it may propose.</p>
+            </div>
+            <button id="spark-button" class="primary-button">Surprise me</button>
+          </div>
+
+          <div class="cognition-flow" aria-label="Cognitive architecture">
+            <div><span>01</span><strong>Perceive</strong><small>Identify the goal and context</small></div>
+            <div><span>02</span><strong>Retrieve</strong><small>Find relevant approved knowledge</small></div>
+            <div><span>03</span><strong>Plan</strong><small>Consider useful approaches</small></div>
+            <div><span>04</span><strong>Verify</strong><small>Check claims and constraints</small></div>
+            <div><span>05</span><strong>Respond</strong><small>Deliver the useful conclusion</small></div>
+          </div>
+
+          <div class="mode-guide">
+            <button class="mode-guide-card" data-mode-choice="standard">
+              <span>COLLABORATE</span>
+              <strong>Fast, balanced help</strong>
+              <small>Best for normal questions, writing, summaries, and everyday work.</small>
+            </button>
+            <button class="mode-guide-card" data-mode-choice="cognitive">
+              <span>COGNITIVE</span>
+              <strong>Deliberate problem solving</strong>
+              <small>Retrieves knowledge, compares approaches, verifies constraints, then answers.</small>
+            </button>
+            <button class="mode-guide-card" data-mode-choice="creative">
+              <span>MUSE</span>
+              <strong>Original exploration</strong>
+              <small>Uses more variation and unusual connections; factual claims need extra checking.</small>
+            </button>
+          </div>
+
+          <div class="mind-grid">
+            <article class="mind-card">
+              <div class="mind-card-heading">
+                <div><p class="eyebrow">HOLISTIC KNOWLEDGE</p><h2>Knowledge library</h2></div>
+                <span id="knowledge-count" class="model-badge">0 records</span>
+              </div>
+              <form id="knowledge-form" class="stack-form">
+                <input id="knowledge-title" maxlength="200" placeholder="Title — e.g. Project constraints" required />
+                <select id="knowledge-domain" aria-label="Knowledge domain">
+                  <option>General</option>
+                  <option>Personal preference</option>
+                  <option>Project</option>
+                  <option>NLP</option>
+                  <option>Computer Vision</option>
+                  <option>Machine Learning</option>
+                  <option>Deep Learning</option>
+                  <option>Creative</option>
+                </select>
+                <textarea id="knowledge-content" rows="5" maxlength="30000" placeholder="A fact, preference, process, or reference Evolv should retrieve when relevant…" required></textarea>
+                <button id="knowledge-save" class="primary-button" type="submit">Embed & save</button>
+              </form>
+              <div id="knowledge-list" class="knowledge-list"></div>
+            </article>
+
+            <article class="mind-card">
+              <div class="mind-card-heading">
+                <div><p class="eyebrow">PERSISTENT CONTEXT</p><h2>Project memory</h2></div>
+                <span id="memory-count" class="model-badge">0 active</span>
+              </div>
+              <p class="mind-explainer">Evolv carries approved projects, tasks, decisions, and preferences across sessions and weaves them into every chat. Records a model extracts from a conversation stay proposed until you approve them.</p>
+              <form id="memory-form" class="stack-form">
+                <input id="memory-title" maxlength="200" placeholder="Title — e.g. Ship the v0.3 release" required />
+                <select id="memory-type" aria-label="Memory type">
+                  <option value="project">Project</option>
+                  <option value="task" selected>Task</option>
+                  <option value="decision">Decision</option>
+                  <option value="preference">Preference</option>
+                  <option value="note">Note</option>
+                </select>
+                <textarea id="memory-body" rows="3" maxlength="10000" placeholder="Details Evolv should remember across conversations…"></textarea>
+                <button id="memory-save" class="primary-button" type="submit">Remember</button>
+              </form>
+              <div class="data-actions memory-vault-actions">
+                <button id="memory-extract" class="secondary-button" type="button">Extract from current conversation</button>
+                <button id="vault-export" class="secondary-button" type="button">Export Obsidian vault</button>
+                <button id="vault-import" class="secondary-button" type="button">Import vault…</button>
+                <input id="vault-input" type="file" accept=".md,text/markdown" multiple class="hidden" />
+              </div>
+              <p class="settings-note">Use [[wikilinks]] in a memory's text to link records, Obsidian-style. Export writes a markdown vault you can open in Obsidian; import reads .md notes back in.</p>
+              <div id="memory-list" class="knowledge-list"></div>
+            </article>
+
+            <article class="mind-card obsidian-memory-card">
+              <div class="mind-card-heading">
+                <div><p class="eyebrow">LOCAL-FIRST MEMORY</p><h2>Obsidian Memory</h2></div>
+                <span id="obsidian-status-badge" class="model-badge">DISCONNECTED</span>
+              </div>
+              <p class="mind-explainer">Connect a dedicated vault. Obsidian notes become the source of truth; Evolv keeps a private searchable index. Generated edits always wait for your approval.</p>
+              <div class="obsidian-stats">
+                <span><strong id="obsidian-note-count">0</strong> notes</span>
+                <span><strong id="obsidian-chunk-count">0</strong> chunks</span>
+                <span><strong id="obsidian-link-count">0</strong> links</span>
+                <span><strong id="obsidian-pending-count">0</strong> pending</span>
+              </div>
+              <p id="obsidian-connection-detail" class="settings-note">Use the Evolv desktop app to connect a live vault.</p>
+              <div class="data-actions">
+                <button id="obsidian-connect" class="primary-button" type="button">Choose dedicated vault</button>
+                <button id="obsidian-sync" class="secondary-button" type="button">Sync now</button>
+                <button id="obsidian-open" class="secondary-button" type="button">Open in Obsidian</button>
+                <button id="obsidian-disconnect" class="secondary-button" type="button">Disconnect</button>
+              </div>
+              <input id="obsidian-note-search" maxlength="200" placeholder="Search note titles, paths, tags, or aliases..." />
+              <div id="obsidian-note-results" class="knowledge-list"></div>
+              <div class="preview-label">NOTE DIFFS &amp; SAFE UNDO</div>
+              <div id="obsidian-changes" class="vault-change-list"></div>
+            </article>
+
+            <article class="mind-card">
+              <div class="mind-card-heading">
+                <div><p class="eyebrow">SAFE SELF-EVOLUTION</p><h2>Architecture proposals</h2></div>
+                <span class="model-badge">NO AUTO-APPLY</span>
+              </div>
+              <p class="mind-explainer">Ask the selected Ollama model to design a bounded system change. Proposals include risks and tests, but cannot edit files or grant themselves permissions.</p>
+              <form id="architecture-form" class="stack-form">
+                <textarea id="architecture-request" rows="5" maxlength="5000" placeholder="What should Evolv improve about its architecture or behavior?" required></textarea>
+                <button id="architecture-propose" class="primary-button" type="submit">Design proposal</button>
+              </form>
+              <div id="architecture-list" class="architecture-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="marketplace-view" class="view panel-view marketplace-view">
+          <div class="panel-header marketplace-header">
+            <div>
+              <p class="eyebrow">LOCAL · DECLARATIVE · REVIEWED</p>
+              <h1>Evolv Marketplace</h1>
+              <p>Install specialist agents, commands, workflows, knowledge, and settings without running third-party code.</p>
+            </div>
+            <div class="marketplace-header-actions">
+              <span class="status-pill ready">OFFLINE CATALOG</span>
+              <label class="tool-master-toggle"><input id="marketplace-developer-mode" type="checkbox" /><span>Developer Mode</span></label>
+            </div>
+          </div>
+          <div class="marketplace-toolbar" role="search">
+            <input id="marketplace-search" type="search" maxlength="200" placeholder="Search packs, tags, authors, commands…" aria-label="Search Marketplace" />
+            <select id="marketplace-category" aria-label="Marketplace category">
+              <option value="">All categories</option>
+              <option value="development">Development</option><option value="engineering">Engineering</option>
+              <option value="embedded-systems">Embedded Systems</option><option value="linux">Linux</option>
+              <option value="productivity">Productivity</option><option value="business">Business</option>
+              <option value="design">Design</option><option value="gaming">Gaming</option>
+              <option value="automotive">Automotive</option><option value="education">Education</option>
+            </select>
+            <select id="marketplace-filter" aria-label="Marketplace filter">
+              <option value="">All packs</option><option value="installed">Installed</option><option value="free">Free</option>
+              <option value="paid">Paid</option><option value="verified">Verified</option><option value="local">Local-only</option>
+              <option value="cloud">Requires cloud API</option>
+            </select>
+            <select id="marketplace-sort" aria-label="Marketplace sort">
+              <option value="featured">Featured</option><option value="popular">Most popular</option>
+              <option value="updated">Recently updated</option><option value="newest">Newest</option>
+              <option value="rated">Highest rated</option><option value="alphabetical">Alphabetical</option>
+            </select>
+            <select id="marketplace-os" aria-label="Supported operating system">
+              <option value="">Any operating system</option><option value="windows">Windows</option><option value="linux">Linux</option><option value="macos">macOS</option>
+            </select>
+            <input id="marketplace-model-filter" maxlength="100" placeholder="Model compatibility…" aria-label="Model compatibility" />
+            <button id="marketplace-clear" class="secondary-button" type="button">Clear</button>
+          </div>
+          <div class="marketplace-tabs" role="tablist" aria-label="Marketplace sections">
+            <button class="marketplace-tab active" data-marketplace-tab="discover" role="tab" aria-selected="true">Discover</button>
+            <button class="marketplace-tab" data-marketplace-tab="installed" role="tab" aria-selected="false">Installed</button>
+            <button class="marketplace-tab" data-marketplace-tab="commands" role="tab" aria-selected="false">Pack commands</button>
+          </div>
+          <div id="marketplace-status" class="marketplace-status" role="status">Loading bundled catalog…</div>
+          <div class="marketplace-layout">
+            <div>
+              <div id="marketplace-featured" class="marketplace-featured"></div>
+              <div id="marketplace-grid" class="marketplace-grid" aria-live="polite"></div>
+              <div id="marketplace-empty" class="empty-panel hidden">
+                <div class="empty-glyph">◇</div><h2>No packs match</h2>
+                <p>Clear the search or change a filter. The bundled catalog remains available offline.</p>
+              </div>
+              <article id="marketplace-developer-panel" class="marketplace-developer hidden">
+                <div class="tool-card-head"><div><p class="eyebrow">PACK WORKSHOP</p><h2>Developer tools</h2></div><span class="model-badge">NO CODE EXECUTION</span></div>
+                <p>Create, validate, install, and export declarative <code>.evolvpack</code> files.</p>
+                <div class="data-actions">
+                  <button id="marketplace-import" class="secondary-button" type="button">Validate or install local pack</button>
+                  <button id="marketplace-create" class="primary-button" type="button">Create new pack</button>
+                  <input id="marketplace-file" class="hidden" type="file" accept=".evolvpack,application/json" />
+                </div>
+                <div class="marketplace-catalog-controls">
+                  <label>Signed remote catalog
+                    <input id="marketplace-catalog-url" type="url" maxlength="2000" placeholder="https://publisher.example/catalog.json" />
+                  </label>
+                  <div class="data-actions">
+                    <button id="marketplace-catalog-connect" class="secondary-button" type="button">Save &amp; sync</button>
+                    <button id="marketplace-catalog-sync" class="secondary-button" type="button">Sync now</button>
+                    <button id="marketplace-catalog-disconnect" class="secondary-button" type="button">Disconnect</button>
+                  </div>
+                  <p id="marketplace-catalog-status" class="settings-note">No remote catalog configured. Only trusted Ed25519 publisher keys are accepted.</p>
+                </div>
+                <div class="marketplace-catalog-controls">
+                  <label>Trusted review service
+                    <input id="marketplace-review-url" type="url" maxlength="2000" placeholder="https://reviews.example/api/" />
+                  </label>
+                  <label>Response signing identity
+                    <select id="marketplace-review-key"><option value="">Choose a trusted publisher key</option></select>
+                  </label>
+                  <div class="data-actions">
+                    <button id="marketplace-review-connect" class="secondary-button" type="button">Save review service</button>
+                    <button id="marketplace-review-flush" class="secondary-button" type="button">Retry pending reviews</button>
+                    <button id="marketplace-review-disconnect" class="secondary-button" type="button">Disconnect</button>
+                  </div>
+                  <p id="marketplace-review-status" class="settings-note">No review service configured. Reviews remain in the local outbox.</p>
+                </div>
+                <pre id="marketplace-validation-output" class="marketplace-diagnostics hidden"></pre>
+              </article>
+            </div>
+            <aside id="marketplace-details" class="marketplace-details" aria-label="Pack details" aria-live="polite">
+              <div class="empty-panel"><div class="empty-glyph">▦</div><h2>Select a pack</h2><p>Review its commands, compatibility, permissions, documentation, and install state.</p></div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="tools-view" class="view panel-view">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">BOUNDED · READ-ONLY · AUDITED</p>
+              <h1>Tool control</h1>
+              <p>Choose which offline tools Evolv may use. Every invocation is recorded and visible here.</p>
+            </div>
+            <label class="tool-master-toggle">
+              <input id="tools-master" type="checkbox" checked />
+              <span>Tools enabled</span>
+            </label>
+          </div>
+          <div class="tools-layout">
+            <div>
+              <article class="tool-builder-card">
+                <div class="tool-card-head"><div><p class="eyebrow">AI-ASSISTED</p><h2>Generate tool</h2></div><span class="model-badge">RECIPE ONLY</span></div>
+                <p class="settings-note">Describe a repeatable workflow. Evolv may combine only enabled safe tools, with up to eight steps. It cannot generate code, commands, packages, loops, secrets, or new permissions.</p>
+                <label><span class="field-label">RECIPE DESIGN MODEL (CURRENT PROVIDER)</span><select id="tool-recipe-model"></select></label>
+                <textarea id="tool-recipe-request" rows="4" maxlength="5000" placeholder="Example: Search my Obsidian notes for a project, read the best match, and list its backlinks."></textarea>
+                <button id="tool-recipe-generate" class="primary-button" type="button">Generate safe recipe</button>
+                <div id="tool-recipe-proposals" class="tools-list"></div>
+              </article>
+              <div class="preview-label">SUGGESTED PIPELINES</div>
+              <p class="settings-note">When the audit log shows the same tool sequence recurring, Evolv suggests bundling it into one composite tool. Suggestions never activate themselves.</p>
+              <div id="macro-suggestions" class="tools-list"></div>
+              <div class="preview-label">COMPOSITE TOOLS</div>
+              <div id="macro-list" class="tools-list"></div>
+              <div class="preview-label">AVAILABLE TOOLS</div>
+              <div id="tools-list" class="tools-list"></div>
+            </div>
+            <div>
+              <div class="preview-label">RECENT ACTIVITY</div>
+              <div id="tool-runs-list" class="tool-runs-list"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="settings-dialog">
+      <form method="dialog" class="settings-card">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">GENERATION</p><h2>Model settings</h2></div>
+          <button class="dialog-close" value="close" aria-label="Close">×</button>
+        </div>
+        <label class="range-label">
+          <span><strong>Temperature</strong><output id="temperature-value">0.7</output></span>
+          <small>Lower is consistent; higher is more varied.</small>
+          <input id="temperature" type="range" min="0" max="2" step="0.1" value="0.7" />
+        </label>
+        <label>
+          <span class="field-label">CONTEXT WINDOW</span>
+          <select id="context-size">
+            <option value="4096">4K tokens</option>
+            <option value="8192" selected>8K tokens</option>
+            <option value="16384">16K tokens</option>
+            <option value="32768">32K tokens</option>
+          </select>
+        </label>
+        <label>
+          <span class="field-label">MAX REPLY TOKENS (CLOUD MODELS)</span>
+          <select id="max-tokens">
+            <option value="4096" selected>4K tokens</option>
+            <option value="8192">8K tokens</option>
+            <option value="16384">16K tokens</option>
+            <option value="32768">32K tokens</option>
+          </select>
+        </label>
+        <div class="settings-divider"></div>
+        <div class="voice-settings-heading">
+          <div>
+            <span class="field-label">LOCAL DESKTOP VOICE</span>
+            <p class="settings-note">Whisper.cpp transcribes locally after you release the push-to-talk button. There is no wake word or background listening.</p>
+          </div>
+          <span id="desktop-voice-badge" class="status-pill">Checking…</span>
+        </div>
+        <div class="push-to-talk-card"><strong>Hold to talk</strong><span>Press and hold the round microphone button beside the message box. Evolv cleans the recording and compares two local Whisper passes. Clear transcripts can send automatically; uncertain ones stop for your review.</span></div>
+        <div id="whisper-status" class="local-voice-status">Whisper.cpp status will appear here.</div>
+        <div id="piper-status" class="local-voice-status">Piper status will appear here.</div>
+        <div class="hearing-intelligence-card">
+          <div><span class="field-label">HEARING INTELLIGENCE</span><p class="settings-note">Local audio cleanup, bounded conversation hints, and pass agreement improve recognition without sending audio or vocabulary to a provider.</p></div>
+          <label><span class="field-label">ACCURACY</span><select id="hearing-accuracy"><option value="enhanced">Enhanced · compare two passes</option><option value="fast">Fast · one pass</option></select></label>
+          <label><span class="field-label">WHEN TO SEND</span><select id="hearing-review-mode"><option value="uncertain">Send clear speech · review uncertainty</option><option value="always">Always let me review first</option></select></label>
+          <label><span class="field-label">PERSONAL VOCABULARY</span><textarea id="hearing-vocabulary" rows="3" maxlength="1200" placeholder="Project names, people, libraries, acronyms — separated by commas or new lines"></textarea></label>
+        </div>
+        <details class="voice-diagnostics-panel">
+          <summary>Voice diagnostics</summary>
+          <div id="voice-diagnostics-status" class="local-voice-status">Hold the microphone button to run a local transcription test.</div>
+        </details>
+        <div class="data-actions">
+          <button id="choose-whisper-folder" class="secondary-button" type="button">Choose Whisper folder</button>
+          <button id="choose-whisper-model" class="secondary-button" type="button">Choose Whisper model</button>
+          <button id="download-whisper-models" class="secondary-button" type="button">Download better speech models</button>
+          <button id="choose-piper-runtime" class="secondary-button" type="button">Choose Piper runtime</button>
+          <button id="choose-piper-model" class="secondary-button" type="button">Choose voice model</button>
+          <button id="download-piper-models" class="secondary-button" type="button">Browse &amp; download voices</button>
+        </div>
+        <p class="settings-note">The bundled <code>base.en</code> model is balanced. For better English accuracy, download <code>ggml-small.en.bin</code> or <code>ggml-medium.en.bin</code>, then choose it above. Larger models use more memory and transcribe more slowly.</p>
+        <p class="settings-note">Each Piper voice needs both matching files in the same folder: <code>voice.onnx</code> and <code>voice.onnx.json</code>. Download both, then choose the <code>.onnx</code> file. Check its MODEL_CARD license before use.</p>
+        <div class="settings-divider"></div>
+        <label>
+          <span class="field-label">FALLBACK DEVICE VOICE</span>
+          <select id="voice-select" aria-label="Text-to-speech voice">
+            <option value="">System default</option>
+          </select>
+        </label>
+        <label class="range-label">
+          <span><strong>Speaking speed</strong><output id="voice-rate-value">1.0×</output></span>
+          <small>Controls how quickly replies are read aloud.</small>
+          <input id="voice-rate" type="range" min="0.6" max="1.6" step="0.1" value="1" />
+        </label>
+        <p class="settings-note">Reasoning support varies by model. GPT-OSS uses low, medium, or high; most other thinking models use on or off.</p>
+        <p class="settings-note">Spoken replies prefer Piper when it is ready, then fall back to a voice installed on this system.</p>
+        <div class="settings-divider"></div>
+        <span class="field-label">AI PROVIDERS</span>
+        <p class="settings-note">Cloud prompts are sent to the provider you select and may create charges on your account. API keys are write-only and protected by your operating system's secure key store in the desktop app.</p>
+        <div id="provider-settings-list" class="provider-settings-list"></div>
+        <div class="settings-divider"></div>
+        <span class="field-label">MARKETPLACE</span>
+        <label class="tool-master-toggle">
+          <input id="marketplace-developer-mode-settings" type="checkbox" />
+          <span>Developer Mode · local pack tools</span>
+        </label>
+        <p class="settings-note">Developer Mode can validate local .evolvpack files and generate starter packs. It never enables arbitrary code execution.</p>
+        <div class="settings-divider"></div>
+        <span class="field-label">SOFTWARE UPDATES</span>
+        <section class="desktop-update-card" aria-live="polite">
+          <div><strong id="desktop-update-title">Evolv update status</strong><span id="desktop-update-version"></span></div>
+          <p id="desktop-update-status" class="settings-note">Checking desktop update supportâ€¦</p>
+          <p id="desktop-update-notes" class="settings-note hidden"></p>
+          <div class="data-actions">
+            <button id="desktop-update-check" class="secondary-button" type="button">Check for updates</button>
+            <button id="desktop-update-install" class="primary-button hidden" type="button">Download &amp; install</button>
+          </div>
+        </section>
+        <p class="settings-note">Updates come only from the configured Evolv GitHub release, require a matching SHA-256 file, and restart the desktop app after verification.</p>
+        <div class="settings-divider"></div>
+        <span class="field-label">DATA</span>
+        <div class="data-actions">
+          <button id="backup-button" class="secondary-button" type="button">Create backup</button>
+          <button id="export-button" class="secondary-button" type="button">Export everything</button>
+          <button id="import-button" class="secondary-button" type="button">Import…</button>
+          <input id="import-input" type="file" accept="application/json,.json" class="hidden" />
+        </div>
+        <div id="import-preview" class="import-preview hidden">
+          <p id="import-summary" class="settings-note"></p>
+          <div class="data-actions">
+            <button id="import-confirm" class="primary-button" type="button">Import now</button>
+            <button id="import-cancel" class="secondary-button" type="button">Cancel</button>
+          </div>
+        </div>
+        <p class="settings-note">Backups are stored in the app's data folder. Export downloads a portable JSON file; import merges it without deleting existing data.</p>
+        <div class="settings-divider"></div>
+        <span class="field-label">SECURITY</span>
+        <p class="settings-note">Signed in as <strong id="account-name">—</strong></p>
+        <div class="data-actions">
+          <button id="change-password-button" class="secondary-button" type="button">Change password</button>
+          <button id="lock-button" class="secondary-button" type="button">Lock now</button>
+          <button id="logout-button" class="secondary-button" type="button">Switch account</button>
+        </div>
+        <p class="settings-note">Evolv locks after 30 minutes without activity. Changing the password signs out every open session.</p>
+        <button class="primary-button full-width" value="close">Done</button>
+      </form>
+    </dialog>
+
+    <dialog id="password-dialog">
+      <form id="change-password-form" class="settings-card">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">LOCAL SECURITY</p><h2>Change password</h2></div>
+          <button id="password-dialog-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        </div>
+        <label>
+          <span class="field-label">CURRENT PASSWORD</span>
+          <input id="current-password" type="password" maxlength="256" autocomplete="current-password" required />
+        </label>
+        <label>
+          <span class="field-label">NEW PASSWORD</span>
+          <input id="new-password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required />
+        </label>
+        <label>
+          <span class="field-label">CONFIRM NEW PASSWORD</span>
+          <input id="confirm-new-password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required />
+        </label>
+        <p id="password-error" class="settings-error hidden" role="alert"></p>
+        <button class="primary-button full-width" type="submit">Change password and sign out</button>
+      </form>
+    </dialog>
+
+    <div id="marketplace-dialog-backdrop" class="marketplace-dialog-backdrop hidden" aria-hidden="true"></div>
+
+    <dialog id="marketplace-permission-dialog" class="mode-dialog" aria-labelledby="marketplace-permission-title">
+      <form id="marketplace-permission-form" class="settings-card">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">EXPLICIT APPROVAL</p><h2 id="marketplace-permission-title">Review permissions</h2></div>
+          <button class="dialog-close" type="button" data-marketplace-close="permissions" aria-label="Close">×</button>
+        </div>
+        <p id="marketplace-permission-summary" class="settings-note"></p>
+        <div id="marketplace-relationship-review" class="marketplace-permissions hidden"></div>
+        <div id="marketplace-publisher-review" class="marketplace-permissions hidden"></div>
+        <div class="marketplace-permission-toolbar" aria-label="Optional permission controls">
+          <button id="marketplace-permission-select-optional" class="secondary-button" type="button">Select optional</button>
+          <button id="marketplace-permission-clear-optional" class="secondary-button" type="button">Clear optional</button>
+        </div>
+        <div id="marketplace-permission-list" class="marketplace-permissions"></div>
+        <p class="settings-note">Unsupported permissions are recorded for transparency but cannot expand Evolv's runtime. Updates never receive new permissions silently.</p>
+        <p id="marketplace-permission-error" class="settings-error hidden" role="alert"></p>
+        <div class="proposal-actions">
+          <button class="secondary-button" type="button" data-marketplace-close="permissions">Cancel</button>
+          <button id="marketplace-permission-confirm" class="primary-button" type="submit">Approve &amp; install</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="marketplace-config-dialog" class="mode-dialog" aria-labelledby="marketplace-config-title">
+      <form id="marketplace-config-form" class="settings-card">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">PACK SETTINGS</p><h2 id="marketplace-config-title">Configure pack</h2></div>
+          <button class="dialog-close" type="button" data-marketplace-close="config" aria-label="Close">×</button>
+        </div>
+        <div id="marketplace-config-fields" class="stack-form"></div>
+        <p id="marketplace-config-error" class="settings-error hidden" role="alert"></p>
+        <div class="proposal-actions">
+          <button id="marketplace-config-reset" class="secondary-button" type="button">Reset defaults</button>
+          <button class="secondary-button" type="button" data-marketplace-close="config">Cancel</button>
+          <button id="marketplace-config-confirm" class="primary-button" type="submit">Save configuration</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="marketplace-starter-dialog" class="mode-dialog" aria-labelledby="marketplace-starter-title">
+      <form id="marketplace-starter-form" class="settings-card">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">LOCAL PACK</p><h2 id="marketplace-starter-title">Create new pack</h2></div>
+          <button class="dialog-close" type="button" data-marketplace-close="starter" aria-label="Close">×</button>
+        </div>
+        <label><span class="field-label">NAME</span><input name="name" maxlength="120" required placeholder="My Specialist Pack" /></label>
+        <label><span class="field-label">ID</span><input name="id" maxlength="100" pattern="evolv\.[a-z0-9.-]+" required placeholder="evolv.my-specialist" /></label>
+        <label><span class="field-label">DESCRIPTION</span><textarea name="description" maxlength="1000" rows="3" required></textarea></label>
+        <div class="marketplace-form-grid">
+          <label><span class="field-label">CATEGORY</span><select name="category"><option value="productivity">Productivity</option><option value="development">Development</option><option value="engineering">Engineering</option><option value="education">Education</option></select></label>
+          <label><span class="field-label">AUTHOR</span><input name="author" maxlength="120" value="Local developer" /></label>
+        </div>
+        <div class="marketplace-form-grid">
+          <label><span class="field-label">INITIAL AGENT NAME</span><input name="agentName" maxlength="120" required placeholder="Release Specialist" /></label>
+          <label><span class="field-label">INITIAL COMMAND NAME</span><input name="commandName" maxlength="120" required placeholder="Prepare release" /></label>
+        </div>
+        <label><span class="field-label">AGENT INSTRUCTION</span><textarea name="agentPrompt" maxlength="5000" rows="3" required placeholder="You are a careful specialist…"></textarea></label>
+        <label><span class="field-label">COMMAND PROMPT</span><textarea name="commandPrompt" maxlength="5000" rows="3" required placeholder="Complete this task: {{input}}"></textarea></label>
+        <fieldset class="marketplace-permissions">
+          <legend class="field-label">OPTIONAL PERMISSIONS</legend>
+          <label><input name="permissions" type="checkbox" value="filesystem.read.project" /> Read active project</label>
+          <label><input name="permissions" type="checkbox" value="models.send-files" /> Send selected files to model</label>
+          <label><input name="permissions" type="checkbox" value="network.api-provider" /> Use configured AI provider</label>
+          <label><input name="permissions" type="checkbox" value="evolv.notifications" /> Show notifications</label>
+        </fieldset>
+        <div class="proposal-actions">
+          <button class="secondary-button" type="button" data-marketplace-close="starter">Cancel</button>
+          <button class="primary-button" type="submit">Generate .evolvpack</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="gesture-dialog" class="gesture-dialog">
+      <div class="gesture-card">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">CAMERA CONTROL</p><h2>Hand gestures</h2></div>
+          <button id="gesture-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="camera-stage">
+          <video id="gesture-video" autoplay muted playsinline></video>
+          <canvas id="gesture-canvas"></canvas>
+          <div id="gesture-loading" class="camera-loading">Camera is off</div>
+          <div class="gesture-readout">
+            <strong id="gesture-name">No gesture</strong>
+            <span id="gesture-confidence">—</span>
+          </div>
+        </div>
+        <div class="gesture-map">
+          <div><span>👍</span><strong>Thumb up</strong><small>Send draft</small></div>
+          <div><span>☝️</span><strong>Point up</strong><small>Focus message</small></div>
+          <div><span>✌️</span><strong>Victory</strong><small>Read last reply</small></div>
+          <div><span>✊</span><strong>Closed fist</strong><small>Stop</small></div>
+        </div>
+        <p class="camera-privacy">Video frames are processed locally by MediaPipe and are not sent to the server. Hold a gesture steadily to activate it.</p>
+        <button id="camera-toggle" class="primary-button full-width" type="button">Start camera</button>
+      </div>
+    </dialog>
+
+    <dialog id="mode-dialog" class="mode-dialog">
+      <div class="mode-card">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">BEFORE YOU SWITCH</p><h2 id="mode-dialog-title">Mind mode</h2></div>
+          <button id="mode-dialog-close" class="dialog-close" type="button" aria-label="Close">×</button>
+        </div>
+        <p id="mode-dialog-description" class="mode-description"></p>
+        <div class="mode-details">
+          <div><span>BEST FOR</span><p id="mode-dialog-best"></p></div>
+          <div><span>WHAT CHANGES</span><p id="mode-dialog-changes"></p></div>
+          <div><span>TRADEOFF</span><p id="mode-dialog-tradeoff"></p></div>
+        </div>
+        <div class="proposal-actions">
+          <button id="mode-cancel" class="secondary-button" type="button">Keep current mode</button>
+          <button id="mode-confirm" class="primary-button" type="button">Use this mode</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <script type="module" src="/app.js?v=0.6.3"></script>
+  </body>
+</html>

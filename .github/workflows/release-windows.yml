@@ -1,0 +1,55 @@
+name: Windows release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Verify tag and package version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag must equal v$version" }
+      - run: npm ci
+      - run: npm test
+      - run: npm run make:win
+      - name: Create SHA-256 release file
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $zip = "out/make/zip/win32/x64/Evolv-win32-x64-$version.zip"
+          if (-not (Test-Path $zip)) { throw "Release ZIP was not created" }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -Encoding ascii
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Evolv-Windows-${{ github.ref_name }}
+          path: |
+            out/make/zip/win32/x64/*.zip
+            out/make/zip/win32/x64/*.sha256
+          if-no-files-found: error
+      - name: Publish GitHub release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $zip = "out/make/zip/win32/x64/Evolv-win32-x64-$version.zip"
+          $checksum = "$zip.sha256"
+          gh release create "v$version" $zip $checksum --title "Evolv $version" --generate-notes --verify-tag
+

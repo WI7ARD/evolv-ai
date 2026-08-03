@@ -1,0 +1,36 @@
+# Private runtime data and credentials
+data/
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.key
+*.pem
+*.pfx
+*.p12
+
+# Dependencies and generated bundles
+node_modules/
+public/transformers.bundle.mjs
+npm-debug.log*
+*.log
+
+# Build, release, smoke, and historical copies
+out/
+out-*/
+outputs/
+work/
+.smoke/
+ui-smoke-data/
+evolv-*-smoke-*/
+Evolv-Personal-*/
+release/stage7-report.json
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
