@@ -33,7 +33,7 @@
     "itch:push": "node scripts/itch-release.mjs push",
     "itch:validate:linux": "node scripts/itch-release.mjs validate linux",
     "itch:push:linux": "node scripts/itch-release.mjs push linux",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test": "node scripts/run-tests.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:persisted": "node scripts/persisted-smoke.mjs",
     "smoke:models": "node scripts/models-smoke.mjs",
