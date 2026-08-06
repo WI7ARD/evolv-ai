@@ -361,6 +361,14 @@ npm run desktop     # run the desktop app in development
 npm run dist:win    # build the distributable Windows ZIP in out/make/
 ```
 
+You do not have to build it yourself to try a change. Every push and pull
+request runs a **Windows package** job that produces the same ZIP and attaches
+it to the run: open the commit or pull request on GitHub, follow its checks to
+the Actions run, and download the `Evolv-Windows-x64` artifact (the ZIP plus its
+`.sha256`). Artifacts are kept for 14 days. Tagged releases, which is what the
+in-app updater consults, are published separately by the Windows release
+workflow — see [docs/GITHUB-RELEASES.md](docs/GITHUB-RELEASES.md).
+
 `dist:win` produces `out/make/zip/win32/x64/Evolv-win32-x64-<version>.zip`,
 bundling Electron, the app in an `asar`, the native `better-sqlite3` binary
 (kept unpacked so it can load at runtime), the generated application icon, and

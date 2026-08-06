@@ -51,3 +51,55 @@ jobs:
       - run: npm ci --omit=dev
       - run: npm test
 
+  # Builds a real, runnable Windows package on every change and attaches it to
+  # the run, so a build can be downloaded and tested without cutting a tagged
+  # release. The release workflow still owns publishing; this only produces a
+  # workflow artifact. It also means packaging breakage — a bad Electron pin, a
+  # missing native prebuild — surfaces on the pull request that caused it
+  # instead of at release time.
+  package-windows:
+    name: Windows package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          # Node 20 matches the release workflow and avoids the Node >=24
+          # extract-zip path that scripts/patch-extract-zip.mjs works around.
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # A packaged app whose voice assets are Git LFS pointer stubs looks fine
+      # until Piper or Whisper is used, so fail here rather than ship one.
+      - name: Verify Git LFS assets were materialised
+        shell: pwsh
+        run: |
+          $pointers = Get-ChildItem -Path electron/voice-assets -Recurse -File |
+            Where-Object { $_.Length -lt 1024 } |
+            Where-Object { (Get-Content $_.FullName -TotalCount 1 -ErrorAction SilentlyContinue) -like 'version https://git-lfs*' }
+          if ($pointers) {
+            $pointers | ForEach-Object { Write-Host "LFS pointer: $($_.FullName)" }
+            throw "$($pointers.Count) voice asset(s) are still Git LFS pointers."
+          }
+          Write-Host "All voice assets are real files."
+      - run: npm run dist:win
+      - name: Create SHA-256 checksum
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $zip = "out/make/zip/win32/x64/Evolv-win32-x64-$version.zip"
+          if (-not (Test-Path $zip)) { throw "Package ZIP was not created" }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -Encoding ascii
+          Write-Host "Built $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Evolv-Windows-x64
+          path: |
+            out/make/zip/win32/x64/*.zip
+            out/make/zip/win32/x64/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
