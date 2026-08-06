@@ -298,11 +298,17 @@ test("exposes bounded tool configuration", async () => {
   const payload = await response.json();
   assert.ok(payload.tools.some((tool) => tool.name === "calculate"));
   assert.ok(payload.tools.every((tool) => tool.contractVersion === 1 && tool.inputSchema?.type === "object" && tool.outputSchema));
-  assert.ok(payload.tools.every((tool) => ["read", "network-read", "approval-write"].includes(tool.risk)));
+  assert.ok(payload.tools.every((tool) => ["read", "network-read", "sandbox", "approval-write"].includes(tool.risk)));
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "approval-write").map((tool) => tool.name).sort(), [
     "propose_engineering_check", "propose_obsidian_archive", "propose_obsidian_create", "propose_obsidian_edit", "propose_obsidian_move",
-    "propose_web_research", "propose_workspace_create", "propose_workspace_edit"
+    "propose_sandbox_promotion", "propose_web_research", "propose_workspace_create", "propose_workspace_edit"
   ]);
+  // Sandbox tools run without approval because they cannot reach the real
+  // project; the approval belongs to promoting the result.
+  assert.deepEqual(payload.tools.filter((tool) => tool.risk === "sandbox").map((tool) => tool.name).sort(), [
+    "open_sandbox", "sandbox_validate", "sandbox_write_file"
+  ]);
+  assert.ok(payload.tools.filter((tool) => tool.risk === "sandbox").every((tool) => tool.riskPolicy?.automatic === true));
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "network-read").map((tool) => tool.name).sort(), [
     "convert_currency", "get_kanye_quote", "get_weather", "search_wikipedia"
   ]);

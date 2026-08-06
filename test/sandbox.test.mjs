@@ -184,3 +184,82 @@ test("the object view describes only what really happened", async (t) => {
   assert.ok(file.validations.some((item) => item.passed));
   assert.deepEqual(view.available, ["promote", "discard"]);
 });
+
+test("the sandbox tools are exposed to chat and gate only the promotion", async (t) => {
+  const { project, database, service } = await fixture(t);
+  const { createToolRegistry } = await import("../lib/tools.mjs");
+  const { EngineeringActionService } = await import("../lib/engineering-actions.mjs");
+  const { ApprovalService } = await import("../lib/approvals.mjs");
+
+  const approvalService = new ApprovalService(database);
+  const projectService = { async rootFor() { return project; } };
+  const engineeringActions = new EngineeringActionService({
+    database, workspaceRoot: project, approvalService, projectService, sandboxService: service
+  });
+  const registry = await createToolRegistry({
+    workspaceRoot: project, database, projectService, approvalService,
+    engineeringActions, sandboxService: service,
+    searchKnowledge: async () => [], searchMemory: async () => []
+  });
+
+  const listed = registry.list();
+  const byName = new Map(listed.map((tool) => [tool.name, tool]));
+  // Trying things is automatic; only applying them is gated.
+  for (const name of ["open_sandbox", "sandbox_write_file", "sandbox_validate"]) {
+    assert.equal(byName.get(name)?.risk, "sandbox", `${name} should be sandbox risk`);
+    assert.equal(byName.get(name)?.riskPolicy.automatic, true, `${name} should not require approval`);
+  }
+  assert.equal(byName.get("propose_sandbox_promotion")?.risk, "approval-write");
+
+  const context = { projectId: "p1", conversationId: null };
+  const opened = await registry.execute("open_sandbox", { objective: "Raise the value" }, context);
+  const sessionId = JSON.parse(opened.output).sessionId;
+
+  await registry.execute("sandbox_write_file", {
+    session_id: sessionId, path: "src/app.mjs", content: "export const value = 7;\n", summary: "Raise it"
+  }, context);
+  const validated = JSON.parse((await registry.execute("sandbox_validate", { session_id: sessionId }, context)).output);
+  assert.equal(validated.passed, true);
+  // Still nothing on disk.
+  assert.equal(await readFile(path.join(project, "src", "app.mjs"), "utf8"), "export const value = 1;\n");
+
+  const proposal = await registry.execute("propose_sandbox_promotion", {
+    session_id: sessionId, summary: "Apply the raised value"
+  }, context);
+  const parsed = JSON.parse(proposal.output);
+  assert.equal(proposal.pendingApproval, true, "promotion must pause for approval");
+  assert.equal(parsed.approvalRequired, true);
+  assert.equal(await readFile(path.join(project, "src", "app.mjs"), "utf8"), "export const value = 1;\n");
+
+  // Approving runs the promotion through the existing engineering-action path.
+  const decided = await engineeringActions.decide(proposal.runId, "approved");
+  assert.equal(decided.approved, true);
+  assert.deepEqual(decided.result.applied, ["src/app.mjs"]);
+  assert.equal(await readFile(path.join(project, "src", "app.mjs"), "utf8"), "export const value = 7;\n");
+});
+
+test("rejecting a promotion leaves the project untouched", async (t) => {
+  const { project, database, service } = await fixture(t);
+  const { EngineeringActionService } = await import("../lib/engineering-actions.mjs");
+  const { ApprovalService } = await import("../lib/approvals.mjs");
+  const approvalService = new ApprovalService(database);
+  const engineeringActions = new EngineeringActionService({
+    database, workspaceRoot: project, approvalService,
+    projectService: { async rootFor() { return project; } }, sandboxService: service
+  });
+
+  const session = await service.open({ projectId: "p1" });
+  await service.applyEdit(session.id, { path: "src/app.mjs", content: "export const value = 8;\n" });
+  await service.validate(session.id);
+  database.createToolRun({
+    id: "run-reject", conversationId: null, messageId: null,
+    toolName: "propose_sandbox_promotion", arguments: "{}",
+    risk: "approval-write", decision: "pending", status: "pending"
+  });
+  engineeringActions.save("run-reject", "sandbox-promotion", { sessionId: session.id, preview: { summary: "Nope" } });
+
+  const decided = await engineeringActions.decide("run-reject", "rejected");
+  assert.equal(decided.approved, false);
+  assert.equal(await readFile(path.join(project, "src", "app.mjs"), "utf8"), "export const value = 1;\n");
+  assert.equal(service.get(session.id).state, "validated", "a rejected sandbox stays available to revise");
+});
