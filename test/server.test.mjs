@@ -304,9 +304,12 @@ test("exposes bounded tool configuration", async () => {
     "propose_sandbox_promotion", "propose_web_research", "propose_workspace_create", "propose_workspace_edit"
   ]);
   // Sandbox tools run without approval because they cannot reach the real
-  // project; the approval belongs to promoting the result.
+  // project; the approval belongs to promoting the result. The physics tools
+  // are here for the same reason turned up further: their world is memory, so
+  // there is nothing to promote and nothing to undo.
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "sandbox").map((tool) => tool.name).sort(), [
-    "open_sandbox", "sandbox_validate", "sandbox_write_file"
+    "open_sandbox", "physics_adjust", "physics_build", "physics_run",
+    "sandbox_validate", "sandbox_write_file"
   ]);
   assert.ok(payload.tools.filter((tool) => tool.risk === "sandbox").every((tool) => tool.riskPolicy?.automatic === true));
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "network-read").map((tool) => tool.name).sort(), [

@@ -1,5 +1,6 @@
 import { initAgentWorkspace, refreshAgentWorkspace } from "./agent-workspace.js";
 import { initSandboxWorkspace, refreshSandboxes } from "./sandbox.js";
+import { initPhysics, refreshPhysics, suspendPhysics } from "./physics.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -1117,7 +1118,12 @@ async function init() {
   if (!await initializeAuth()) return;
   initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
   initSandboxWorkspace({ api, toast, project: activeProject });
+  initPhysics({ api, toast });
   $("#sandbox-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
+  $("#physics-back-to-chat")?.addEventListener("click", () => {
     switchView("chat");
     elements.prompt.focus();
   });
@@ -1773,7 +1779,8 @@ async function addAttachments(files) {
 // the only entry point to the goal runner now that it has no sidebar tab.
 const COMPOSER_COMMANDS = [
   { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal },
-  { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox }
+  { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox },
+  { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") }
 ];
 
 function openSandbox() {
@@ -2664,6 +2671,9 @@ function switchView(view) {
   if (view === "projects") refreshProjects().catch((error) => toast(error.message, "error"));
   if (view === "agent") refreshAgentWorkspace().catch((error) => toast(error.message, "error"));
   if (view === "sandbox") refreshSandboxes().catch((error) => toast(error.message, "error"));
+  if (view === "physics") refreshPhysics().catch((error) => toast(error.message, "error"));
+  // The simulation clock must not keep running for a view nobody is looking at.
+  else suspendPhysics();
 }
 
 function renderEvolution() {

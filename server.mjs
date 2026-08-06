@@ -11,6 +11,7 @@ import { createAccountStore } from "./lib/accounts.mjs";
 import { createProfileManager } from "./lib/profiles.mjs";
 import { handleGoalRoutes, streamGoalResume } from "./server/goal-routes.mjs";
 import { handleSandboxRoutes } from "./server/sandbox-routes.mjs";
+import { handlePhysicsRoutes } from "./server/physics-routes.mjs";
 import { createUnavailableSecretStore } from "./lib/secrets.mjs";
 import { createLogger } from "./lib/logger.mjs";
 import {
@@ -207,6 +208,12 @@ const sandboxService = new Proxy({}, {
   get(_target, property) {
     const value = scopedResource("sandboxService")[property];
     return typeof value === "function" ? value.bind(scopedResource("sandboxService")) : value;
+  }
+});
+const physicsService = new Proxy({}, {
+  get(_target, property) {
+    const value = scopedResource("physicsService")[property];
+    return typeof value === "function" ? value.bind(scopedResource("physicsService")) : value;
   }
 });
 const goalRunner = new Proxy({}, {
@@ -2483,6 +2490,7 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (await handleSandboxRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, sandboxService })) return;
+    if (await handlePhysicsRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, physicsService })) return;
     if (await handleGoalRoutes({
       req, res, url, authenticated, readBody, bodyLimit: SMALL_BODY, json, goalRunner, agentRuntime, vaultService,
       writeStreamEvent, activeControllers: activeAgentRunControllers, activeRunKey
