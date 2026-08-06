@@ -367,11 +367,13 @@ instructions, see [LINUX-MINT.md](LINUX-MINT.md).
 
 ### Toolchain notes
 
-The build is pinned to **Electron 41.9.2**, the newest supported Electron line
+The build is pinned to **Electron 41.10.4**, the newest supported Electron line
 with a verified `better-sqlite3` Windows prebuild for this release. Electron 42
 does not have a compatible prebuild, so moving beyond 41 currently requires a
 C++ toolchain or a database-runtime change. `dist:win` fetches the matching
-native binary, so no compiler is needed.
+native binary, so no compiler is needed. Stay on the newest 41.x patch: patch
+releases share the 41 ABI, so the same prebuild applies, and 41.10.3 fixed a
+sandboxed-iframe popup bypass (GHSA-9f4c-93c8-jc8g).
 
 `dist:win` is used instead of `electron-forge make` because, on Node 24+,
 `extract-zip` (via `yauzl`/`fd-slicer`) hangs while unpacking the Electron

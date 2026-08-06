@@ -58,11 +58,11 @@
     "@electron-forge/cli": "7.11.2",
     "@electron-forge/maker-zip": "7.11.2",
     "@electron-forge/plugin-auto-unpack-natives": "7.11.2",
-    "electron": "41.9.2",
+    "electron": "41.10.4",
     "esbuild": "^0.28.1"
   },
   "overrides": {
-    "tar": "7.5.16",
+    "tar": "7.5.22",
     "tmp": "0.2.7"
   }
 }
