@@ -1116,7 +1116,7 @@ function formatBytes(bytes) {
 async function init() {
   if (!await initializeAuth()) return;
   initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
-  initSandboxWorkspace({ api, toast });
+  initSandboxWorkspace({ api, toast, project: activeProject });
   $("#sandbox-back-to-chat")?.addEventListener("click", () => {
     switchView("chat");
     elements.prompt.focus();

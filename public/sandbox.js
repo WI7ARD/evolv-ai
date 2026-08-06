@@ -2,7 +2,7 @@ import { initWorld, showWorld } from "./world.js";
 
 const $ = (selector) => document.querySelector(selector);
 
-const state = { api: null, toast: null, sessions: [], selectedId: "", detail: null, busy: false };
+const state = { api: null, toast: null, project: null, sessions: [], selectedId: "", detail: null, busy: false };
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -37,7 +37,7 @@ function renderList() {
       <strong>${escapeHtml(session.objective || "Untitled simulation")}</strong>
       <span class="status-pill ${session.state === "validated" ? "ready" : ""}">${escapeHtml(stateLabel(session.state))}</span>
       <small>${escapeHtml(String(session.fileCount))} file(s) mirrored · ${escapeHtml(new Date(session.createdAt).toLocaleString())}</small>
-    </button>`).join("") : '<p class="settings-note">No simulations yet. Ask Evolv to try a change, or use /sandbox in chat.</p>';
+    </button>`).join("") : '<p class="settings-note">No simulations yet. Start one above, or ask Evolv in chat to try a change.</p>';
 }
 
 function renderDetail() {
@@ -127,10 +127,42 @@ async function act(name) {
   }
 }
 
-export function initSandboxWorkspace({ api, toast }) {
+// Opening a simulation used to be something only a model could do, through the
+// open_sandbox tool. That left the workspace with no human entry point: /sandbox
+// showed an empty list and an empty map, and the empty state advised using
+// /sandbox — the command you had just used. This is the missing door.
+async function start(objective) {
+  if (state.busy) return;
+  const projectId = state.project()?.id || "";
+  if (!projectId) {
+    state.toast("Connect a project folder first — a simulation mirrors a project.", "error");
+    return;
+  }
+  state.busy = true;
+  try {
+    const session = await state.api("/api/sandboxes", {
+      method: "POST", body: JSON.stringify({ projectId, objective })
+    });
+    state.toast("Simulation open. Your project is untouched.");
+    const field = $("#sandbox-objective");
+    if (field) field.value = "";
+    await refreshSandboxes(session.id);
+  } catch (error) {
+    state.toast(error.message, "error");
+  } finally {
+    state.busy = false;
+  }
+}
+
+export function initSandboxWorkspace({ api, toast, project }) {
   state.api = api;
   state.toast = toast;
+  state.project = project || (() => null);
   initWorld({ api });
+  $("#sandbox-new")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    start($("#sandbox-objective")?.value.trim() || "");
+  });
   $("#sandbox-refresh")?.addEventListener("click", () => refreshSandboxes().catch((error) => toast(error.message, "error")));
   $("#sandbox-list")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-sandbox]");
