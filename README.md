@@ -449,7 +449,7 @@ With the app and Ollama running, verify real streamed responses:
 
 ```powershell
 $env:EVOLV_PASSWORD = "your Evolv password"
-npm run smoke            # non-persisted /api/chat round-trip
+npm run smoke            # plain streamed chat round-trip
 npm run smoke:persisted  # persisted chat with a forced tool call
 npm run smoke:models     # every installed model, pass/fail table
 Remove-Item Env:EVOLV_PASSWORD

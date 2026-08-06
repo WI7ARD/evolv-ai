@@ -508,21 +508,6 @@ function normalizeThink(value, model = "") {
   return true;
 }
 
-function validateChat(body) {
-  if (!body.model || typeof body.model !== "string") throw Object.assign(new Error("Choose a model first."), { status: 400 });
-  if (!Array.isArray(body.messages) || body.messages.length === 0) throw Object.assign(new Error("Messages are required."), { status: 400 });
-  const messages = body.messages
-    .slice(-80)
-    .filter((message) => ["user", "assistant"].includes(message?.role) && typeof message?.content === "string")
-    .map((message) => ({
-      role: message.role,
-      content: message.content.slice(0, 100_000),
-      ...(message.images == null ? {} : { images: validateImages(message.images) })
-    }));
-  if (!messages.length) throw Object.assign(new Error("No valid messages were supplied."), { status: 400 });
-  return messages;
-}
-
 async function embedText(model, input) {
   const response = await ollamaFetch("/api/embed", {
     method: "POST",
@@ -885,111 +870,6 @@ async function handleHealth(res) {
     json(res, 200, { connected: true, version: payload.version, ollamaUrl: OLLAMA_URL });
   } catch (error) {
     json(res, 200, { connected: false, error: error.message, ollamaUrl: OLLAMA_URL });
-  }
-}
-
-async function handleChat(req, res, state, body) {
-  const messages = validateChat(body);
-  const mode = ["standard", "cognitive", "creative"].includes(body.mode) ? body.mode : "standard";
-  const latestUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content || "";
-  const providerId = String(body.provider || "ollama");
-  const intelligenceSettings = normalizeIntelligenceSettings(database.getSettings().intelligence);
-  const vaultAllowed = !vaultService.connected() || providerId === "ollama"
-    || intelligenceSettings.vaultCloudProviders.includes(providerId);
-  const [capabilities, retrievedKnowledge, retrievedMemory] = await Promise.all([
-    getModelCapabilities(body.model, providerId),
-    retrieveKnowledge(state, latestUserMessage),
-    retrieveProjectMemory(database, latestUserMessage, { includeVault: vaultAllowed })
-  ]);
-  const controller = new AbortController();
-  res.on("close", () => {
-    if (!res.writableEnded) controller.abort();
-  });
-
-  const requestedTemperature = Math.max(0, Math.min(2, Number(body.temperature ?? 0.7)));
-  const temperature = mode === "creative" ? Math.max(0.95, requestedTemperature) : requestedTemperature;
-  const numCtx = Math.max(2048, Math.min(131072, Number(body.numCtx ?? 8192)));
-  const maxTokens = Math.max(256, Math.min(32768, Math.round(Number(body.maxTokens)) || 4096));
-  const systemPrompt = activeVersion(state).prompt;
-  const approvedStrategyInstruction = evolutionService.strategyInstruction();
-  const systemMessages = [
-    { role: "system", content: systemPrompt },
-    ...(approvedStrategyInstruction ? [{ role: "system", content: approvedStrategyInstruction }] : []),
-    { role: "system", content: currentClockContext() },
-    ...(cognitionInstruction(mode) ? [{ role: "system", content: cognitionInstruction(mode) }] : []),
-    ...(retrievedMemory.length ? [{ role: "system", content: memoryContext(retrievedMemory) }] : []),
-    ...(retrievedKnowledge.length ? [{ role: "system", content: knowledgeContext(retrievedKnowledge) }] : [])
-  ];
-
-  const ollamaBody = {
-    model: body.model,
-    messages: [...systemMessages, ...messages],
-    stream: true,
-    options: {
-      temperature,
-      num_ctx: numCtx,
-      maxTokens,
-      ...(mode === "creative" ? { seed: crypto.randomInt(1, 2_147_483_647) } : {})
-    },
-    keep_alive: "10m"
-  };
-  if (capabilities.includes("thinking")) {
-    ollamaBody.think = normalizeThink(body.think, body.model);
-  }
-
-  const watchdog = createIdleWatchdog(controller.signal);
-  watchdog.reset();
-  const response = await ollamaFetch("/api/chat", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(ollamaBody),
-    signal: watchdog.signal
-  });
-
-  if (!response.ok) {
-    watchdog.clear();
-    const detail = await response.text();
-    throw Object.assign(new Error(detail || `Ollama returned ${response.status}.`), { status: 502 });
-  }
-
-  res.writeHead(200, {
-    "content-type": "application/x-ndjson; charset=utf-8",
-    "cache-control": "no-store",
-    connection: "keep-alive"
-  });
-  res.write(`${JSON.stringify({
-    meta: {
-      mode,
-      knowledge: retrievedKnowledge.map((item) => ({
-        id: item.id,
-        title: item.title,
-        domain: item.domain,
-        score: Number(item.score.toFixed(3))
-      })),
-      memory: retrievedMemory.map((item) => ({
-        id: item.id,
-        type: item.type,
-        title: item.title,
-        score: Number((item.score || 0).toFixed(3))
-      }))
-    }
-  })}\n`);
-
-  const reader = response.body.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      watchdog.reset();
-      if (done) break;
-      res.write(value);
-    }
-  } catch (error) {
-    if (watchdog.timedOut()) throw streamStalledError();
-    throw error;
-  } finally {
-    watchdog.clear();
-    reader.releaseLock();
-    res.end();
   }
 }
 
@@ -3035,9 +2915,6 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, database.importData(validatePortableImport(await readBody(req, MAX_BODY))));
     }
 
-    if (req.method === "POST" && url.pathname === "/api/chat") {
-      return await handleChat(req, res, await loadState(), await readBody(req, MAX_BODY));
-    }
     if (req.method === "POST" && url.pathname === "/api/feedback") {
       return json(res, 201, await handleFeedback(await loadState(), await readBody(req, SMALL_BODY)));
     }
