@@ -9,12 +9,16 @@ import { perceive, spriteState, SKILLS, WORLD_VERSION } from "../lib/world.mjs";
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "evolv-world-"));
-  t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const project = path.join(root, "project");
   await mkdir(path.join(project, "src"), { recursive: true });
   await writeFile(path.join(project, "src", "app.mjs"), "export const value = 1;\n");
   const database = createDatabase({ dataDir: path.join(root, "profile"), defaultPrompt: "Test" });
-  t.after(() => database.close());
+  // Close before removing: Windows refuses to unlink SQLite's open WAL files,
+  // and `after` hooks run in registration order.
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
   const service = new SandboxService({
     database, projectService: { async rootFor() { return project; } },
     sandboxRoot: path.join(root, "sandboxes")

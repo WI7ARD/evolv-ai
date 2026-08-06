@@ -9,7 +9,6 @@ import { SandboxService, isDeniedPath } from "../lib/sandbox.mjs";
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "evolv-sandbox-"));
-  t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const project = path.join(root, "project");
   await mkdir(path.join(project, "src"), { recursive: true });
   await writeFile(path.join(project, "src", "app.mjs"), "export const value = 1;\n");
@@ -20,7 +19,12 @@ async function fixture(t) {
   await writeFile(path.join(project, "node_modules", "left-pad", "index.js"), "module.exports = 1;\n");
 
   const database = createDatabase({ dataDir: path.join(root, "profile"), defaultPrompt: "Test" });
-  t.after(() => database.close());
+  // Close before removing: Windows refuses to unlink SQLite's open WAL files,
+  // and `after` hooks run in registration order.
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
   const projectService = { async rootFor() { return project; } };
   const service = new SandboxService({
     database, projectService, sandboxRoot: path.join(root, "sandboxes")

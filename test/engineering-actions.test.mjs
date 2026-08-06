@@ -123,9 +123,13 @@ test("cloud pack sessions cannot expose project files without the send-files per
 
 test("filesystem actions refuse to fall back to Evolv's own source directory", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "evolv-root-guard-"));
-  t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const database = createDatabase({ dataDir: path.join(root, "profile"), defaultPrompt: "Test" });
-  t.after(() => database.close());
+  // Close before removing: Windows refuses to unlink SQLite's open WAL files,
+  // and `after` hooks run in registration order.
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
 
   // workspaceRoot is Evolv's own source. With a project service present, that
   // must never be used as an implicit root: a tool that forgot to pass a

@@ -165,20 +165,25 @@ test("desktop project picker returns an expiring opaque grant and prevents cross
 
 test("a folder connected by a non-canonical path stays usable afterwards", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "evolv-projects-link-"));
-  t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const real = path.join(root, "real-project");
   const link = path.join(root, "link-to-project");
   await mkdir(real, { recursive: true });
   try {
     await symlink(real, link, "junction");
   } catch {
+    await rm(root, { recursive: true, force: true });
     t.skip("Directory links are unavailable in this environment.");
     return;
   }
   await writeFile(path.join(real, "notes.md"), "# Linked project\n\nIndexed through a link.\n");
 
   const database = createDatabase({ dataDir: path.join(root, "profile"), defaultPrompt: "Test" });
-  t.after(() => database.close());
+  // Close before removing: Windows refuses to unlink SQLite's open WAL files,
+  // and `after` hooks run in registration order.
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
   // A host that hands back the path exactly as the user chose it — a link here,
   // and on Windows commonly a short 8.3 path such as C:\Users\RUNNER~1\...
   // Evolv must still recognise the folder on every later call.
