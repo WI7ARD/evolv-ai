@@ -10,6 +10,7 @@ import { createAuthService } from "./lib/auth.mjs";
 import { createAccountStore } from "./lib/accounts.mjs";
 import { createProfileManager } from "./lib/profiles.mjs";
 import { handleGoalRoutes, streamGoalResume } from "./server/goal-routes.mjs";
+import { handleSandboxRoutes } from "./server/sandbox-routes.mjs";
 import { createUnavailableSecretStore } from "./lib/secrets.mjs";
 import { createLogger } from "./lib/logger.mjs";
 import {
@@ -200,6 +201,12 @@ const projectService = new Proxy({}, {
   get(_target, property) {
     const value = scopedResource("projectService")[property];
     return typeof value === "function" ? value.bind(scopedResource("projectService")) : value;
+  }
+});
+const sandboxService = new Proxy({}, {
+  get(_target, property) {
+    const value = scopedResource("sandboxService")[property];
+    return typeof value === "function" ? value.bind(scopedResource("sandboxService")) : value;
   }
 });
 const goalRunner = new Proxy({}, {
@@ -2475,6 +2482,7 @@ const server = http.createServer(async (req, res) => {
         })
       });
     }
+    if (await handleSandboxRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, sandboxService })) return;
     if (await handleGoalRoutes({
       req, res, url, authenticated, readBody, bodyLimit: SMALL_BODY, json, goalRunner, agentRuntime, vaultService,
       writeStreamEvent, activeControllers: activeAgentRunControllers, activeRunKey

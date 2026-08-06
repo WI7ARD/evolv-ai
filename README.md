@@ -286,6 +286,32 @@ reviewable component changes, risks, and tests. These proposals cannot edit
 files, execute code, expand permissions, or apply themselves. Actual code
 changes remain a separate human-approved development step.
 
+## Sandbox — try the change before making it
+
+Evolv can do the work in a private copy of your project before touching a
+single real file. It mirrors the project's text files into a sandbox, edits
+there, runs syntax checks and approved package scripts there, and leaves your
+project untouched. A simulation that fails is thrown away and costs you
+nothing.
+
+Only one thing can write to your project: approving the promotion, which
+arrives as an ordinary diff approval in chat. Before writing, Evolv re-checks
+every target file and refuses the whole set if anything changed while the
+simulation ran — approved work is never applied on top of an edit you made in
+the meantime, and a multi-file change is all-or-nothing.
+
+Trying a change is automatic; applying it is not. That split is deliberate:
+the model should be free to attempt, fail, and retry without interrupting you,
+so the one approval you see is a result that already passed its checks.
+
+Secrets never enter a sandbox. `.env` files, credentials, keys, hidden folders
+and `node_modules` are excluded by the same rules that protect the project
+tools.
+
+Type `/sandbox` in chat to review open simulations, run their checks, or
+discard them. While any simulation is open, Evolv says so — the project on
+disk is unchanged until you say otherwise.
+
 ## Verified goal runner
 
 Type `/agent` in the chat box to plan and run a bounded goal; `/agent <goal>`

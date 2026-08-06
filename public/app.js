@@ -1,4 +1,5 @@
 import { initAgentWorkspace, refreshAgentWorkspace } from "./agent-workspace.js";
+import { initSandboxWorkspace, refreshSandboxes } from "./sandbox.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -1115,6 +1116,11 @@ function formatBytes(bytes) {
 async function init() {
   if (!await initializeAuth()) return;
   initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
+  initSandboxWorkspace({ api, toast });
+  $("#sandbox-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
   // The agent has no sidebar entry, so it needs its own way back.
   $("#agent-back-to-chat")?.addEventListener("click", () => {
     switchView("chat");
@@ -1766,8 +1772,13 @@ async function addAttachments(files) {
 // Composer commands are handled locally and never reach a model. `/agent` is
 // the only entry point to the goal runner now that it has no sidebar tab.
 const COMPOSER_COMMANDS = [
-  { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal }
+  { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal },
+  { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox }
 ];
+
+function openSandbox() {
+  switchView("sandbox");
+}
 
 function matchComposerCommand(text) {
   const match = String(text).trim().match(/^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i);
@@ -2652,6 +2663,7 @@ function switchView(view) {
   if (view === "marketplace") refreshMarketplace().catch((error) => toast(error.message, "error"));
   if (view === "projects") refreshProjects().catch((error) => toast(error.message, "error"));
   if (view === "agent") refreshAgentWorkspace().catch((error) => toast(error.message, "error"));
+  if (view === "sandbox") refreshSandboxes().catch((error) => toast(error.message, "error"));
 }
 
 function renderEvolution() {
