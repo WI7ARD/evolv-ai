@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { startMockOllama } from "./helpers/mock-ollama.mjs";
 import { createAuthenticatedClient } from "./helpers/auth-client.mjs";
@@ -15,7 +17,16 @@ let mock;
 let dataDir;
 let client;
 
+// The approval test proposes a file below this directory. The engineering
+// action service requires the parent to already exist, and `work/` is ignored
+// by Git, so a clean checkout has to create it rather than inherit it from
+// whatever happens to be lying around in the developer's tree.
+const scratchDir = path.join(fileURLToPath(new URL("..", import.meta.url)), "work");
+let ownsScratchDir = false;
+
 test.before(async () => {
+  ownsScratchDir = !existsSync(scratchDir);
+  await mkdir(scratchDir, { recursive: true });
   dataDir = await mkdtemp(path.join(tmpdir(), "evolv-stream-"));
   mock = await startMockOllama();
   child = spawn(process.execPath, ["server.mjs"], {
@@ -51,6 +62,7 @@ test.after(async () => {
   await mock?.close();
   await delay(150);
   await rm(dataDir, { recursive: true, force: true }).catch(() => {});
+  if (ownsScratchDir) await rm(scratchDir, { recursive: true, force: true }).catch(() => {});
 });
 
 async function createConversation(title) {

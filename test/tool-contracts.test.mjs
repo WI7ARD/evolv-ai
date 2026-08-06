@@ -29,8 +29,17 @@ test("tool contracts reject disabled risk classes and publish typed dry-run poli
 
 test("tool timeout signals cooperatively abort real work", async () => {
   const { signal } = createToolSignal(100);
-  await assert.rejects(async () => {
-    await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
-    throwIfToolAborted(signal);
-  }, (error) => error.code === "TIMEOUT" && error.name === "TimeoutError");
+  // AbortSignal.timeout() schedules an unref'd timer, so it cannot by itself
+  // hold the event loop open. A real tool run always has live handles (the
+  // request socket, a child process) keeping it alive; this test has none, so
+  // it has to supply one or the runner exits before the abort ever fires.
+  const keepAlive = setInterval(() => {}, 10);
+  try {
+    await assert.rejects(async () => {
+      await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      throwIfToolAborted(signal);
+    }, (error) => error.code === "TIMEOUT" && error.name === "TimeoutError");
+  } finally {
+    clearInterval(keepAlive);
+  }
 });

@@ -27,3 +27,27 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # Linux is a supported target (see LINUX-MINT.md and `npm run dist:linux`),
+  # so the suite has to stay green there too. Development dependencies are
+  # omitted deliberately: Electron's own postinstall extracts with the
+  # unpatched extract-zip, which hangs on Node >=24 everywhere, and
+  # scripts/patch-extract-zip.mjs can only repair that on Windows. The tests
+  # need no development dependency.
+  test-linux:
+    name: Node ${{ matrix.node }} on Linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --omit=dev
+      - run: npm test
+
