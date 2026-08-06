@@ -8,6 +8,7 @@ import test from "node:test";
 import { createDatabase } from "../lib/database.mjs";
 import {
   BundledMarketplaceProvider,
+  EVOLV_VERSION,
   MarketplaceService,
   compareSemver,
   permissionDiff,
@@ -175,6 +176,24 @@ test("developer mode creates a valid exportable starter and duplicate manifests 
   const invalid = structuredClone(starter.manifest);
   invalid.id = "../../bad";
   assert.throws(() => validateManifest(invalid, { platform: "win32" }), /Pack ID/);
+});
+
+test("the minimum-version gate tracks the shipped release, not a hardcoded literal", (t) => {
+  const { marketplace } = fixture(t);
+  const shipped = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  assert.equal(EVOLV_VERSION, shipped);
+  marketplace.developerMode(true);
+  const starter = marketplace.createStarter({
+    name: "Current Release Pack", id: "evolv.current-release", author: "Owner"
+  });
+  // A pack authored against the shipped release must install, and one that
+  // needs a future release must still be refused.
+  const current = structuredClone(starter.manifest);
+  current.minEvolvVersion = shipped;
+  assert.equal(validateManifest(current, { platform: "win32" }).minEvolvVersion, shipped);
+  const future = structuredClone(starter.manifest);
+  future.minEvolvVersion = `${Number(shipped.split(".")[0]) + 1}.0.0`;
+  assert.throws(() => validateManifest(future, { platform: "win32" }), /requires Evolv/);
 });
 
 test("publisher verification is cryptographic and manifests cannot self-award trust", (t) => {
