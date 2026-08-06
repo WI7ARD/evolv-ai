@@ -85,3 +85,36 @@ test("custom providers reject private non-loopback endpoints", async () => {
   database.close();
   await rm(directory, { recursive: true, force: true });
 });
+
+test("a custom endpoint that later resolves privately is refused before the key is sent", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "evolv-provider-rebind-"));
+  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "provider.db"), defaultPrompt: "test" });
+  // The first lookup is the save-time check and answers with a public address.
+  // Every later lookup rebinds to loopback, which is what a DNS rebinding
+  // attack against the stored endpoint looks like.
+  let lookups = 0;
+  const lookup = async () => {
+    lookups += 1;
+    return [{ address: lookups === 1 ? "93.184.216.34" : "127.0.0.1", family: 4 }];
+  };
+  let fetched = false;
+  const service = createProviderService({
+    database,
+    secretStore: { available: true, description: "test", encrypt: async (value) => value, decrypt: async (value) => value },
+    ollamaUrl: "http://127.0.0.1:11434",
+    lookup
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (...args) => { fetched = true; return originalFetch(...args); };
+  try {
+    await service.saveCredentials("custom", { apiKey: "12345678", baseUrl: "https://models.example/v1" });
+    assert.equal(lookups, 1);
+    await assert.rejects(service.models("custom"), (error) => error.code === "PRIVATE_ENDPOINT");
+    assert.ok(lookups > 1, "the stored endpoint must be re-resolved at connect time");
+    assert.equal(fetched, false, "no request may leave the machine once the endpoint resolves privately");
+  } finally {
+    globalThis.fetch = originalFetch;
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
