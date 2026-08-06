@@ -514,15 +514,25 @@ decomposition of `server.mjs`.
 
 ## 15. Risks, tradeoffs, scalability
 
-**Risk 1 — Monetisation contradicts the thesis.** The brief gates *automatic
-checkpoints* and *unlimited rollback* behind the paid tier while the free tier
-still edits files. That ships the exact product the slogan promises not to:
-AI editing without a safety net. It is also the tier most likely to generate
-the "Evolv destroyed my project" story that ends the product.
-**Recommendation: safety is never a paid feature.** Snapshots, rollback, and
-validation are free forever. Monetise multi-agent, cloud sync, team features,
-priority models, the plugin marketplace, and enterprise controls — capability
-and scale, not recoverability.
+**Risk 1 — Tiering the product at all.** The brief proposed a free tier and a
+paid tier, with automatic checkpoints and unlimited rollback behind the paid
+one. **That plan is withdrawn: Evolv has no paywalls.** Every feature in this
+document — snapshots, rollback, validation, multi-agent, the sandbox, plugins
+— is available to every user.
+
+This removes a design constraint rather than adding one, and simplifies real
+architecture. There is no entitlement check, no licence state, no tier flag
+threaded through the approval path, no billing integration, no account service
+to run, and no upgrade prompt to design around. The risk to actively avoid is
+reintroducing tiering by accident: a "pro" flag added for one feature becomes
+a plumbing dependency everywhere. Nothing in the schema, the API, or the
+approval envelope should carry an entitlement concept.
+
+Gating recoverability would also have been incoherent on its own terms. A
+free tier that edits files without a safety net is exactly the product the
+slogan promises not to ship, and exactly the configuration that produces the
+"Evolv destroyed my project" story. Not charging for anything makes that
+failure impossible by construction.
 
 **Risk 2 — Sandbox scope.** A 2D world with perception, inventory, physics and
 an SDK is a multi-quarter project that does not itself make anything safer
@@ -572,10 +582,11 @@ is urgent; both should be measured rather than guessed.
 
 ---
 
-## The three decisions I would push back on
+## Decisions
 
-1. **Do not gate safety features behind payment.** It contradicts the slogan
-   and creates the worst possible failure story.
+1. **No paywalls.** Every feature ships to every user. Nothing in the schema,
+   the API, or the approval envelope carries an entitlement concept, and
+   nothing should acquire one later.
 2. **Build the shadow workspace, not the 2D world — at least first.** One is
    the safety mechanism; the other is a picture of it.
 3. **Keep plugins declarative until you deliberately decide otherwise.** It is
