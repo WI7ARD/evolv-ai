@@ -27,10 +27,7 @@
         <nav class="side-nav" aria-label="Workspace">
           <button class="nav-item active" data-view="chat">
             <span class="nav-icon">◌</span> Chat
-          </button>
-          <button class="nav-item" data-view="agent">
-            <span class="nav-icon">◎</span> Agent
-            <span id="agent-dot" class="notification-dot hidden"></span>
+            <span id="agent-dot" class="notification-dot hidden" title="A goal run is waiting for approval"></span>
           </button>
           <button class="nav-item" data-view="projects">
             <span class="nav-icon">▣</span> Projects
@@ -158,7 +155,7 @@
                   <button id="voice-toggle" class="tool-button" type="button" aria-label="Toggle spoken replies" title="Spoken replies">◖</button>
                   <button id="gesture-button" class="tool-button" type="button" aria-label="Open hand gestures" title="Hand gestures">✋</button>
                 </div>
-                <span id="composer-hint">Enter to send · Shift+Enter for a new line</span>
+                <span id="composer-hint">Enter to send · Shift+Enter for a new line · /agent to run a goal</span>
                 <span id="voice-listen-status" class="voice-listen-status hidden" aria-live="polite">Hold the microphone button to talk</span>
                 <button id="stop-button" class="stop-button hidden" type="button">Stop</button>
                 <button id="send-button" class="send-button" type="submit" aria-label="Send">↑</button>
@@ -170,8 +167,11 @@
 
         <section id="agent-view" class="view panel-view agent-view">
           <div class="panel-header">
-            <div><p class="eyebrow">VERIFIED GOAL RUNNER</p><h1>Agent</h1><p>Approve the plan once. Evolv runs safe local reads, pauses before every outside request or change, and finishes only after verification.</p></div>
-            <button id="agent-refresh" class="secondary-button" type="button">Refresh runs</button>
+            <div><p class="eyebrow">VERIFIED GOAL RUNNER</p><h1>Agent</h1><p>Started with <code>/agent</code> in chat. Approve the plan once. Evolv runs safe local reads, pauses before every outside request or change, and finishes only after verification.</p></div>
+            <div class="panel-header-actions">
+              <button id="agent-back-to-chat" class="secondary-button" type="button">Back to chat</button>
+              <button id="agent-refresh" class="secondary-button" type="button">Refresh runs</button>
+            </div>
           </div>
           <div class="agent-layout">
             <article class="mind-card agent-create-card">

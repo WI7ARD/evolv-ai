@@ -53,7 +53,9 @@ Use the generated `Evolv-linux-x64-0.6.3.tar.gz`. Do not relabel a Windows build
 
 ## Run a verified goal
 
-1. Open **Agent** in the left sidebar.
+1. Type `/agent` in the chat box. Adding the goal on the same line — `/agent
+   audit the release checklist` — drafts it for you. The command is handled
+   locally and is never sent to a model.
 2. Enter the goal and one measurable success criterion per line.
 3. Choose the project, optional installed pack, provider/model, and a budget no larger than the balanced preset.
 4. Select **Propose plan**. Read every step. You may edit the structured plan before approval.

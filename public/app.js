@@ -1115,6 +1115,11 @@ function formatBytes(bytes) {
 async function init() {
   if (!await initializeAuth()) return;
   initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
+  // The agent has no sidebar entry, so it needs its own way back.
+  $("#agent-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
   startSessionWatch();
   resetMarketplaceDialogs();
   bindEvents();
@@ -1758,8 +1763,40 @@ async function addAttachments(files) {
   renderAttachments();
 }
 
+// Composer commands are handled locally and never reach a model. `/agent` is
+// the only entry point to the goal runner now that it has no sidebar tab.
+const COMPOSER_COMMANDS = [
+  { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal }
+];
+
+function matchComposerCommand(text) {
+  const match = String(text).trim().match(/^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i);
+  if (!match) return null;
+  const command = COMPOSER_COMMANDS.find((item) => item.name === `/${match[1].toLowerCase()}`);
+  return command ? { command, argument: (match[2] || "").trim() } : null;
+}
+
+function openAgentGoal(objective = "") {
+  switchView("agent");
+  const form = $("#agent-goal-form");
+  const field = form?.elements?.objective;
+  if (!field) return;
+  if (objective) field.value = objective;
+  // Send the person to the first thing they still have to supply.
+  const next = objective ? (form.elements.successCriteria?.value.trim() ? form : form.elements.successCriteria) : field;
+  (next === form ? form.elements.objective : next).focus();
+  if (objective) toast("Goal drafted. Add success criteria, then propose a plan.");
+}
+
 async function sendMessage(text) {
   if (!text.trim() || app.generating) return;
+  const composerCommand = matchComposerCommand(text);
+  if (composerCommand) {
+    elements.prompt.value = "";
+    resizePrompt();
+    composerCommand.command.run(composerCommand.argument);
+    return;
+  }
   if (!elements.model.value) {
     toast("Install or select an Ollama model first.", "error");
     return;

@@ -286,6 +286,23 @@ reviewable component changes, risks, and tests. These proposals cannot edit
 files, execute code, expand permissions, or apply themselves. Actual code
 changes remain a separate human-approved development step.
 
+## Verified goal runner
+
+Type `/agent` in the chat box to plan and run a bounded goal; `/agent <goal>`
+drafts the objective in one step. The command is handled in the browser and is
+never sent to a model.
+
+You state the outcome and its success criteria, and a model of your choice
+proposes a structured plan. Nothing runs until you have read that plan and
+approved it — and you can edit it first. Safe local reads then proceed on their
+own, while network research, file changes, engineering checks, and Obsidian
+note changes each stop for their own approval. A run completes only when a
+final verification step records evidence for the original criteria; a model
+answer without evidence is reported as partial or failed, never as success.
+
+Runs are durable: they survive a restart, can be paused, resumed, replanned,
+or cancelled, and each keeps its own step history, evidence, and budget.
+
 ## Evolv Marketplace
 
 Marketplace turns Evolv into a modular, local-first capability platform. The
