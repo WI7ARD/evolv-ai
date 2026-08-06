@@ -293,10 +293,6 @@ async function ensureState() {
   return database.getState();
 }
 
-async function writeState(nextState) {
-  database.saveState(nextState);
-}
-
 function readBody(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
     const contentType = String(req.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase();
@@ -1404,7 +1400,7 @@ async function runPromptEvaluation(state, body) {
     database.finishEvaluationRun(runId, "complete", summary);
     proposal.evaluationRunId = runId;
     proposal.evaluation = summary;
-    await writeState(state);
+    database.setPendingProposal(proposal);
     database.audit("intelligence.evaluation-completed", `Evaluated proposed prompt on ${results.length} case(s)`, {
       entityType: "prompt-proposal", entityId: proposal.id, metadata: summary
     });
@@ -2043,7 +2039,7 @@ ${reviewPacket}
       expected: String(test.expected || "").slice(0, 1000)
     }))
   };
-  await writeState(state);
+  database.setPendingProposal(state.pendingProposal);
   return state.pendingProposal;
 }
 
@@ -2061,9 +2057,8 @@ async function handleFeedback(state, body) {
     model: String(body.model || "").slice(0, 200),
     versionId: state.activeVersionId
   };
+  database.addFeedback(item);
   state.feedback.push(item);
-  state.feedback = state.feedback.slice(-500);
-  await writeState(state);
   const evaluationCase = database.addEvaluationCase(evaluationCaseFromFeedback(item));
   database.recordRoutingOutcome(item.messageId, item.rating);
   evolutionService.applyFeedback(item.messageId, item.rating, item.note);
@@ -2091,18 +2086,28 @@ async function applyProposal(state, proposalId) {
     source: "feedback-upgrade",
     evaluatorModel: proposal.evaluatorModel
   };
+  // Recording the version, promoting it, and clearing the proposal it came
+  // from is one change: a half-applied upgrade would leave the proposal
+  // offering to redo work that is already committed.
+  database.raw.transaction(() => {
+    database.addPromptVersion(version);
+    database.setActiveVersion(version.id);
+    database.setPendingProposal(null);
+  })();
   state.versions.push(version);
   state.activeVersionId = version.id;
   state.pendingProposal = null;
-  await writeState(state);
   return version;
 }
 
 async function activateVersion(state, versionId) {
   if (!state.versions.some((version) => version.id === versionId)) throw Object.assign(new Error("Unknown prompt version."), { status: 404 });
+  database.raw.transaction(() => {
+    database.setActiveVersion(versionId);
+    database.setPendingProposal(null);
+  })();
   state.activeVersionId = versionId;
   state.pendingProposal = null;
-  await writeState(state);
 }
 
 async function addKnowledge(state, body) {
@@ -2132,17 +2137,17 @@ async function addKnowledge(state, body) {
     createdAt: new Date().toISOString(),
     source: "user-approved"
   };
-  state.knowledge = [...(state.knowledge || []), item].slice(-1000);
-  await writeState(state);
+  database.addKnowledge(item);
+  state.knowledge = [...(state.knowledge || []), item];
   const { embedding: _embedding, ...safeItem } = item;
   return safeItem;
 }
 
 async function deleteKnowledge(state, id) {
-  const before = (state.knowledge || []).length;
+  // The database is the authority on whether the record existed: the request's
+  // aggregate may predate a record added by another tab.
+  if (!database.deleteKnowledge(id)) throw Object.assign(new Error("Knowledge record not found."), { status: 404 });
   state.knowledge = (state.knowledge || []).filter((item) => item.id !== id);
-  if (state.knowledge.length === before) throw Object.assign(new Error("Knowledge record not found."), { status: 404 });
-  await writeState(state);
 }
 
 function architectureProposalSchema() {
@@ -2245,8 +2250,8 @@ async function proposeArchitecture(state, body) {
     tests: result.tests.slice(0, 8).map((item) => String(item).slice(0, 1000)),
     status: "proposal-only"
   };
-  state.architectureProposals = [...(state.architectureProposals || []), proposal].slice(-100);
-  await writeState(state);
+  database.addArchitectureProposal(proposal);
+  state.architectureProposals = [...(state.architectureProposals || []), proposal];
   return proposal;
 }
 
@@ -3286,7 +3291,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "DELETE" && url.pathname === "/api/proposals/current") {
       const state = await loadState();
       state.pendingProposal = null;
-      await writeState(state);
+      database.setPendingProposal(null);
       return json(res, 200, { ok: true });
     }
     if (req.method === "POST" && url.pathname === "/api/versions/activate") {

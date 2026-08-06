@@ -238,6 +238,39 @@ test("stores knowledge safely and omits raw vectors from client state", async ()
 
   const deleted = await client.fetch(`/api/knowledge/${created.id}`, { method: "DELETE" });
   assert.equal(deleted.status, 200);
+  // Deleting the same record twice reports the second attempt honestly instead
+  // of silently rewriting the table from the request's own stale aggregate.
+  const again = await client.fetch(`/api/knowledge/${created.id}`, { method: "DELETE" });
+  assert.equal(again.status, 404);
+});
+
+test("prompt version activation and proposal discard persist within the request scope", async () => {
+  const before = await (await client.fetch("/api/state")).json();
+  const target = before.versions.at(-1).id;
+  // Activation runs its two writes in one database transaction taken inside the
+  // per-request profile scope, so this also proves that scope survives it.
+  const activated = await client.fetch("/api/versions/activate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ versionId: target })
+  });
+  assert.equal(activated.status, 200);
+  assert.equal((await activated.json()).activeVersionId, target);
+
+  const discarded = await client.fetch("/api/proposals/current", { method: "DELETE" });
+  assert.equal(discarded.status, 200);
+
+  const after = await (await client.fetch("/api/state")).json();
+  assert.equal(after.activeVersionId, target, "the activation must outlive the request that made it");
+  assert.equal(after.pendingProposal, null);
+  assert.equal(after.versions.length, before.versions.length, "activating must not add or drop versions");
+
+  const unknown = await client.fetch("/api/versions/activate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ versionId: "no-such-version" })
+  });
+  assert.equal(unknown.status, 404);
 });
 
 test("supports persisted conversation lifecycle", async () => {
