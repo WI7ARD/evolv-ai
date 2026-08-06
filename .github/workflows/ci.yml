@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Lets a build be started by hand from the Actions tab. Useful when a run is
+  # wanted without a new commit — re-running a stuck run keeps its original
+  # commit, which is rarely the one you want to check.
+  workflow_dispatch:
 
 permissions:
   contents: read
