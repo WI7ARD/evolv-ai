@@ -120,3 +120,28 @@ test("cloud pack sessions cannot expose project files without the send-files per
   const allowed = registry.schemas({ providerId: "openai", packPermissions: ["filesystem.read.project", "models.send-files"] });
   assert.equal(allowed.some((tool) => tool.function.name === "read_workspace_text"), true);
 });
+
+test("filesystem actions refuse to fall back to Evolv's own source directory", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evolv-root-guard-"));
+  t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  const database = createDatabase({ dataDir: path.join(root, "profile"), defaultPrompt: "Test" });
+  t.after(() => database.close());
+
+  // workspaceRoot is Evolv's own source. With a project service present, that
+  // must never be used as an implicit root: a tool that forgot to pass a
+  // project would otherwise be handed the application's source and secrets.
+  const withProjects = new EngineeringActionService({
+    database, workspaceRoot: process.cwd(),
+    projectService: { async rootFor(projectId) {
+      if (!projectId) throw Object.assign(new Error("no project"), { code: "PROJECT_REQUIRED" });
+      return root;
+    } }
+  });
+  await assert.rejects(() => withProjects.safePath("server.mjs", {}), (error) => error.code === "PROJECT_REQUIRED");
+  await assert.rejects(() => withProjects.runCommand({ executable: "git", args: ["status"] }, 5_000), (error) => error.code === "PROJECT_REQUIRED");
+
+  // Without a project service — an embedded or test construction — the
+  // configured root remains the legitimate default.
+  const standalone = new EngineeringActionService({ database, workspaceRoot: root });
+  assert.equal(await standalone.actionRoot({}), path.resolve(root));
+});
