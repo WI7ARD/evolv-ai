@@ -7,6 +7,8 @@
 // create a second path to disk that bypasses the approval envelope, which is
 // exactly the property the sandbox exists to guarantee.
 
+import { perceive } from "../lib/world.mjs";
+
 export async function handleSandboxRoutes(context) {
   const { req, res, url, readBody, bodyLimit, json, sandboxService } = context;
 
@@ -29,13 +31,18 @@ export async function handleSandboxRoutes(context) {
     return true;
   }
 
-  const match = url.pathname.match(/^\/api\/sandboxes\/([^/]+)(?:\/(files|validate|objects))?$/);
+  const match = url.pathname.match(/^\/api\/sandboxes\/([^/]+)(?:\/(files|validate|objects|world))?$/);
   if (!match) return false;
   const sessionId = decodeURIComponent(match[1]);
   const action = match[2] || "";
 
   if (req.method === "GET" && !action) {
     json(res, 200, sandboxService.get(sessionId));
+    return true;
+  }
+  if (req.method === "GET" && action === "world") {
+    // A spatial reading of the same session. Derived, never stored.
+    json(res, 200, perceive(sandboxService.get(sessionId)));
     return true;
   }
   if (req.method === "GET" && action === "objects") {

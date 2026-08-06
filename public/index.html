@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/styles.css?v=0.6.3" />
     <link rel="modulepreload" href="/agent-workspace.js?v=0.6.3" />
     <link rel="modulepreload" href="/sandbox.js?v=0.6.3" />
+    <link rel="modulepreload" href="/world.js?v=0.6.3" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -176,6 +177,15 @@
             </div>
           </div>
           <p id="sandbox-banner" class="sandbox-banner hidden" role="status" aria-live="polite"></p>
+          <article id="world-panel" class="mind-card world-panel">
+            <div class="mind-card-heading">
+              <div><p class="eyebrow">WORLD</p><h2>What Evolv is doing</h2></div>
+              <label class="world-toggle"><input id="world-enabled" type="checkbox" checked /> <span>Show</span></label>
+            </div>
+            <canvas id="world-canvas" class="world-canvas" role="img" aria-label="A map of the current simulation"></canvas>
+            <p id="world-caption" class="settings-note">Open a simulation to see it here.</p>
+            <div id="world-skills" class="world-skills"></div>
+          </article>
           <div class="agent-layout">
             <article class="mind-card agent-runs-card">
               <div class="mind-card-heading"><div><p class="eyebrow">SIMULATIONS</p><h2>Sessions</h2></div><span id="sandbox-count" class="status-pill">0</span></div>

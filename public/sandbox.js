@@ -1,3 +1,5 @@
+import { initWorld, showWorld } from "./world.js";
+
 const $ = (selector) => document.querySelector(selector);
 
 const state = { api: null, toast: null, sessions: [], selectedId: "", detail: null, busy: false };
@@ -88,6 +90,7 @@ async function select(sessionId) {
     state.toast(error.message, "error");
   }
   renderDetail();
+  await showWorld(sessionId);
 }
 
 export async function refreshSandboxes(selectId = "") {
@@ -97,7 +100,7 @@ export async function refreshSandboxes(selectId = "") {
   renderIndicator();
   const target = selectId || state.selectedId || state.sessions[0]?.id || "";
   renderList();
-  if (target) await select(target); else { state.detail = null; renderDetail(); }
+  if (target) await select(target); else { state.detail = null; renderDetail(); await showWorld(""); }
 }
 
 async function act(name) {
@@ -127,6 +130,7 @@ async function act(name) {
 export function initSandboxWorkspace({ api, toast }) {
   state.api = api;
   state.toast = toast;
+  initWorld({ api });
   $("#sandbox-refresh")?.addEventListener("click", () => refreshSandboxes().catch((error) => toast(error.message, "error")));
   $("#sandbox-list")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-sandbox]");

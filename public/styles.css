@@ -821,3 +821,7 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
   .marketplace-form-grid { display: block; }
 }
 .sandbox-banner { margin: 22px 0 0; padding: 12px 16px; border: 1px solid var(--acid); border-radius: 8px; background: color-mix(in srgb, var(--acid) 10%, transparent); color: var(--ink); font-size: 12px; font-weight: 600; }
+.world-panel { margin-top: 20px; }
+.world-canvas { display: block; width: 100%; height: 300px; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; margin: 14px 0 10px; }
+.world-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
+.world-skills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
