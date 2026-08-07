@@ -95,7 +95,7 @@ test("finished work is not shown as outstanding", async () => {
   assert.deepEqual(sent[0].payload.tasks.map((task) => task.title), ["Upload firmware", "Review logs"]);
 });
 
-test("the lab display shows the camera without ever sending it anywhere", async () => {
+test("the lab display asks for no devices at all", async () => {
   const [html, lab, app] = await Promise.all([
     readFile(new URL("../public/index.html", import.meta.url), "utf8"),
     readFile(new URL("../public/lab.js", import.meta.url), "utf8"),
@@ -109,39 +109,36 @@ test("the lab display shows the camera without ever sending it anywhere", async 
   }
   assert.match(html, /id="lab-clock"/);
   assert.match(html, /id="lab-calendar"/);
-  assert.match(html, /id="lab-hand"/);
+  assert.match(html, /id="lab-summary"/);
 
-  // The camera is read in the page. Nothing may post a frame, a canvas dump, or
-  // a landmark set anywhere — that is the whole basis of the privacy claim the
-  // panel makes on screen.
+  // The camera was removed from this display. Nothing here may reach for a
+  // device, and the page must not carry the elements that fed one — a leftover
+  // video tag is how a removed feature quietly comes back.
+  assert.doesNotMatch(lab, /getUserMedia|MediaStream|recognizeForVideo|ensureRecognizer|getTracks/);
+  assert.doesNotMatch(html, /id="lab-video"|id="lab-hand"|id="lab-camera"|id="lab-gesture"/);
+  assert.doesNotMatch(app, /ensureGestureRecognizer\(\);\s*\n\s*return \{ recognizer/);
+
+  // Still a read-only surface: it shows and speaks, it never writes.
   assert.doesNotMatch(lab, /toDataURL|toBlob|FormData|captureStream/);
-  const posts = lab.match(/method:\s*"POST"/g) || [];
-  assert.equal(posts.length, 0, "the display only reads; it must never post");
+  assert.equal((lab.match(/method:\s*"POST"/g) || []).length, 0, "the display only reads; it must never post");
 
-  // One recognizer, injected, rather than a second MediaPipe instance — two
-  // would mean two camera streams, and most webcams refuse the second.
-  assert.doesNotMatch(lab, /vision_bundle|GestureRecognizer\.createFromOptions/);
-  assert.match(lab, /ensureRecognizer/);
-  assert.match(app, /await ensureGestureRecognizer\(\)/);
-
-  // Leaving must release the camera and stop the clocks.
+  // Leaving must stop the clocks and any speech.
   assert.match(lab, /export function suspendLab/);
-  assert.match(lab, /getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\)/);
+  assert.match(lab, /clearInterval/);
   assert.match(app, /suspendLab\(\)/);
 });
 
-test("every gesture the display advertises is one it actually handles", async () => {
+test("every control the display advertises is one it actually handles", async () => {
   const [html, lab] = await Promise.all([
     readFile(new URL("../public/index.html", import.meta.url), "utf8"),
     readFile(new URL("../public/lab.js", import.meta.url), "utf8")
   ]);
-  const advertised = html.match(/Point up to move the focus ring[^<]*/)?.[0] || "";
-  assert.ok(advertised, "the gesture hint must be on the page");
-
-  for (const gesture of ["Pointing_Up", "Thumb_Up", "Closed_Fist", "Victory"]) {
-    assert.match(lab, new RegExp(gesture), `${gesture} is advertised but not handled`);
+  for (const control of ["lab-next", "lab-speak", "lab-refresh", "lab-location", "lab-back-to-chat"]) {
+    assert.match(html, new RegExp(`id="${control}"`), `${control} is missing from the page`);
   }
-  // Open palm is the resting pose, so it must stay inert or the display would
-  // fire an action every time someone simply holds a hand up.
-  assert.match(lab, /name !== "Open_Palm"/);
+  for (const control of ["lab-next", "lab-speak", "lab-refresh", "lab-location"]) {
+    assert.match(lab, new RegExp(control), `${control} has no handler`);
+  }
+  // The hint must describe the buttons that exist, not gestures that no longer do.
+  assert.doesNotMatch(html, /Point up to move|thumbs up to hear|victory to refresh/i);
 });

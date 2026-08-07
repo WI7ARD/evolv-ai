@@ -205,12 +205,12 @@
 
         <section id="lab-view" class="view panel-view lab-view">
           <div class="panel-header">
-            <div><p class="eyebrow">LAB DISPLAY</p><h1>Lab</h1><p>Time, weather, tasks, and your hand — read aloud on request. Started with <code>/lab</code>. Camera frames are read in this window and never leave the computer.</p></div>
+            <div><p class="eyebrow">LAB DISPLAY</p><h1>Lab</h1><p>Time, weather, and open work at a glance — read aloud on request. Started with <code>/lab</code>. No camera and no microphone.</p></div>
             <div class="panel-header-actions">
               <button id="lab-back-to-chat" class="secondary-button" type="button">Back to chat</button>
               <button id="lab-refresh" class="secondary-button" type="button">Refresh</button>
-              <button id="lab-speak" class="secondary-button" type="button">Speak panel</button>
-              <button id="lab-camera" class="primary-button" type="button">Start camera</button>
+              <button id="lab-next" class="secondary-button" type="button">Next panel</button>
+              <button id="lab-speak" class="primary-button" type="button">Speak panel</button>
             </div>
           </div>
 
@@ -223,11 +223,8 @@
             <article id="lab-panel-time" class="lab-panel lab-panel-time">
               <p id="lab-clock" class="lab-clock">--:--:--</p>
               <p id="lab-date" class="lab-line"></p>
-              <div class="lab-ring">
-                <canvas id="lab-hand" class="lab-hand" width="360" height="360" role="img" aria-label="Live hand tracking"></canvas>
-                <video id="lab-video" class="lab-video" playsinline muted aria-hidden="true"></video>
-              </div>
-              <p class="lab-note">Gesture <strong id="lab-gesture">—</strong> · focus <strong id="lab-focus-name">TIME</strong></p>
+              <p id="lab-summary" class="lab-summary" aria-live="polite"></p>
+              <p class="lab-note">Focus <strong id="lab-focus-name">TIME</strong></p>
             </article>
 
             <div class="lab-column">
@@ -254,7 +251,7 @@
               </article>
             </div>
           </div>
-          <p class="settings-note">Point up to move the focus ring · thumbs up to hear the focused panel · fist to stop · victory to refresh.</p>
+          <p class="settings-note">Next panel moves the focus ring · Speak panel reads the focused panel aloud.</p>
         </section>
 
         <section id="physics-view" class="view panel-view agent-view">

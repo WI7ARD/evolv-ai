@@ -1120,13 +1120,7 @@ async function init() {
   initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
   initSandboxWorkspace({ api, toast, project: activeProject });
   initPhysics({ api, toast });
-  initLab({
-    api, toast, project: activeProject,
-    async ensureRecognizer() {
-      await ensureGestureRecognizer();
-      return { recognizer: app.gestureRecognizer, connections: app.gestureConnections };
-    }
-  });
+  initLab({ api, toast, project: activeProject });
   $("#lab-back-to-chat")?.addEventListener("click", () => {
     switchView("chat");
     elements.prompt.focus();

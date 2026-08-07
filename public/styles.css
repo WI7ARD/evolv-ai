@@ -829,7 +829,12 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 /* The lab display. Cyan rather than acid green: it reads as instrumentation
    against Evolv's usual chrome, and keeps the hand legible over dark panels. */
 .lab-view { --glow: #5df0cd; }
-.lab-grid { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(320px, 1.6fr) minmax(240px, 1fr); gap: 14px; margin-top: 18px; }
+/* align-items: start so a panel is as tall as its contents. Stretching leaves
+   a one-line to-do list occupying the height of the whole right column. */
+.lab-grid {
+  display: grid; align-items: start; gap: 14px; margin-top: 18px;
+  grid-template-columns: minmax(200px, 1fr) minmax(320px, 1.6fr) minmax(240px, 1fr);
+}
 .lab-column { display: flex; flex-direction: column; gap: 14px; }
 .lab-panel {
   border: 1px solid rgba(93, 240, 205, .18); border-radius: 12px; padding: 16px;
@@ -849,11 +854,12 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
   font-size: clamp(34px, 6vw, 62px); font-weight: 200; letter-spacing: .04em; margin: 0;
   color: var(--glow); text-shadow: 0 0 22px rgba(93, 240, 205, .45); font-variant-numeric: tabular-nums;
 }
-.lab-ring { position: relative; margin: 14px 0 4px; }
-.lab-hand { display: block; width: min(360px, 46vw); height: auto; aspect-ratio: 1; }
-/* The video is the source for tracking only. Showing the room would turn a
-   private reading into a mirror pointed at whoever walks past. */
-.lab-video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+/* The focused panel's summary, shown in the words it would be spoken in, so
+   the Speak button is never a surprise. */
+.lab-summary {
+  margin: 22px 0 0; max-width: 34ch; font-size: 15px; line-height: 1.6;
+  color: var(--ink); min-height: 3em;
+}
 
 .lab-tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .lab-task { font-size: 12px; color: var(--ink); padding-left: 16px; position: relative; line-height: 1.45; }
