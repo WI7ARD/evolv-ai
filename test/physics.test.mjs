@@ -396,7 +396,9 @@ test("the toolbar, the tool schema, and the dispatch switch cannot drift apart",
 
   // Hover is resolved in the page on purpose: a request per mouse move would
   // lag the cursor. It is hit-testing, not simulation.
-  assert.match(ui, /mousemove/);
+  // Pointer events rather than mouse events, so dragging works under a finger
+  // as well as a cursor.
+  assert.match(ui, /pointermove/);
   assert.match(ui, /pointInPolygon/);
   assert.doesNotMatch(ui, /Engine\.update|Bodies\.rectangle|import .*matter/i);
 
@@ -430,4 +432,118 @@ test("a model can build a prefab, join two objects, and blow them sideways", asy
   const bad = await registry.execute("physics_connect", { joint: "spring", a: "ghost-9", b: ball.payload.id }, {});
   assert.equal(bad.ok, false);
   assert.match(bad.output, /No object named ghost-9/);
+});
+
+test("a paused drag places an object exactly and leaves it still", () => {
+  const physics = new PhysicsService();
+  const box = physics.addBox({ x: 200, y: 300, width: 40, height: 40 });
+
+  physics.grab({ id: box.id, x: 200, y: 300 });
+  physics.dragTo({ x: 600, y: 150, live: false });
+  physics.release();
+
+  const moved = physics.describe(box.id);
+  assert.equal(moved.x, 600);
+  assert.equal(moved.y, 150);
+  // Velocity is cleared, or the object shoots away the moment the clock starts.
+  assert.equal(moved.speed, 0);
+});
+
+test("a live drag pulls an object rather than teleporting it", () => {
+  const physics = new PhysicsService();
+  const ball = physics.addCircle({ x: 200, y: 300, radius: 25 });
+
+  physics.grab({ id: ball.id, x: 200, y: 300 });
+  physics.dragTo({ x: 650, y: 300, live: true });
+  // The constraint needs solver ticks to act; that is the point of dragging
+  // rather than placing — the object swings and collides on the way.
+  assert.ok(physics.describe(ball.id).x < 260, "a live drag must not jump instantly");
+  physics.step(120);
+  assert.ok(Math.abs(physics.describe(ball.id).x - 650) < 40, "the object must reach the cursor");
+
+  physics.release();
+  physics.step(1);
+  assert.equal(physics.perceive().objects.length, 1);
+});
+
+test("fixed objects can be repositioned even though no force can move them", () => {
+  const physics = new PhysicsService();
+  const ramp = physics.addRamp({ x: 300, y: 400, width: 200, height: 20 });
+  assert.equal(physics.describe(ramp.id).fixed, true);
+
+  physics.grab({ id: ramp.id, x: 300, y: 400 });
+  physics.dragTo({ x: 500, y: 250, live: true });
+  physics.release();
+
+  // A constraint does nothing to a static body, so this path has to move it
+  // directly or ramps would be permanently stuck where they landed.
+  assert.equal(physics.describe(ramp.id).x, 500);
+  assert.equal(physics.describe(ramp.id).y, 250);
+});
+
+test("dragging a prefab moves every part together", () => {
+  const physics = new PhysicsService();
+  const ragdoll = physics.addRagdoll({ x: 200, y: 200 });
+  const before = physics.frame().bodies.map((body) => [body.x, body.y]);
+
+  physics.grab({ id: ragdoll.id, x: 200, y: 200 });
+  physics.dragTo({ x: 500, y: 200, live: false });
+  physics.release();
+
+  const after = physics.frame().bodies.map((body) => [body.x, body.y]);
+  const deltas = before.map(([x, y], index) => `${(after[index][0] - x).toFixed(1)},${(after[index][1] - y).toFixed(1)}`);
+  assert.equal(new Set(deltas).size, 1, "a dragged ragdoll must keep its shape");
+  assert.equal(deltas[0], "300.0,0.0");
+});
+
+test("dragging cleans up after itself", () => {
+  const physics = new PhysicsService();
+  const box = physics.addBox({ x: 300, y: 300 });
+
+  // Deleting what the cursor holds must not leave a constraint attached to a
+  // body that no longer exists — the solver would fault on the next tick.
+  physics.grab({ id: box.id, x: 300, y: 300 });
+  physics.remove(box.id);
+  physics.step(30);
+  assert.equal(physics.perceive().objectCount, 0);
+
+  const other = physics.addCircle({ x: 100, y: 100 });
+  physics.grab({ id: other.id, x: 100, y: 100 });
+  physics.clear();
+  physics.step(30);
+  assert.equal(physics.perceive().objectCount, 0);
+
+  assert.throws(() => physics.dragTo({ x: 10, y: 10 }), /Nothing is being dragged/);
+  assert.deepEqual(physics.release(), { released: null });
+});
+
+test("a model can place an object without a cursor", async (t) => {
+  const { registry } = await registryFixture(t);
+  const built = await call(registry, "physics_build", { kind: "box", x: 100, y: 100 });
+  const moved = await call(registry, "physics_adjust", { action: "move", id: built.payload.id, x: 700, y: 250 });
+
+  assert.equal(moved.ok, true);
+  assert.equal(moved.payload.x, 700);
+  assert.equal(moved.payload.y, 250);
+});
+
+test("the canvas drags with one request in flight at a time", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const [ui, routes] = await Promise.all([
+    readFile(new URL("../public/physics.js", import.meta.url), "utf8"),
+    readFile(new URL("../server/physics-routes.mjs", import.meta.url), "utf8")
+  ]);
+
+  assert.match(ui, /pointerdown/);
+  assert.match(ui, /pointerup/);
+  // Without coalescing, a fast drag queues a request per pointer event and the
+  // object trails the cursor by the whole backlog.
+  assert.match(ui, /inFlight/);
+  assert.match(ui, /pending/);
+  // The other tools own the click; dragging must not steal it.
+  assert.match(ui, /state\.deleting \|\| state\.pendingJoint/);
+  assert.match(ui, /swallowClick/);
+  // Drag has its own route so a mouse move does not build a prose summary.
+  assert.match(routes, /\/api\/physics\/drag/);
+  assert.doesNotMatch(routes.split("/api/physics/drag")[1].split("if (req.method")[0], /perceive/);
 });

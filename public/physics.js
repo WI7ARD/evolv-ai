@@ -14,7 +14,8 @@ const $ = (selector) => document.querySelector(selector);
 
 const state = {
   api: null, toast: null, running: false, timer: null, frame: null,
-  selected: "", hovered: "", busy: false, deleting: false, pendingJoint: null
+  selected: "", hovered: "", busy: false, deleting: false, pendingJoint: null,
+  drag: null, swallowClick: false
 };
 
 // Each kind reads at a glance without a legend: machines warm, structure grey,
@@ -300,6 +301,58 @@ async function handleCanvasClick(event) {
   }
 }
 
+// Dragging.
+//
+// The world is solved in the server, so a drag is a conversation, not a local
+// mutation. A request per pointer event would queue up hundreds and the object
+// would trail the cursor by whatever the backlog was, so only one is ever in
+// flight: moves that arrive while a request is open overwrite a pending target
+// and are sent as one when it returns. The cursor stays ahead, the object
+// stays current, and nothing accumulates.
+async function pump() {
+  const drag = state.drag;
+  if (!drag || drag.inFlight || !drag.pending) return;
+  const target = drag.pending;
+  drag.pending = null;
+  drag.inFlight = true;
+  try {
+    const result = await state.api("/api/physics/drag", {
+      method: "POST",
+      body: JSON.stringify({ phase: "move", x: target.x, y: target.y, live: state.running })
+    });
+    // While the clock runs the render loop owns the frame; taking it here too
+    // would fight it and show two positions a frame apart.
+    if (!state.running) { state.frame = result.frame; draw(); }
+  } catch (error) {
+    state.toast(error.message, "error");
+    endDrag();
+    return;
+  } finally {
+    if (state.drag) state.drag.inFlight = false;
+  }
+  pump();
+}
+
+async function beginDrag(id, point, canvas, pointerId) {
+  state.drag = { id, inFlight: false, pending: null, moved: false, from: point };
+  canvas.setPointerCapture?.(pointerId);
+  try {
+    await state.api("/api/physics/drag", { method: "POST", body: JSON.stringify({ phase: "start", id, ...point }) });
+  } catch (error) {
+    state.drag = null;
+    state.toast(error.message, "error");
+  }
+}
+
+async function endDrag() {
+  if (!state.drag) return;
+  state.drag = null;
+  try {
+    const result = await state.api("/api/physics/drag", { method: "POST", body: JSON.stringify({ phase: "end" }) });
+    if (!state.running) { state.frame = result.frame; draw(); }
+  } catch { /* releasing a drag that already ended is not worth a toast */ }
+}
+
 export function initPhysics({ api, toast }) {
   state.api = api;
   state.toast = toast;
@@ -345,15 +398,51 @@ export function initPhysics({ api, toast }) {
   slider("physics-wind", "set_wind", "wind", "physics-wind-value");
 
   const canvas = $("#physics-canvas");
-  canvas?.addEventListener("click", handleCanvasClick);
-  canvas?.addEventListener("mousemove", (event) => {
-    const hit = bodyAt(worldPoint(event, canvas));
+  canvas?.addEventListener("click", (event) => {
+    // A drag ends in a click event too. Swallowing it stops a drag that
+    // happened to be in delete mode from also deleting what it just moved.
+    if (state.swallowClick) { state.swallowClick = false; return; }
+    handleCanvasClick(event);
+  });
+
+  canvas?.addEventListener("pointerdown", (event) => {
+    // The other tools own the click: dragging must not steal it.
+    if (state.deleting || state.pendingJoint || event.button !== 0) return;
+    const point = worldPoint(event, canvas);
+    const hit = bodyAt(point);
+    if (!hit) return;
+    event.preventDefault();
+    canvas.style.cursor = "grabbing";
+    beginDrag(hit, point, canvas, event.pointerId);
+  });
+
+  canvas?.addEventListener("pointermove", (event) => {
+    const point = worldPoint(event, canvas);
+    if (state.drag) {
+      if (Math.hypot(point.x - state.drag.from.x, point.y - state.drag.from.y) > 3) state.drag.moved = true;
+      state.drag.pending = point;
+      pump();
+      return;
+    }
+    const hit = bodyAt(point);
     if (hit === state.hovered) return;
     state.hovered = hit;
-    canvas.style.cursor = hit ? (state.deleting ? "not-allowed" : "pointer") : "crosshair";
+    canvas.style.cursor = hit ? (state.deleting ? "not-allowed" : "grab") : "crosshair";
     draw();
   });
-  canvas?.addEventListener("mouseleave", () => {
+
+  const finishDrag = () => {
+    if (!state.drag) return;
+    // Only a real movement swallows the click, so a plain click on an object
+    // still selects it and reports its mass.
+    state.swallowClick = state.drag.moved;
+    canvas.style.cursor = state.hovered ? "grab" : "crosshair";
+    endDrag();
+  };
+  canvas?.addEventListener("pointerup", finishDrag);
+  canvas?.addEventListener("pointercancel", finishDrag);
+  canvas?.addEventListener("pointerleave", () => {
+    finishDrag();
     if (!state.hovered) return;
     state.hovered = "";
     draw();

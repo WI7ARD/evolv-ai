@@ -57,6 +57,19 @@ export async function handlePhysicsRoutes(context) {
     return true;
   }
 
+  // Dragging gets its own route rather than going through /actions, which
+  // returns full perception. A drag fires many times a second, and building a
+  // prose summary of the scene for every mouse move is work nobody reads.
+  if (req.method === "POST" && url.pathname === "/api/physics/drag") {
+    const body = await readBody(req, bodyLimit);
+    const phase = String(body.phase || "move");
+    if (phase === "start") physicsService.grab({ id: body.id, x: body.x, y: body.y });
+    else if (phase === "end") physicsService.release();
+    else physicsService.dragTo({ x: body.x, y: body.y, live: body.live !== false });
+    json(res, 200, { phase, frame: physicsService.frame() });
+    return true;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/physics/at") {
     json(res, 200, { object: physicsService.at(url.searchParams.get("x"), url.searchParams.get("y")) });
     return true;
