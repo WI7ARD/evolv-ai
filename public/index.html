@@ -10,6 +10,7 @@
     <link rel="modulepreload" href="/sandbox.js?v=0.6.3" />
     <link rel="modulepreload" href="/world.js?v=0.6.3" />
     <link rel="modulepreload" href="/physics.js?v=0.6.3" />
+    <link rel="modulepreload" href="/lab.js?v=0.6.3" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -200,6 +201,60 @@
             </article>
           </div>
           <article id="sandbox-detail" class="mind-card agent-detail hidden" aria-live="polite"></article>
+        </section>
+
+        <section id="lab-view" class="view panel-view lab-view">
+          <div class="panel-header">
+            <div><p class="eyebrow">LAB DISPLAY</p><h1>Lab</h1><p>Time, weather, tasks, and your hand — read aloud on request. Started with <code>/lab</code>. Camera frames are read in this window and never leave the computer.</p></div>
+            <div class="panel-header-actions">
+              <button id="lab-back-to-chat" class="secondary-button" type="button">Back to chat</button>
+              <button id="lab-refresh" class="secondary-button" type="button">Refresh</button>
+              <button id="lab-speak" class="secondary-button" type="button">Speak panel</button>
+              <button id="lab-camera" class="primary-button" type="button">Start camera</button>
+            </div>
+          </div>
+
+          <div class="lab-grid">
+            <article id="lab-panel-tasks" class="lab-panel">
+              <header><span class="lab-eyebrow">TO DO</span><span id="lab-task-count" class="status-pill">0</span></header>
+              <ul id="lab-tasks" class="lab-tasks"></ul>
+            </article>
+
+            <article id="lab-panel-time" class="lab-panel lab-panel-time">
+              <p id="lab-clock" class="lab-clock">--:--:--</p>
+              <p id="lab-date" class="lab-line"></p>
+              <div class="lab-ring">
+                <canvas id="lab-hand" class="lab-hand" width="360" height="360" role="img" aria-label="Live hand tracking"></canvas>
+                <video id="lab-video" class="lab-video" playsinline muted aria-hidden="true"></video>
+              </div>
+              <p class="lab-note">Gesture <strong id="lab-gesture">—</strong> · focus <strong id="lab-focus-name">TIME</strong></p>
+            </article>
+
+            <div class="lab-column">
+              <article id="lab-panel-weather" class="lab-panel">
+                <header><span class="lab-eyebrow">WEATHER</span></header>
+                <div id="lab-weather"></div>
+                <label class="lab-field">
+                  <span>Location</span>
+                  <input id="lab-location" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Austin, Texas" />
+                </label>
+              </article>
+
+              <article class="lab-panel">
+                <header><span class="lab-eyebrow">CALENDAR</span><span id="lab-month" class="lab-note"></span></header>
+                <div id="lab-calendar" class="lab-calendar"></div>
+              </article>
+
+              <article id="lab-panel-system" class="lab-panel lab-board">
+                <header><span class="lab-eyebrow">SYSTEM</span></header>
+                <div id="lab-system-panel" class="lab-board-inner">
+                  <div class="lab-traces" aria-hidden="true"></div>
+                  <div id="lab-system"></div>
+                </div>
+              </article>
+            </div>
+          </div>
+          <p class="settings-note">Point up to move the focus ring · thumbs up to hear the focused panel · fist to stop · victory to refresh.</p>
         </section>
 
         <section id="physics-view" class="view panel-view agent-view">

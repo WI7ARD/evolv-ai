@@ -1,6 +1,7 @@
 import { initAgentWorkspace, refreshAgentWorkspace } from "./agent-workspace.js";
 import { initSandboxWorkspace, refreshSandboxes } from "./sandbox.js";
 import { initPhysics, refreshPhysics, suspendPhysics } from "./physics.js";
+import { initLab, refreshLab, suspendLab } from "./lab.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -1119,6 +1120,17 @@ async function init() {
   initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
   initSandboxWorkspace({ api, toast, project: activeProject });
   initPhysics({ api, toast });
+  initLab({
+    api, toast, project: activeProject,
+    async ensureRecognizer() {
+      await ensureGestureRecognizer();
+      return { recognizer: app.gestureRecognizer, connections: app.gestureConnections };
+    }
+  });
+  $("#lab-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
   $("#sandbox-back-to-chat")?.addEventListener("click", () => {
     switchView("chat");
     elements.prompt.focus();
@@ -1780,7 +1792,8 @@ async function addAttachments(files) {
 const COMPOSER_COMMANDS = [
   { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal },
   { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox },
-  { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") }
+  { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") },
+  { name: "/lab", description: "Open the lab display", run: () => switchView("lab") }
 ];
 
 function openSandbox() {
@@ -2674,6 +2687,10 @@ function switchView(view) {
   if (view === "physics") refreshPhysics().catch((error) => toast(error.message, "error"));
   // The simulation clock must not keep running for a view nobody is looking at.
   else suspendPhysics();
+  if (view === "lab") refreshLab().catch((error) => toast(error.message, "error"));
+  // Leaving the lab releases the camera; a webcam light that stays on after you
+  // navigate away is alarming, and rightly so.
+  else suspendLab();
 }
 
 function renderEvolution() {
