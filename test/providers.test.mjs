@@ -118,3 +118,123 @@ test("a custom endpoint that later resolves privately is refused before the key 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+// A provider's model list is not a chat menu. Offering a model that cannot
+// chat has exactly one outcome: the user picks it and the provider answers 404,
+// with nothing in the message to explain why.
+test("models that cannot chat never reach the model picker", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "evolv-chatonly-"));
+  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "p.db"), defaultPrompt: "test" });
+  const secretStore = { available: true, description: "t", async encrypt(v) { return v; }, async decrypt(v) { return v; } };
+
+  const catalogue = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    // The shape OpenAI actually returns: everything the key can touch.
+    res.end(JSON.stringify({ data: [
+      { id: "gpt-4o" }, { id: "gpt-4o-mini" }, { id: "o3-mini" }, { id: "gpt-4o-audio-preview" },
+      { id: "dall-e-3" }, { id: "whisper-1" }, { id: "tts-1" }, { id: "text-embedding-3-small" },
+      { id: "omni-moderation-latest" }, { id: "davinci-002" }, { id: "gpt-3.5-turbo-instruct" },
+      { id: "gpt-4o-realtime-preview" }
+    ] }));
+  });
+  await new Promise((resolve) => catalogue.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${catalogue.address().port}/v1`;
+
+  const service = createProviderService({ database, secretStore, ollamaUrl: "http://127.0.0.1:11434", providerBaseUrls: { openai: url } });
+  try {
+  await service.saveCredentials("openai", { apiKey: "sk-test-key-value" });
+  const offered = (await service.models("openai")).map((model) => model.id);
+
+  assert.deepEqual(offered, ["gpt-4o", "gpt-4o-mini", "o3-mini", "gpt-4o-audio-preview"]);
+  // Audio *preview* is a chat model despite the name; excluding it would be a
+  // real model missing from the dropdown.
+  assert.ok(offered.includes("gpt-4o-audio-preview"));
+  for (const rejected of ["dall-e-3", "whisper-1", "tts-1", "text-embedding-3-small", "davinci-002", "gpt-4o-realtime-preview"]) {
+    assert.ok(!offered.includes(rejected), `${rejected} cannot chat and must not be offered`);
+  }
+
+  } finally {
+    catalogue.closeAllConnections();
+    await new Promise((resolve) => catalogue.close(resolve));
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Gemini hides models that cannot hold a conversation", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "evolv-gemini-"));
+  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "p.db"), defaultPrompt: "test" });
+  const secretStore = { available: true, description: "t", async encrypt(v) { return v; }, async decrypt(v) { return v; } };
+
+  const catalogue = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ models: [
+      // Google lists gemini-2.5-pro as generateContent-only yet streaming works,
+      // so the listing is trusted and only genuinely non-conversational
+      // families are excluded by name.
+      { name: "models/gemini-2.5-flash", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/imagen-3.0-generate-002", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/veo-3.0-generate-preview", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/gemini-2.5-flash-preview-tts", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] }
+    ] }));
+  });
+  await new Promise((resolve) => catalogue.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${catalogue.address().port}/v1beta`;
+
+  const service = createProviderService({ database, secretStore, ollamaUrl: "http://127.0.0.1:11434", providerBaseUrls: { gemini: url } });
+  try {
+  await service.saveCredentials("gemini", { apiKey: "test-key-value" });
+  const offered = (await service.models("gemini")).map((model) => model.id);
+
+  assert.deepEqual(offered, ["gemini-2.5-flash"]);
+
+  } finally {
+    catalogue.closeAllConnections();
+    await new Promise((resolve) => catalogue.close(resolve));
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a failed provider call repeats what the provider actually said", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "evolv-detail-"));
+  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "p.db"), defaultPrompt: "test" });
+  const secretStore = { available: true, description: "t", async encrypt(v) { return v; }, async decrypt(v) { return v; } };
+
+  const upstream = http.createServer((req, res) => {
+    if (req.url.endsWith("/models")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: "gpt-4o" }] }));
+      return;
+    }
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "The model `gpt-4o` does not exist or you do not have access to it.", code: "model_not_found" } }));
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${upstream.address().port}/v1`;
+
+  const service = createProviderService({ database, secretStore, ollamaUrl: "http://127.0.0.1:11434", providerBaseUrls: { openai: url } });
+  try {
+  await service.saveCredentials("openai", { apiKey: "sk-test-key-value" });
+
+  // "OpenAI chat failed (404)" is a dead end. The provider already explained
+  // itself; the only job here is not to throw that explanation away.
+  await assert.rejects(
+    () => service.streamRound("openai", {
+      model: "gpt-4o", messages: [{ role: "user", content: "hi" }], options: { temperature: 0 }
+    }, AbortSignal.timeout(5000), () => {}),
+    (error) => {
+      assert.match(error.message, /does not exist or you do not have access/);
+      assert.match(error.message, /404/);
+      return true;
+    }
+  );
+
+  } finally {
+    upstream.closeAllConnections();
+    await new Promise((resolve) => upstream.close(resolve));
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
