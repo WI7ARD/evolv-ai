@@ -17,7 +17,10 @@ function statusLabel(value) {
 function budgets(name) {
   if (name === "small") return { maxSteps: 5, maxRuntimeMs: 300000, maxToolCalls: 10, maxRetries: 1, maxTokens: 20000, maxCostUnits: 3 };
   if (name === "focused") return { maxSteps: 8, maxRuntimeMs: 600000, maxToolCalls: 16, maxRetries: 2, maxTokens: 40000, maxCostUnits: 6 };
-  return { maxSteps: 12, maxRuntimeMs: 1200000, maxToolCalls: 24, maxRetries: 2, maxTokens: 65536, maxCostUnits: 10 };
+  // The thorough preset stops rationing tool calls: a step may retry, and a
+  // run that does real work should not stall on a budget rather than on the
+  // work. Steps still bound how long a plan can be.
+  return { maxSteps: 12, maxRuntimeMs: 1200000, maxToolCalls: 100, maxRetries: 2, maxTokens: 262144, maxCostUnits: 10 };
 }
 
 async function populateModels() {
