@@ -308,7 +308,7 @@ test("exposes bounded tool configuration", async () => {
   // are here for the same reason turned up further: their world is memory, so
   // there is nothing to promote and nothing to undo.
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "sandbox").map((tool) => tool.name).sort(), [
-    "open_sandbox", "physics_adjust", "physics_build", "physics_run",
+    "open_sandbox", "physics_adjust", "physics_build", "physics_connect", "physics_run",
     "sandbox_validate", "sandbox_write_file"
   ]);
   assert.ok(payload.tools.filter((tool) => tool.risk === "sandbox").every((tool) => tool.riskPolicy?.automatic === true));

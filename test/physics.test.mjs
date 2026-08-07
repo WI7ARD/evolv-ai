@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createDatabase } from "../lib/database.mjs";
 import { createToolRegistry } from "../lib/tools.mjs";
-import { PhysicsService, MAX_BODIES, WORLD_HEIGHT } from "../lib/physics.mjs";
+import { PhysicsService, MAX_BODIES, WORLD_HEIGHT, PHYSICS_KINDS, MATERIALS } from "../lib/physics.mjs";
 
 async function registryFixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "evolv-physics-"));
@@ -162,7 +162,7 @@ test("a model can build, run, and see the sandbox through tools", async (t) => {
   const { registry } = await registryFixture(t);
 
   const exposed = registry.schemas({}).map((tool) => tool.function.name).filter((name) => name.startsWith("physics_"));
-  assert.deepEqual(exposed.sort(), ["physics_adjust", "physics_build", "physics_look", "physics_run"]);
+  assert.deepEqual(exposed.sort(), ["physics_adjust", "physics_build", "physics_connect", "physics_look", "physics_run"]);
 
   const built = await call(registry, "physics_build", { kind: "circle", x: 400, y: 50, radius: 30, note: "test ball" });
   assert.equal(built.ok, true);
@@ -187,7 +187,7 @@ test("the physics tools never ask for approval and never touch anything real", a
   const { registry } = await registryFixture(t);
   const physicsTools = registry.list().filter((tool) => tool.name.startsWith("physics_"));
 
-  assert.equal(physicsTools.length, 4);
+  assert.equal(physicsTools.length, 5);
   for (const tool of physicsTools) {
     // A scene is memory. Prompting to drop a box would train someone to
     // approve without reading, which is what makes the real prompts work.
@@ -197,7 +197,7 @@ test("the physics tools never ask for approval and never touch anything real", a
 
   const bad = await registry.execute("physics_build", { kind: "pyramid", x: 10, y: 10 }, {});
   assert.equal(bad.ok, false);
-  assert.match(bad.output, /box, circle, ramp, or motor/);
+  assert.match(bad.output, /kind must be one of: box, circle/);
 });
 
 test("the physics sandbox is reachable and the page carries no engine of its own", async () => {
@@ -216,10 +216,14 @@ test("the physics sandbox is reachable and the page carries no engine of its own
   assert.match(app, /initPhysics\(\{ api, toast \}\)/);
   assert.match(html, /id="physics-back-to-chat"/);
 
-  // Every control in the toolbar must have a handler.
-  for (const control of ["physics-play", "physics-add-box", "physics-add-circle", "physics-add-motor", "physics-add-ramp", "physics-clear", "physics-gravity"]) {
+  // Every control must have a handler. The drop buttons are checked separately
+  // against the engine's own list, since they are data rather than ids.
+  // The id, not the selector spelling: the sliders are wired through a shared
+  // helper, so "#physics-gravity" never appears literally even though it is
+  // handled. Matching the id keeps the check honest without dictating style.
+  for (const control of ["physics-play", "physics-clear", "physics-gravity", "physics-wind", "physics-material", "physics-delete-mode", "physics-tools"]) {
     assert.match(html, new RegExp(`id="${control}"`), `${control} is missing from the page`);
-    assert.match(ui, new RegExp(`#${control}`), `${control} has no handler`);
+    assert.match(ui, new RegExp(control), `${control} has no handler`);
   }
 
   // The CSP is script-src 'self', so a CDN would silently fail to load and the
@@ -237,4 +241,193 @@ test("the physics sandbox is reachable and the page carries no engine of its own
   // Reads are split by purpose: geometry for the canvas, meaning for a reader.
   assert.match(routes, /\/api\/physics\/frame/);
   assert.match(routes, /physicsService\.perceive\(\)/);
+});
+
+test("every advertised shape can actually be built", () => {
+  const physics = new PhysicsService();
+  const built = PHYSICS_KINDS.map((kind) => physics.apply(`create_${kind}`, { x: 400, y: 200 }));
+
+  assert.equal(built.length, PHYSICS_KINDS.length);
+  assert.deepEqual(built.map((object) => object.kind), PHYSICS_KINDS);
+  assert.equal(physics.perceive().objectCount, PHYSICS_KINDS.length);
+  // Prefabs are several bodies but one object; that is the whole point of the
+  // group model, and the object count above is what proves it.
+  assert.ok(physics.perceive().partCount > PHYSICS_KINDS.length);
+});
+
+test("a star is genuinely concave rather than quietly hulled", () => {
+  // Matter can only decompose concave outlines with the optional poly-decomp
+  // package, which is absent. Bodies.fromVertices does not fail without it —
+  // it returns the convex hull, so a five-pointed star would silently become a
+  // pentagon. Building it from parts is what keeps the points.
+  const physics = new PhysicsService();
+  physics.addStar({ x: 400, y: 300, points: 5, radius: 50 });
+  const pieces = physics.frame().bodies;
+  assert.equal(pieces.length, 5, "a star must draw as five spikes, not one blob");
+  assert.ok(pieces.every((piece) => piece.vertices.length >= 3));
+});
+
+test("a gear stays on its axle and a car drives down a slope", () => {
+  const gears = new PhysicsService();
+  const gear = gears.addGear({ x: 400, y: 300, radius: 50, teeth: 8, speed: 0.25 });
+  gears.step(60);
+  const spun = gears.describe(gear.id);
+  assert.ok(Math.abs(spun.angleDegrees) > 100, "a driven gear must turn");
+  assert.ok(Math.abs(spun.x - 400) < 5 && Math.abs(spun.y - 300) < 5, "a gear must not wander off its pin");
+  assert.equal(gears.frame().bodies.length, 9, "a gear draws as a hub plus its teeth");
+
+  const road = new PhysicsService();
+  road.addRamp({ x: 400, y: 420, width: 700, height: 20, angle: 0.18 });
+  const car = road.addCar({ x: 180, y: 300 });
+  assert.equal(car.parts, 3, "a car is a chassis and two wheels");
+  road.step(240);
+  assert.ok(road.describe(car.id).x > 260, "a car on a slope must roll downhill");
+});
+
+test("materials change how things behave, not just what they are called", () => {
+  const drop = (material) => {
+    const physics = new PhysicsService();
+    const ball = physics.addCircle({ x: 400, y: 100, radius: 25, material });
+    physics.step(60);
+    let highest = WORLD_HEIGHT;
+    for (let index = 0; index < 200; index += 1) {
+      physics.step(1);
+      highest = Math.min(highest, physics.describe(ball.id).y);
+    }
+    return { mass: physics.describe(ball.id).mass, bounce: WORLD_HEIGHT - highest };
+  };
+  const plain = drop("default");
+  assert.ok(drop("rubber").bounce > plain.bounce * 2, "rubber must visibly out-bounce the default");
+  assert.ok(drop("metal").mass > plain.mass * 4, "metal must be much heavier");
+  assert.ok(drop("wood").mass < plain.mass, "wood must be lighter");
+
+  const slide = (material) => {
+    const physics = new PhysicsService();
+    physics.addRamp({ x: 400, y: 400, width: 500, height: 20, angle: 0.25 });
+    const box = physics.addBox({ x: 250, y: 300, width: 40, height: 40, material });
+    physics.step(180);
+    return physics.describe(box.id).x;
+  };
+  assert.ok(slide("ice") > slide("default") + 100, "ice must slide further than the default");
+  assert.throws(() => new PhysicsService().addBox({ x: 1, y: 1, material: "cheese" }), /Unknown material/);
+});
+
+test("wind pushes everything that can move and nothing that cannot", () => {
+  const physics = new PhysicsService();
+  physics.setGravity(0);
+  const light = physics.addCircle({ x: 400, y: 300, radius: 15, material: "wood" });
+  const heavy = physics.addCircle({ x: 400, y: 200, radius: 15, material: "metal" });
+  const fixed = physics.addRamp({ x: 400, y: 500, width: 200, height: 20, angle: 0 });
+
+  physics.setWind(2);
+  physics.step(120);
+  const lightMoved = physics.describe(light.id).x - 400;
+  const heavyMoved = physics.describe(heavy.id).x - 400;
+
+  assert.ok(lightMoved > 50, "wind must move a light object");
+  // Scaled by mass, so wind accelerates everything alike. Otherwise heavy
+  // things ignore it and light things fly off, which reads as a bug.
+  assert.ok(Math.abs(lightMoved - heavyMoved) < 5, "wind must not favour light objects");
+  assert.equal(physics.describe(fixed.id).x, 400, "wind must never move a fixed object");
+  assert.equal(physics.perceive().wind, 2);
+  assert.throws(() => physics.setWind(99), /between/);
+});
+
+test("springs pull, pins hold, and a deleted end takes its joint with it", () => {
+  const physics = new PhysicsService();
+  physics.setGravity(0);
+  const a = physics.addCircle({ x: 200, y: 300, radius: 20 });
+  const b = physics.addCircle({ x: 600, y: 300, radius: 20 });
+
+  const spring = physics.addSpring({ a: a.id, b: b.id, length: 100, stiffness: 0.02 });
+  assert.deepEqual(spring.connects, [a.id, b.id]);
+  physics.step(180);
+  const gap = Math.abs(physics.describe(a.id).x - physics.describe(b.id).x);
+  assert.ok(Math.abs(gap - 100) < 25, `a spring must settle near its rest length, got ${gap}`);
+
+  // A joint is drawn, or the scene looks broken.
+  assert.ok(physics.frame().links.some((link) => link.springy), "a spring must appear in the frame");
+
+  physics.remove(a.id);
+  assert.equal(physics.perceive().objects.some((object) => object.kind === "spring"), false,
+    "a joint whose end is gone would pull on nothing");
+  assert.throws(() => physics.addPin({ a: b.id, b: b.id }), /two different objects/);
+});
+
+test("a prefab moves and dies as one object", () => {
+  const physics = new PhysicsService();
+  const ragdoll = physics.addRagdoll({ x: 400, y: 200 });
+  assert.ok(ragdoll.parts > 5, "a ragdoll is several bodies");
+  assert.equal(physics.perceive().objectCount, 1, "but it is one object to a reader");
+
+  // Any limb identifies the whole figure, which is what a click means.
+  physics.step(30);
+  const limb = physics.frame().bodies[3];
+  assert.equal(physics.at(limb.x, limb.y)?.id, ragdoll.id);
+
+  physics.push({ id: ragdoll.id, vx: 8, vy: 0 });
+  physics.step(30);
+  assert.ok(physics.describe(ragdoll.id).x > 400, "pushing a ragdoll must move the whole figure");
+
+  physics.remove(ragdoll.id);
+  assert.equal(physics.perceive().partCount, 0, "removing a prefab must leave no orphan limbs");
+});
+
+test("the toolbar, the tool schema, and the dispatch switch cannot drift apart", async (t) => {
+  const { readFile } = await import("node:fs/promises");
+  const [html, ui] = await Promise.all([
+    readFile(new URL("../public/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/physics.js", import.meta.url), "utf8")
+  ]);
+
+  // Every kind the engine can build has a button, and every button names a
+  // kind the engine can build.
+  const buttons = [...html.matchAll(/data-kind="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual([...buttons].sort(), [...PHYSICS_KINDS].sort());
+  for (const joint of ["spring", "pin"]) assert.match(html, new RegExp(`data-joint="${joint}"`));
+
+  // The material dropdown must offer exactly what the engine accepts. Scoped
+  // to that select — the page has other dropdowns whose options are unrelated.
+  const select = html.match(/<select id="physics-material">([\s\S]*?)<\/select>/)?.[1] || "";
+  const options = [...select.matchAll(/value="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(options.sort(), Object.keys(MATERIALS).sort());
+  assert.match(html, /id="physics-wind"/);
+  assert.match(html, /id="physics-delete-mode"/);
+
+  // Hover is resolved in the page on purpose: a request per mouse move would
+  // lag the cursor. It is hit-testing, not simulation.
+  assert.match(ui, /mousemove/);
+  assert.match(ui, /pointInPolygon/);
+  assert.doesNotMatch(ui, /Engine\.update|Bodies\.rectangle|import .*matter/i);
+
+  // The model can reach every kind the toolbar can.
+  const { registry } = await registryFixture(t);
+  const build = registry.schemas({}).find((tool) => tool.function.name === "physics_build");
+  assert.deepEqual([...build.function.parameters.properties.kind.enum].sort(), [...PHYSICS_KINDS].sort());
+  const adjust = registry.schemas({}).find((tool) => tool.function.name === "physics_adjust");
+  assert.ok(adjust.function.parameters.properties.action.enum.includes("set_wind"));
+});
+
+test("a model can build a prefab, join two objects, and blow them sideways", async (t) => {
+  const { registry } = await registryFixture(t);
+
+  const car = await call(registry, "physics_build", { kind: "car", x: 300, y: 150, material: "metal" });
+  assert.equal(car.ok, true);
+  assert.equal(car.payload.kind, "car");
+  assert.equal(car.payload.material, "metal");
+
+  const ball = await call(registry, "physics_build", { kind: "circle", x: 500, y: 150 });
+  const joined = await call(registry, "physics_connect", { joint: "spring", a: car.payload.id, b: ball.payload.id });
+  assert.equal(joined.ok, true);
+  assert.deepEqual(joined.payload.connects, [car.payload.id, ball.payload.id]);
+
+  const windy = await call(registry, "physics_adjust", { action: "set_wind", wind: -2 });
+  assert.equal(windy.payload.wind, -2);
+  const ran = await call(registry, "physics_run", { steps: 120 });
+  assert.equal(ran.payload.scene.wind, -2);
+  assert.match(ran.payload.scene.summary, /wind -2/);
+
+  const bad = await registry.execute("physics_connect", { joint: "spring", a: "ghost-9", b: ball.payload.id }, {});
+  assert.equal(bad.ok, false);
+  assert.match(bad.output, /No object named ghost-9/);
 });

@@ -210,17 +210,46 @@
             </div>
           </div>
           <article class="mind-card">
-            <div class="physics-toolbar">
+            <div class="physics-controls">
               <button id="physics-play" class="primary-button" type="button">Run</button>
-              <button id="physics-add-box" class="secondary-button" type="button">Box</button>
-              <button id="physics-add-circle" class="secondary-button" type="button">Circle</button>
-              <button id="physics-add-motor" class="secondary-button" type="button">Motor</button>
-              <button id="physics-add-ramp" class="secondary-button" type="button">Ramp</button>
-              <label class="physics-gravity">
+              <label class="physics-field">
+                <span>Material</span>
+                <select id="physics-material">
+                  <option value="default">Default</option>
+                  <option value="rubber">Bouncy rubber</option>
+                  <option value="metal">Heavy metal</option>
+                  <option value="wood">Light wood</option>
+                  <option value="ice">Ice</option>
+                </select>
+              </label>
+              <label class="physics-field">
                 <span>Gravity</span>
                 <input id="physics-gravity" type="range" min="-2" max="3" step="0.1" value="1" />
+                <output id="physics-gravity-value">1.0</output>
               </label>
-              <button id="physics-clear" class="secondary-button physics-danger" type="button">Clear</button>
+              <label class="physics-field">
+                <span>Wind</span>
+                <input id="physics-wind" type="range" min="-3" max="3" step="0.1" value="0" />
+                <output id="physics-wind-value">0.0</output>
+              </label>
+              <button id="physics-delete-mode" class="secondary-button" type="button" aria-pressed="false">Delete tool</button>
+              <button id="physics-clear" class="secondary-button physics-danger" type="button">Clear all</button>
+            </div>
+            <div id="physics-tools" class="physics-tools" role="group" aria-label="Objects to drop into the scene">
+              <button class="physics-tool" type="button" data-kind="box">Box</button>
+              <button class="physics-tool" type="button" data-kind="circle">Circle</button>
+              <button class="physics-tool" type="button" data-kind="triangle">Triangle</button>
+              <button class="physics-tool" type="button" data-kind="polygon">Polygon</button>
+              <button class="physics-tool" type="button" data-kind="star">Star</button>
+              <button class="physics-tool" type="button" data-kind="ramp">Ramp</button>
+              <button class="physics-tool" type="button" data-kind="motor">Motor</button>
+              <button class="physics-tool" type="button" data-kind="gear">Gear</button>
+              <button class="physics-tool" type="button" data-kind="chain">Chain</button>
+              <button class="physics-tool" type="button" data-kind="rope">Rope</button>
+              <button class="physics-tool" type="button" data-kind="ragdoll">Ragdoll</button>
+              <button class="physics-tool" type="button" data-kind="car">Car</button>
+              <button class="physics-tool physics-joint" type="button" data-joint="spring">Spring</button>
+              <button class="physics-tool physics-joint" type="button" data-joint="pin">Pin joint</button>
             </div>
             <canvas id="physics-canvas" class="physics-canvas" role="img" aria-label="The physics sandbox"></canvas>
             <p id="physics-caption" class="settings-note">Empty scene. Drop something in.</p>
