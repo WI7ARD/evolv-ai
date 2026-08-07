@@ -8,12 +8,9 @@ const $ = (selector) => document.querySelector(selector);
 
 const state = {
   api: null, toast: null, project: null,
-  clock: null, poll: null, focus: 0,
+  clock: null, poll: null,
   data: { tasks: [], weather: null }
 };
-
-// The order the focus ring walks. Each panel knows how to say itself.
-const PANELS = ["time", "weather", "tasks", "system"];
 
 function place() {
   return localStorage.getItem("evolv:lab-location") || "";
@@ -108,20 +105,20 @@ function renderSystem() {
   host.innerHTML = lines.map((line) => `<p>${line}</p>`).join("");
 }
 
-// What the focused panel would say if asked. Kept separate from the markup so
-// the spoken version reads as a sentence rather than as scraped labels, and
-// shown on screen so the Speak button is never a surprise.
-function spokenSummary() {
+// What a panel would say if asked. Kept separate from the markup so the spoken
+// version reads as a sentence rather than as scraped labels, and shown on
+// screen for the time panel so its Speak button is never a surprise.
+function spokenSummary(panel) {
   const now = new Date();
-  if (PANELS[state.focus] === "time") {
+  if (panel === "time") {
     return `It is ${now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} on ${now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}.`;
   }
-  if (PANELS[state.focus] === "weather") {
+  if (panel === "weather") {
     const weather = state.data.weather;
     if (!weather) return "No weather reading yet.";
     return `${weather.place}: ${Math.round(weather.temperature)} degrees and ${weather.conditions}, feels like ${Math.round(weather.feelsLike)}.`;
   }
-  if (PANELS[state.focus] === "tasks") {
+  if (panel === "tasks") {
     const tasks = state.data.tasks || [];
     if (!tasks.length) return "Nothing is open.";
     return `${tasks.length} open task${tasks.length === 1 ? "" : "s"}. ${tasks.slice(0, 3).map((task) => task.title).join(". ")}.`;
@@ -129,22 +126,20 @@ function spokenSummary() {
   return "Evolv is running locally. Conversations, feedback, and settings stay on this computer.";
 }
 
-function renderFocus() {
-  PANELS.forEach((name, index) => {
-    $(`#lab-panel-${name}`)?.classList.toggle("focused", index === state.focus);
-  });
-  $("#lab-focus-name").textContent = PANELS[state.focus].toUpperCase();
+function renderSummary() {
   const summary = $("#lab-summary");
-  if (summary) summary.textContent = spokenSummary();
+  if (summary) summary.textContent = spokenSummary("time");
 }
 
-function speakFocused() {
+function speak(panel) {
   if (!("speechSynthesis" in window)) {
     state.toast("This system has no speech voices installed.", "error");
     return;
   }
+  // Cancel first: without it a second press queues behind the first and the
+  // display talks over itself for the next half minute.
   speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(spokenSummary());
+  const utterance = new SpeechSynthesisUtterance(spokenSummary(panel));
   utterance.rate = 1;
   $("#lab-system-panel")?.classList.add("talking");
   utterance.onend = () => $("#lab-system-panel")?.classList.remove("talking");
@@ -168,7 +163,7 @@ async function refresh() {
     else renderWeather();
     renderTasks();
     renderSystem();
-    renderFocus();
+    renderSummary();
   } catch (error) {
     state.toast(error.message, "error");
   }
@@ -179,11 +174,13 @@ export function initLab({ api, toast, project }) {
   state.toast = toast;
   state.project = project || (() => null);
 
-  $("#lab-next")?.addEventListener("click", () => {
-    state.focus = (state.focus + 1) % PANELS.length;
-    renderFocus();
+  // One delegated handler: a panel declares what it speaks, so adding a panel
+  // needs no wiring here.
+  $("#lab-view")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-speak]");
+    if (button) speak(button.dataset.speak);
   });
-  $("#lab-speak")?.addEventListener("click", speakFocused);
+  $("#lab-stop-speech")?.addEventListener("click", silence);
   $("#lab-refresh")?.addEventListener("click", () => refresh());
   $("#lab-location")?.addEventListener("change", (event) => {
     localStorage.setItem("evolv:lab-location", event.target.value.trim().slice(0, 120));
@@ -196,7 +193,7 @@ export function initLab({ api, toast, project }) {
 export async function refreshLab() {
   renderClock();
   renderCalendar();
-  renderFocus();
+  renderSummary();
   if (!state.clock) state.clock = setInterval(renderClock, 1000);
   if (!state.poll) state.poll = setInterval(refresh, 10 * 60 * 1000);
   await refresh();

@@ -133,12 +133,26 @@ test("every control the display advertises is one it actually handles", async ()
     readFile(new URL("../public/index.html", import.meta.url), "utf8"),
     readFile(new URL("../public/lab.js", import.meta.url), "utf8")
   ]);
-  for (const control of ["lab-next", "lab-speak", "lab-refresh", "lab-location", "lab-back-to-chat"]) {
+  // Back-to-chat is wired in app.js with the other view switches; the rest
+  // belong to the display itself.
+  const app = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  for (const control of ["lab-refresh", "lab-location", "lab-back-to-chat", "lab-stop-speech"]) {
     assert.match(html, new RegExp(`id="${control}"`), `${control} is missing from the page`);
+    assert.ok(lab.includes(control) || app.includes(control), `${control} has no handler`);
   }
-  for (const control of ["lab-next", "lab-speak", "lab-refresh", "lab-location"]) {
-    assert.match(lab, new RegExp(control), `${control} has no handler`);
+
+  // Every panel speaks for itself, and every button names a panel the code can
+  // actually say. A Speak button wired to a name spokenSummary does not know
+  // would silently read the system fallback instead.
+  const speakable = [...html.matchAll(/data-speak="([a-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(speakable.sort(), ["system", "tasks", "time", "weather"]);
+  for (const panel of speakable) {
+    if (panel === "system") continue;
+    assert.match(lab, new RegExp(`panel === "${panel}"`), `${panel} has a Speak button but no spoken form`);
   }
-  // The hint must describe the buttons that exist, not gestures that no longer do.
+
+  // The focus ring is gone; nothing may still refer to it.
+  assert.doesNotMatch(lab, /state\.focus|renderFocus|PANELS/);
+  assert.doesNotMatch(html, /lab-focus-name|id="lab-next"/);
   assert.doesNotMatch(html, /Point up to move|thumbs up to hear|victory to refresh/i);
 });

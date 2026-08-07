@@ -21,7 +21,9 @@ test("the agent is reached with /agent in chat rather than a sidebar tab", async
   assert.match(app, /agent-back-to-chat/);
 
   // The command is discoverable from the composer.
-  assert.match(html, /\/agent to run a goal/);
+  // The composer hint must name the command. Matching the token rather than a
+  // sentence keeps the hint free to be reworded without a false failure.
+  assert.match(html.match(/id="composer-hint"[^>]*>([^<]*)</)?.[1] || "", /\/agent\b/);
   assert.match(app, /COMPOSER_COMMANDS/);
   assert.match(app, /name: "\/agent"/);
 });

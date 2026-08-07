@@ -13,7 +13,8 @@ test("the sandbox is reached from chat and never offers a way to write directly"
   // Reached by command, like the agent — no sidebar entry.
   assert.doesNotMatch(html, /data-view="sandbox"/);
   assert.match(html, /id="sandbox-view"/);
-  assert.match(html, /\/sandbox to review simulations/);
+  // The composer hint must name the command; the exact wording is free to change.
+  assert.match(html.match(/id="composer-hint"[^>]*>([^<]*)</)?.[1] || "", /\/sandbox\b/);
   assert.match(app, /name: "\/sandbox"/);
   assert.match(html, /id="sandbox-back-to-chat"/);
 

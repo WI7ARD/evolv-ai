@@ -841,8 +841,18 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
   background: linear-gradient(180deg, rgba(93, 240, 205, .05), transparent 60%), #0b0f10;
   transition: border-color .25s, box-shadow .25s;
 }
-.lab-panel.focused { border-color: var(--glow); box-shadow: 0 0 0 1px rgba(93, 240, 205, .25), 0 0 26px rgba(93, 240, 205, .12); }
+.lab-panel:hover { border-color: rgba(93, 240, 205, .32); }
 .lab-panel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 10px; }
+.lab-header-right { display: inline-flex; align-items: center; gap: 8px; }
+/* Each panel reads itself, so the button lives on the panel rather than in a
+   toolbar that would first need a way to say which panel it meant. */
+.lab-speak {
+  border: 1px solid rgba(93, 240, 205, .28); background: transparent; color: var(--glow);
+  border-radius: 6px; padding: 5px 10px; font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  font-family: inherit; cursor: pointer; transition: background .15s, border-color .15s;
+}
+.lab-speak:hover { background: rgba(93, 240, 205, .12); border-color: var(--glow); }
+.lab-panel-time .lab-speak { margin-top: 16px; padding: 8px 22px; }
 .lab-eyebrow { font-size: 10px; letter-spacing: .16em; color: var(--glow); font-weight: 700; }
 .lab-note { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
 .lab-line { font-size: 13px; color: var(--ink); margin: 4px 0 0; }
