@@ -11,7 +11,7 @@
 // physics_build cannot drift apart.
 
 export async function handlePhysicsRoutes(context) {
-  const { req, res, url, readBody, bodyLimit, json, physicsService } = context;
+  const { req, res, url, readBody, bodyLimit, json, physicsService, database } = context;
   if (!url.pathname.startsWith("/api/physics")) return false;
   if (!physicsService) {
     throw Object.assign(new Error("The physics sandbox is unavailable in this build."), {
@@ -78,6 +78,45 @@ export async function handlePhysicsRoutes(context) {
   if (req.method === "DELETE" && url.pathname === "/api/physics") {
     json(res, 200, physicsService.clear());
     return true;
+  }
+
+  // Reset undoes a run without touching what was built.
+  if (req.method === "POST" && url.pathname === "/api/physics/reset") {
+    json(res, 200, { scene: physicsService.reset() });
+    return true;
+  }
+
+  // Saved scenes. The engine holds no database handle — it stays memory-only,
+  // which is what keeps its tools in the automatic risk tier — so persistence
+  // lives out here, moving opaque snapshots between the two.
+  if (url.pathname === "/api/physics/scenes") {
+    if (req.method === "GET") {
+      json(res, 200, { scenes: database.listPhysicsScenes({ limit: url.searchParams.get("limit") || 50 }) });
+      return true;
+    }
+    if (req.method === "POST") {
+      const body = await readBody(req, bodyLimit);
+      const snapshot = physicsService.snapshot();
+      json(res, 201, database.savePhysicsScene({
+        name: body.name, snapshot, objectCount: snapshot.objects.length + snapshot.joints.length
+      }));
+      return true;
+    }
+  }
+
+  const sceneMatch = url.pathname.match(/^\/api\/physics\/scenes\/([^/]+)(?:\/(load))?$/);
+  if (sceneMatch) {
+    const id = decodeURIComponent(sceneMatch[1]);
+    if (req.method === "POST" && sceneMatch[2] === "load") {
+      const saved = database.getPhysicsScene(id);
+      if (!saved) throw Object.assign(new Error("That scene no longer exists."), { status: 404, code: "SCENE_NOT_FOUND" });
+      json(res, 200, { name: saved.name, scene: physicsService.restore(saved.snapshot) });
+      return true;
+    }
+    if (req.method === "DELETE") {
+      json(res, 200, { removed: database.deletePhysicsScene(id) });
+      return true;
+    }
   }
 
   return false;

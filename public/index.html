@@ -283,8 +283,18 @@
                 <input id="physics-wind" type="range" min="-3" max="3" step="0.1" value="0" />
                 <output id="physics-wind-value">0.0</output>
               </label>
+              <button id="physics-reset" class="secondary-button" type="button" title="Return to how the scene looked before you pressed Run">Reset</button>
               <button id="physics-delete-mode" class="secondary-button" type="button" aria-pressed="false">Delete tool</button>
               <button id="physics-clear" class="secondary-button physics-danger" type="button">Clear all</button>
+            </div>
+            <div class="physics-scenes">
+              <label class="sr-only" for="physics-scene-name">Scene name</label>
+              <input id="physics-scene-name" type="text" maxlength="80" autocomplete="off" placeholder="Name this scene" />
+              <button id="physics-save" class="secondary-button" type="button">Save</button>
+              <label class="sr-only" for="physics-scene-list">Saved scenes</label>
+              <select id="physics-scene-list"><option value="">Saved scenes…</option></select>
+              <button id="physics-load" class="secondary-button" type="button">Load</button>
+              <button id="physics-scene-delete" class="secondary-button physics-danger" type="button">Delete scene</button>
             </div>
             <div id="physics-tools" class="physics-tools" role="group" aria-label="Objects to drop into the scene">
               <button class="physics-tool" type="button" data-kind="box">Box</button>

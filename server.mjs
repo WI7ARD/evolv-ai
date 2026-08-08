@@ -2491,7 +2491,7 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (await handleSandboxRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, sandboxService })) return;
-    if (await handlePhysicsRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, physicsService })) return;
+    if (await handlePhysicsRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, physicsService, database })) return;
     if (await handleHudRoutes({ req, res, url, json, toolRegistry, projectService })) return;
     if (await handleGoalRoutes({
       req, res, url, authenticated, readBody, bodyLimit: SMALL_BODY, json, goalRunner, agentRuntime, vaultService,

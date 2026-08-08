@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createDatabase } from "../lib/database.mjs";
 import { createToolRegistry } from "../lib/tools.mjs";
-import { PhysicsService, MAX_BODIES, WORLD_HEIGHT, PHYSICS_KINDS, MATERIALS } from "../lib/physics.mjs";
+import { handlePhysicsRoutes } from "../server/physics-routes.mjs";
+import { PhysicsService, MAX_BODIES, WORLD_HEIGHT, PHYSICS_KINDS, MATERIALS, SCENE_VERSION } from "../lib/physics.mjs";
 
 async function registryFixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "evolv-physics-"));
@@ -546,4 +547,194 @@ test("the canvas drags with one request in flight at a time", async () => {
   // Drag has its own route so a mouse move does not build a prose summary.
   assert.match(routes, /\/api\/physics\/drag/);
   assert.doesNotMatch(routes.split("/api/physics/drag")[1].split("if (req.method")[0], /perceive/);
+});
+
+test("a saved scene rebuilds exactly, in a fresh engine", () => {
+  const build = () => {
+    const physics = new PhysicsService();
+    physics.addRamp({ x: 400, y: 420, width: 380, height: 20, angle: 0.35, material: "wood" });
+    const ball = physics.addCircle({ x: 260, y: 200, radius: 22, material: "rubber" });
+    physics.addRagdoll({ x: 500, y: 120 });
+    const car = physics.addCar({ x: 150, y: 520, material: "metal" });
+    physics.addSpring({ a: ball.id, b: car.id, length: 120, stiffness: 0.03 });
+    physics.setGravity(0.9);
+    physics.setWind(0.4);
+    physics.step(200);
+    return physics;
+  };
+
+  const original = build();
+  const snapshot = original.snapshot();
+  const restored = new PhysicsService();
+  restored.restore(snapshot);
+
+  const before = original.perceive();
+  const after = restored.perceive();
+
+  // Contacts are solver output, not state: a restored world has not stepped
+  // yet, so it has no pairs. Everything that is actually state must match.
+  const { contacts: _ignoredBefore, ...beforeState } = before;
+  const { contacts: _ignoredAfter, ...afterState } = after;
+  assert.deepEqual(afterState, beforeState);
+
+  // Ids survive, so the spring still joins the two objects it named.
+  const spring = after.objects.find((object) => object.kind === "spring");
+  assert.deepEqual(spring.connects, before.objects.find((object) => object.kind === "spring").connects);
+
+  // A prefab keeps its pose, not just its centre: construction alone would
+  // rebuild the ragdoll standing up rather than however it landed.
+  assert.deepEqual(restored.frame().bodies.map((body) => [body.x, body.y]),
+    original.frame().bodies.map((body) => [body.x, body.y]));
+});
+
+test("reset returns a run scene to how it was built", () => {
+  const physics = new PhysicsService();
+  const ball = physics.addCircle({ x: 400, y: 80, radius: 25 });
+  physics.addRamp({ x: 400, y: 400, width: 300, height: 20, angle: 0.3 });
+  const start = physics.describe(ball.id);
+
+  physics.step(300);
+  assert.ok(physics.describe(ball.id).y > start.y + 100, "the ball should have moved");
+
+  physics.reset();
+  assert.equal(physics.describe(ball.id).x, start.x);
+  assert.equal(physics.describe(ball.id).y, start.y);
+  assert.equal(physics.perceive().elapsedSeconds, 0);
+
+  // Repeatable: reset is not a one-shot undo.
+  physics.step(300);
+  physics.reset();
+  assert.equal(physics.describe(ball.id).y, start.y);
+
+  assert.throws(() => new PhysicsService().reset(), /has not been run yet/);
+});
+
+test("adding something after a run moves the point reset returns to", () => {
+  const physics = new PhysicsService();
+  const first = physics.addCircle({ x: 200, y: 100, radius: 20 });
+  physics.step(120);
+  const settled = physics.describe(first.id).y;
+
+  // The mark is taken at the first step after any structural change, so the
+  // new object joins the scene reset returns to rather than vanishing from it.
+  const second = physics.addBox({ x: 500, y: 100, width: 40, height: 40 });
+  physics.step(120);
+  physics.reset();
+
+  assert.equal(physics.perceive().objectCount, 2, "reset must not delete what was added");
+  assert.equal(physics.describe(first.id).y, settled);
+  assert.equal(physics.describe(second.id).y, 100);
+});
+
+test("a scene from a newer build is refused rather than half-applied", () => {
+  const physics = new PhysicsService();
+  physics.addCircle({ x: 200, y: 100, radius: 20 });
+  const snapshot = physics.snapshot();
+
+  const target = new PhysicsService();
+  target.addBox({ x: 50, y: 50 });
+  assert.throws(
+    () => target.restore({ ...snapshot, version: SCENE_VERSION + 1 }),
+    (error) => error.code === "PHYSICS_SCENE_VERSION"
+  );
+  // Refused means untouched, not emptied.
+  assert.equal(target.perceive().objectCount, 1);
+
+  assert.throws(() => target.restore(null), /not a saved scene/);
+  assert.throws(() => target.restore({ version: 1, objects: [{ id: "x-1", kind: "wormhole" }] }), /unknown object/);
+});
+
+test("a joint whose object is missing is dropped rather than fatal", () => {
+  const physics = new PhysicsService();
+  const a = physics.addCircle({ x: 200, y: 200, radius: 20 });
+  const b = physics.addCircle({ x: 400, y: 200, radius: 20 });
+  physics.addSpring({ a: a.id, b: b.id });
+  const snapshot = physics.snapshot();
+
+  // A hand-edited or partially recovered file should still load what it can.
+  snapshot.objects = snapshot.objects.filter((object) => object.id !== b.id);
+  const restored = new PhysicsService();
+  restored.restore(snapshot);
+
+  assert.equal(restored.perceive().objectCount, 1);
+  assert.equal(restored.perceive().objects.some((object) => object.kind === "spring"), false);
+});
+
+test("scenes save, list, reload, and delete over HTTP", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "evolv-scenes-"));
+  const database = createDatabase({ dataDir: path.join(root, "data"), defaultPrompt: "Test" });
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const physicsService = new PhysicsService();
+  const sent = [];
+  const call = (method, pathname, body = {}) => handlePhysicsRoutes({
+    req: { method }, res: {}, url: new URL(`http://x${pathname}`),
+    readBody: async () => body, bodyLimit: 10_000,
+    json: (_res, status, payload) => sent.push({ status, payload }),
+    physicsService, database
+  });
+
+  const ball = physicsService.addCircle({ x: 200, y: 100, radius: 20 });
+  physicsService.addRamp({ x: 400, y: 400 });
+  physicsService.step(120);
+  const settled = physicsService.describe(ball.id).y;
+
+  await call("POST", "/api/physics/scenes", { name: "Ramp test" });
+  assert.equal(sent.at(-1).status, 201);
+  const saved = sent.at(-1).payload;
+  assert.equal(saved.objectCount, 2);
+
+  await call("GET", "/api/physics/scenes");
+  assert.deepEqual(sent.at(-1).payload.scenes.map((scene) => scene.name), ["Ramp test"]);
+
+  // Wreck the live scene, then bring the saved one back.
+  physicsService.clear();
+  assert.equal(physicsService.perceive().objectCount, 0);
+  await call("POST", `/api/physics/scenes/${saved.id}/load`);
+  assert.equal(sent.at(-1).payload.name, "Ramp test");
+  assert.equal(physicsService.perceive().objectCount, 2);
+  assert.equal(physicsService.describe(ball.id).y, settled, "a reloaded scene is where it was saved");
+
+  await call("DELETE", `/api/physics/scenes/${saved.id}`);
+  assert.equal(sent.at(-1).payload.removed, true);
+  await call("GET", "/api/physics/scenes");
+  assert.deepEqual(sent.at(-1).payload.scenes, []);
+
+  await assert.rejects(() => call("POST", `/api/physics/scenes/${saved.id}/load`), (error) => error.code === "SCENE_NOT_FOUND");
+  await assert.rejects(() => call("POST", "/api/physics/scenes", { name: "  " }), (error) => error.code === "SCENE_NAME_REQUIRED");
+});
+
+test("reset is reachable over HTTP and every scene control is wired to the page", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "evolv-reset-"));
+  const database = createDatabase({ dataDir: path.join(root, "data"), defaultPrompt: "Test" });
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const physicsService = new PhysicsService();
+  const sent = [];
+  const call = (method, pathname) => handlePhysicsRoutes({
+    req: { method }, res: {}, url: new URL(`http://x${pathname}`),
+    readBody: async () => ({}), bodyLimit: 10_000,
+    json: (_res, status, payload) => sent.push({ status, payload }),
+    physicsService, database
+  });
+
+  const ball = physicsService.addCircle({ x: 400, y: 80, radius: 25 });
+  physicsService.step(200);
+  assert.ok(physicsService.describe(ball.id).y > 200);
+  await call("POST", "/api/physics/reset");
+  assert.equal(physicsService.describe(ball.id).y, 80);
+
+  const { readFile } = await import("node:fs/promises");
+  const [html, ui] = await Promise.all([
+    readFile(new URL("../public/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/physics.js", import.meta.url), "utf8")
+  ]);
+  for (const control of ["physics-reset", "physics-save", "physics-load", "physics-scene-delete", "physics-scene-name", "physics-scene-list"]) {
+    assert.match(html, new RegExp(`id="${control}"`), `${control} is missing from the page`);
+    assert.match(ui, new RegExp(control), `${control} has no handler`);
+  }
 });

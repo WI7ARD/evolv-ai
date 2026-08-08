@@ -353,9 +353,88 @@ async function endDrag() {
   } catch { /* releasing a drag that already ended is not worth a toast */ }
 }
 
+// Saved scenes. The name field doubles as "save as": typing a new name creates
+// a scene, reusing one overwrites it, which is what people expect from a name.
+async function listScenes(selectId = "") {
+  try {
+    const { scenes } = await state.api("/api/physics/scenes");
+    const list = $("#physics-scene-list");
+    if (!list) return;
+    const chosen = selectId || list.value;
+    list.innerHTML = '<option value="">Saved scenes…</option>'
+      + scenes.map((scene) => `<option value="${escapeAttribute(scene.id)}">${escapeAttribute(scene.name)} · ${scene.objectCount}</option>`).join("");
+    if (chosen) list.value = chosen;
+  } catch (error) {
+    state.toast(error.message, "error");
+  }
+}
+
+function escapeAttribute(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+}
+
+async function saveScene() {
+  const field = $("#physics-scene-name");
+  const name = field?.value.trim();
+  if (!name) {
+    state.toast("Give the scene a name first.", "error");
+    field?.focus();
+    return;
+  }
+  try {
+    const saved = await state.api("/api/physics/scenes", { method: "POST", body: JSON.stringify({ name }) });
+    state.toast(`Saved “${saved.name}”.`);
+    await listScenes(saved.id);
+  } catch (error) {
+    state.toast(error.message, "error");
+  }
+}
+
+async function loadScene() {
+  const id = $("#physics-scene-list")?.value;
+  if (!id) { state.toast("Pick a saved scene first."); return; }
+  stop();
+  try {
+    const result = await state.api(`/api/physics/scenes/${encodeURIComponent(id)}/load`, { method: "POST", body: "{}" });
+    const field = $("#physics-scene-name");
+    if (field) field.value = result.name;
+    state.selected = "";
+    await refreshFrame();
+    state.toast(`Loaded “${result.name}”.`);
+  } catch (error) {
+    state.toast(error.message, "error");
+  }
+}
+
 export function initPhysics({ api, toast }) {
   state.api = api;
   state.toast = toast;
+
+  $("#physics-save")?.addEventListener("click", saveScene);
+  $("#physics-load")?.addEventListener("click", loadScene);
+  $("#physics-scene-delete")?.addEventListener("click", async () => {
+    const list = $("#physics-scene-list");
+    const id = list?.value;
+    if (!id) { state.toast("Pick a saved scene first."); return; }
+    try {
+      await state.api(`/api/physics/scenes/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await listScenes("");
+      state.toast("Scene deleted.");
+    } catch (error) {
+      state.toast(error.message, "error");
+    }
+  });
+  $("#physics-reset")?.addEventListener("click", async () => {
+    stop();
+    try {
+      await state.api("/api/physics/reset", { method: "POST", body: "{}" });
+      await refreshFrame();
+      state.toast("Back to the start.");
+    } catch (error) {
+      state.toast(error.message, "error");
+    }
+  });
 
   // Every drop button is the same handler; the kind is data, so adding one to
   // the page needs no code here.
@@ -452,7 +531,7 @@ export function initPhysics({ api, toast }) {
 }
 
 export async function refreshPhysics() {
-  await refreshFrame();
+  await Promise.all([refreshFrame(), listScenes()]);
 }
 
 // Leaving the view must stop the clock. Otherwise the scene keeps stepping,
