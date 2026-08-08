@@ -59,19 +59,29 @@ async function speak(line) {
   return speakWithSystemVoice(line);
 }
 
+function ensureAudio() {
+  if (!state.audio || state.audio.state === "closed") state.audio = new AudioContext();
+  return state.audio;
+}
+
 function playWav(base64) {
   return new Promise((resolve) => {
+    const audio = ensureAudio();
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    state.audio.decodeAudioData(bytes.buffer, (buffer) => {
-      const source = state.audio.createBufferSource();
+    // The callback form still returns a promise, and an undecodable clip would
+    // reject it with nobody listening — one bad line of narration would fill
+    // the console with unhandled rejections.
+    const decoding = audio.decodeAudioData(bytes.buffer, (buffer) => {
+      const source = audio.createBufferSource();
       source.buffer = buffer;
-      source.connect(state.audio.destination);
+      source.connect(audio.destination);
       if (state.mixer) source.connect(state.mixer);
       source.onended = resolve;
       source.start();
     }, () => resolve());
+    if (decoding?.catch) decoding.catch(() => resolve());
   });
 }
 
@@ -99,8 +109,7 @@ async function startRecording(title) {
     // Narration is mixed in as a track rather than relying on system audio
     // capture, which is unavailable on some platforms and would also pick up
     // whatever else the machine happens to be playing.
-    state.audio = new AudioContext();
-    state.mixer = state.audio.createMediaStreamDestination();
+    state.mixer = ensureAudio().createMediaStreamDestination();
     state.mixer.stream.getAudioTracks().forEach((track) => display.addTrack(track));
 
     state.chunks = [];
@@ -110,7 +119,9 @@ async function startRecording(title) {
     return { converter: armed?.converter !== false };
   } catch (error) {
     await window.evolvDemo.disarm().catch(() => {});
-    state.toast(`Recording did not start: ${error.message}`, "error");
+    // Not fatal: the experiment is still worth watching without a file at the
+    // end, so say what happened and carry on rather than aborting.
+    state.toast(`Recording unavailable (${error.message}). The demo will run without saving a video.`, "error");
     state.stream = null;
     state.recorder = null;
     return false;
@@ -119,8 +130,6 @@ async function startRecording(title) {
 
 async function finishRecording(title) {
   if (!state.recorder) {
-    state.audio?.close().catch(() => {});
-    state.audio = null;
     state.mixer = null;
     return null;
   }
@@ -133,8 +142,6 @@ async function finishRecording(title) {
   const blob = new Blob(state.chunks, { type: "video/webm" });
   state.recorder = null;
   state.stream = null;
-  await state.audio?.close().catch(() => {});
-  state.audio = null;
   state.mixer = null;
   if (!blob.size) return null;
 
@@ -265,6 +272,9 @@ export async function runDemo(id = "") {
     await finishRecording(script.title).catch(() => {});
     status("Demo stopped.");
   } finally {
+    await state.audio?.close().catch(() => {});
+    state.audio = null;
+    state.mixer = null;
     state.running = false;
     status($("#demo-status")?.textContent || "Ready.", { busy: false });
   }

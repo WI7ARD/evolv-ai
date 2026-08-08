@@ -255,12 +255,19 @@ async function createWindow() {
   // the recording cannot become a view of the rest of the desktop.
   session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     if (Date.now() > demoCaptureArmedUntil || !mainWindow) return callback({});
+    const own = mainWindow.getMediaSourceId();
     try {
-      const sources = await desktopCapturer.getSources({ types: ["window"] });
-      const own = sources.find((source) => source.id === mainWindow.getMediaSourceId());
-      callback(own ? { video: own } : {});
-    } catch {
-      callback({});
+      // No thumbnails: the default fetches a bitmap of every open window, which
+      // is slow enough on a busy desktop to miss the permission timeout and
+      // come back as a flat denial.
+      const sources = await desktopCapturer.getSources({ types: ["window"], thumbnailSize: { width: 0, height: 0 } });
+      const match = sources.find((source) => source.id === own);
+      // The enumeration does not always contain the asking window itself. Its
+      // own id is authoritative, so fall back to it rather than refusing.
+      callback({ video: match || { id: own, name: "Evolv" } });
+    } catch (error) {
+      desktopLogger?.error?.("demo.capture-source-failed", "Could not resolve the window to record", { details: { message: error.message } });
+      callback({ video: { id: own, name: "Evolv" } });
     }
   }, { useSystemPicker: false });
 

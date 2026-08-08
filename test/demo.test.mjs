@@ -182,3 +182,36 @@ test("the demo stays stoppable after it navigates away from its own panel", asyn
   assert.match(html, /id="demo-view"/);
   assert.match(html.match(/id="composer-hint"[^>]*>([^<]*)</)?.[1] || "", /\/demo\b/);
 });
+
+test("narration survives a refused recording", async () => {
+  const demo = await readFile(new URL("../public/demo.js", import.meta.url), "utf8");
+
+  // The AudioContext used to be created only when recording started, so a
+  // refused screen-capture left it null and the first Piper line crashed the
+  // demo with "Cannot read properties of null". It is now created on demand.
+  assert.match(demo, /function ensureAudio\(\)/);
+  assert.match(demo, /const audio = ensureAudio\(\);/);
+  assert.doesNotMatch(demo, /state\.audio\.decodeAudioData/);
+  assert.match(demo, /state\.mixer = ensureAudio\(\)\.createMediaStreamDestination\(\)/);
+
+  // A failed recording is reported and stepped over, never fatal.
+  assert.match(demo, /The demo will run without saving a video/);
+  assert.match(demo, /return false;/);
+
+  // decodeAudioData's callback form still returns a promise; an undecodable
+  // clip rejects it, and with nobody listening one bad line of narration fills
+  // the console with unhandled rejections.
+  assert.match(demo, /decoding\?\.catch/);
+});
+
+test("the window being recorded is resolved without depending on enumeration", async () => {
+  const main = await readFile(new URL("../electron/main.mjs", import.meta.url), "utf8");
+
+  // getSources fetches a thumbnail per window by default, which on a busy
+  // desktop is slow enough to miss the permission timeout and surface as a
+  // flat "Permission denied".
+  assert.match(main, /thumbnailSize: \{ width: 0, height: 0 \}/);
+  // And the enumeration does not reliably include the asking window, so its own
+  // id is the fallback rather than a refusal.
+  assert.match(main, /match \|\| \{ id: own, name: "Evolv" \}/);
+});
