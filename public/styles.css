@@ -965,7 +965,7 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .physics-joint { border-style: dashed; }
 .physics-tool.active { border-color: var(--acid); color: #11150d; background: var(--acid); border-style: solid; }
 
-.physics-canvas { display: block; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; cursor: crosshair; }
+.physics-canvas { display: block; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; cursor: crosshair; }
 .physics-canvas.deleting { border-color: rgba(255, 68, 102, .5); }
 .physics-readout { font-variant-numeric: tabular-nums; min-height: 1.2em; }
 @media (max-width: 620px) {

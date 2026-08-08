@@ -10,6 +10,7 @@
 // it cannot record rather than failing silently.
 
 import { DEMO_SCRIPTS, pickScript } from "./demo-scripts.js";
+import { syncPhysicsFrame } from "./physics.js";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -99,11 +100,38 @@ function speakWithSystemVoice(line) {
 
 // ---------------------------------------------------------------- recording
 
+// Two ways in, because either can be refused depending on the machine.
+// getDisplayMedia is the modern path and goes through display-capture
+// permission; the constraint form asks for a specific window by id and does
+// not. Reporting both failures matters — "Permission denied" alone says
+// nothing about which layer said no.
+async function captureWindow(sourceId) {
+  const failures = [];
+  try {
+    return await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+  } catch (error) {
+    failures.push(`display: ${error.message}`);
+  }
+  if (sourceId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: sourceId, maxFrameRate: 30 } }
+      });
+    } catch (error) {
+      failures.push(`window: ${error.message}`);
+    }
+  } else {
+    failures.push("window: no source id");
+  }
+  throw new Error(failures.join(" · "));
+}
+
 async function startRecording(title) {
   if (!desktop()) return false;
   try {
     const armed = await window.evolvDemo.arm();
-    const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+    const display = await captureWindow(armed?.sourceId || "");
     state.stream = display;
 
     // Narration is mixed in as a track rather than relying on system audio
@@ -173,6 +201,9 @@ async function physics(actions = []) {
     const created = result?.results?.[0];
     if (action.as && created?.id) state.names.set(action.as, created.id);
   }
+  // Show what was just built. Without this the demo is invisible: the server
+  // has the objects, the canvas has nothing.
+  await syncPhysicsFrame().catch(() => {});
 }
 
 async function runSteps(steps) {
@@ -204,6 +235,7 @@ async function runPhysicsFor(totalSteps) {
   while (done < totalSteps && !state.cancelled) {
     const batch = Math.min(6, totalSteps - done);
     await state.api("/api/physics/step", { method: "POST", body: JSON.stringify({ steps: batch }) });
+    await syncPhysicsFrame().catch(() => {});
     done += batch;
     await new Promise((resolve) => setTimeout(resolve, 24));
   }
@@ -243,9 +275,16 @@ export async function runDemo(id = "") {
   if (title) title.textContent = script.title;
 
   try {
-    if (script.kind === "physics") state.switchView("physics");
-    else state.switchView("chat");
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    if (script.kind === "physics") {
+      state.switchView("physics");
+      // Put the world on screen. The panel header and toolbar are tall enough
+      // that a fresh view starts scrolled above the canvas, which makes a
+      // running demo look like it is doing nothing.
+      $("#physics-canvas")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    } else {
+      state.switchView("chat");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     const recording = await startRecording(script.title);
     if (!recording) {

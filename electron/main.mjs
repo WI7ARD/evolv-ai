@@ -56,7 +56,13 @@ function registerDemoBridge() {
   // the capability lapses on its own rather than staying open until quit.
   handle("demo:arm", () => {
     demoCaptureArmedUntil = Date.now() + 15_000;
-    return { armed: true, converter: demoRecorder.available() };
+    return {
+      armed: true,
+      converter: demoRecorder.available(),
+      // The renderer needs this for the getUserMedia path, which does not go
+      // through display-capture permission at all.
+      sourceId: mainWindow?.getMediaSourceId() || ""
+    };
   });
   handle("demo:disarm", () => {
     demoCaptureArmedUntil = 0;
@@ -270,6 +276,12 @@ async function createWindow() {
       callback({ video: { id: own, name: "Evolv" } });
     }
   }, { useSystemPicker: false });
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+    if (requestingOrigin && requestingOrigin !== origin) return false;
+    if (permission === "display-capture") return Date.now() <= demoCaptureArmedUntil;
+    return ["media", "camera", "microphone"].includes(permission);
+  });
 
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const requestingOrigin = new URL(webContents.getURL()).origin;

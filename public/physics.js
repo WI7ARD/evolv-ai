@@ -36,6 +36,8 @@ const scatter = () => 160 + Math.random() * 480;
 
 function worldPoint(event, canvas) {
   const rect = canvas.getBoundingClientRect();
+  // Against the drawn width: the canvas is letterboxed when height is the
+  // binding constraint, and a stale divisor puts every click in the wrong place.
   const scale = (state.frame?.world.width || 800) / rect.width;
   return { x: (event.clientX - rect.left) * scale, y: (event.clientY - rect.top) * scale };
 }
@@ -75,13 +77,19 @@ function draw() {
 
   // Backing store at device resolution, drawing in world units. Without this
   // the whole scene is soft on any HiDPI screen.
+  // Fit to width *and* height. Width alone made an 800x600 world 680px tall
+  // under a header of its own, so most of the scene sat below the fold and
+  // objects appeared to never arrive.
   const ratio = window.devicePixelRatio || 1;
-  const cssWidth = canvas.clientWidth || width;
-  const scale = cssWidth / width;
-  const cssHeight = height * scale;
+  const available = canvas.parentElement?.clientWidth || canvas.clientWidth || width;
+  const maxHeight = Math.max(280, window.innerHeight * 0.56);
+  const scale = Math.min(available / width, maxHeight / height);
+  const cssWidth = Math.round(width * scale);
+  const cssHeight = Math.round(height * scale);
   if (canvas.width !== Math.round(cssWidth * ratio) || canvas.height !== Math.round(cssHeight * ratio)) {
     canvas.width = Math.round(cssWidth * ratio);
     canvas.height = Math.round(cssHeight * ratio);
+    canvas.style.width = `${cssWidth}px`;
     canvas.style.height = `${cssHeight}px`;
   }
   context.setTransform(ratio * scale, 0, 0, ratio * scale, 0, 0);
@@ -532,6 +540,13 @@ export function initPhysics({ api, toast }) {
 
 export async function refreshPhysics() {
   await Promise.all([refreshFrame(), listScenes()]);
+}
+
+// The demo drives the world through the API rather than through these
+// controls, so nothing here would otherwise know the scene had changed and the
+// canvas would sit empty while objects piled up on the server.
+export async function syncPhysicsFrame() {
+  await refreshFrame();
 }
 
 // Leaving the view must stop the clock. Otherwise the scene keeps stepping,

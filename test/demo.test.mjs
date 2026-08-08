@@ -215,3 +215,51 @@ test("the window being recorded is resolved without depending on enumeration", a
   // id is the fallback rather than a refusal.
   assert.match(main, /match \|\| \{ id: own, name: "Evolv" \}/);
 });
+
+test("a physics script actually produces the thing it narrates", async () => {
+  const { PhysicsService } = await import("../lib/physics.mjs");
+
+  // Every script is run headlessly through the real engine. A script can be
+  // perfectly well-formed and still show nothing — the previous impact demo
+  // narrated a wrecking ball on a chain and built a ball that was never
+  // attached to it, which only became obvious on screen.
+  for (const script of DEMO_SCRIPTS.filter((item) => item.kind === "physics")) {
+    const physics = new PhysicsService();
+    const names = new Map();
+    let before = null;
+
+    for (const step of script.steps) {
+      for (const action of step.physics || []) {
+        const payload = { ...action };
+        delete payload.as;
+        if (typeof payload.id === "string" && payload.id.startsWith("$")) payload.id = names.get(payload.id.slice(1));
+        if (action.action === "push") before = physics.perceive().objects.map((object) => [object.id, object.x, object.y]);
+        const created = physics.apply(payload.action, payload);
+        if (action.as && created?.id) names.set(action.as, created.id);
+      }
+      if (step.run) physics.step(step.run);
+    }
+
+    const view = physics.perceive();
+    assert.ok(view.objectCount >= 2, `${script.id}: built almost nothing`);
+
+    // Something must visibly move, or the clip is a still life.
+    if (before) {
+      const after = view.objects.map((object) => [object.id, object.x, object.y]);
+      const moved = after.filter(([id, x, y]) => {
+        const was = before.find((entry) => entry[0] === id);
+        return was && (Math.abs(x - was[1]) > 6 || Math.abs(y - was[2]) > 6);
+      });
+      assert.ok(moved.length >= 3, `${script.id}: only ${moved.length} objects moved — the demo would look inert`);
+    }
+
+    // And every name a later step referenced must have resolved.
+    for (const step of script.steps) {
+      for (const action of step.physics || []) {
+        if (typeof action.id === "string" && action.id.startsWith("$")) {
+          assert.ok(names.has(action.id.slice(1)), `${script.id}: ${action.id} never resolved to a real object`);
+        }
+      }
+    }
+  }
+});

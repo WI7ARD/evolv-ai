@@ -44,36 +44,34 @@ export const DEMO_SCRIPTS = Object.freeze([
     ]
   },
   {
-    id: "pendulum",
-    title: "A chain, a wrecking ball, and a wall of crates",
+    id: "impact",
+    title: "A heavy ball and a wall of crates",
     kind: "physics",
     steps: [
       {
-        say: "Something less scientific and more satisfying. A wrecking ball, a chain to hang it from, and a wall to knock down.",
+        say: "Something less scientific and more satisfying. A wall of crates, and something heavy to throw at it.",
         physics: [{ action: "clear" }, { action: "set_gravity", gravity: 1 }, { action: "set_wind", wind: 0 }]
       },
       {
-        say: "The wall first. Nine metal crates, stacked three high. Each one is a separate object with its own mass and friction, so the pile behaves like a pile.",
+        say: "The wall first. Nine metal crates, stacked three high. Each one is a separate object with its own mass and friction, so the pile behaves like a pile rather than a single lump.",
         physics: [
           ...[0, 1, 2].flatMap((row) => [0, 1, 2].map((column) => ({
-            action: "create_box", x: 560 + column * 46, y: 520 - row * 46,
+            action: "create_box", x: 560 + column * 46, y: 530 - row * 46,
             width: 44, height: 44, material: "metal"
           })))
         ]
       },
+      { say: "Let it settle, so nothing is falling when the ball arrives.", run: 120 },
       {
-        say: "Now a chain, anchored near the ceiling, with a heavy ball on the end of it.",
-        physics: [
-          { action: "create_chain", x: 260, y: 60, links: 9, material: "metal" },
-          { action: "create_circle", as: "ball", x: 250, y: 300, radius: 34, material: "metal", note: "wrecking ball" }
-        ]
+        say: "Now a solid metal ball, over on the left.",
+        physics: [{ action: "create_circle", as: "ball", x: 120, y: 500, radius: 34, material: "metal" }]
       },
       {
-        say: "Pull it back, and let go.",
-        physics: [{ action: "push", id: "$ball", vx: -14, vy: -2 }],
-        run: 90
+        say: "And throw it.",
+        physics: [{ action: "push", id: "$ball", vx: 26, vy: -3 }],
+        run: 300
       },
-      { say: "Nothing here is animated. Every collision is being solved as it happens.", run: 420 },
+      { say: "Nothing here is animated. Every one of those collisions is being solved as it happens.", run: 240 },
       { say: "", measure: { report: "settled" } }
     ]
   },
