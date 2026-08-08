@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createDatabase } from "./lib/database.mjs";
+import { batchToolCalls } from "./lib/tool-batching.mjs";
 import { createAuthService } from "./lib/auth.mjs";
 import { createAccountStore } from "./lib/accounts.mjs";
 import { createProfileManager } from "./lib/profiles.mjs";
@@ -1685,84 +1686,115 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
         return;
       }
       totalCalls += normalizedCalls.length;
-      for (const call of normalizedCalls) {
+      for (const batch of batchToolCalls(normalizedCalls, toolRegistry)) {
         agentRuntime.assertCanContinue(agentRunId);
-        const callKey = `${call.function.name}:${JSON.stringify(call.function.arguments)}`;
-        const cached = executedCalls.get(callKey);
-        writeStreamEvent(res, {
-          type: "tool_request",
-          messageId: activeAssistantId,
-          callId: call.id,
-          tool: call.function.name,
-          arguments: call.function.arguments,
-          status: "running"
-        });
-        if (!cached) agentRuntime.consumeBudget(agentRunId, { toolCalls: 1 });
-        agentRuntime.recordEffect(agentRunId, agentStepId, "before", "tool.execute", {
-          callId: call.id, toolName: call.function.name, cached: Boolean(cached)
-        });
-        const result = cached || await toolRegistry.execute(call.function.name, call.function.arguments, {
-          conversationId,
-          messageId: activeAssistantId,
-          agentRunId,
-          providerId,
-          model: selectedModel,
-          vaultAllowed,
-          projectId: activeProject.id,
-          ...(packCommand ? {
-            packPermissions: packCommand.grantedPermissions,
-          } : {})
-        });
-        agentRuntime.recordEffect(agentRunId, agentStepId, "after", "tool.execute", {
-          callId: call.id,
-          toolName: call.function.name,
-          cached: Boolean(cached),
-          ok: Boolean(result.ok),
-          pendingApproval: Boolean(result.pendingApproval),
-          durationMs: cached ? 0 : result.durationMs
-        });
-        if (!cached) executedCalls.set(callKey, result);
-        const toolOutput = cached
-          ? `${result.output}\n[duplicate call — cached result reused; do not repeat this call]`
-          : result.output;
-        database.addMessage({
-          conversationId,
-          role: "tool",
-          content: toolOutput,
-          status: result.pendingApproval ? "pending-approval" : result.ok ? "complete" : "error",
-          toolName: call.function.name,
-          toolCallId: call.id,
-          metadata: { runId: result.runId, agentRunId, durationMs: result.durationMs, untrusted: true, pendingApproval: Boolean(result.pendingApproval), ...(cached ? { cached: true } : {}) }
-        });
-        messages.push({ role: "tool", tool_name: call.function.name, tool_call_id: call.id, content: toolOutput });
-        writeStreamEvent(res, {
-          type: "tool_result",
-          callId: call.id,
-          runId: result.runId,
-          tool: call.function.name,
-          status: result.pendingApproval ? "approval_required" : result.ok ? "completed" : "failed",
-          cached: Boolean(cached),
-          durationMs: cached ? 0 : result.durationMs,
-          output: toolOutput
-        });
-        if (result.pendingApproval) {
-          const waitingRun = agentRuntime.waitForApproval(agentRunId, {
-            toolRunId: result.runId,
-            toolName: call.function.name
-          });
-          writeStreamEvent(res, { type: "run", runId: agentRunId, stepId: agentStepId, state: waitingRun.state, budgets: waitingRun.budgets });
+
+        // Start the whole batch, then wait for it. A model that asks for four
+        // crates gets four round trips overlapped instead of stacked, and the
+        // user sees all four appear as running at once.
+        //
+        // Dedupe is resolved here, at start time, and the map holds the promise
+        // rather than the settled result — otherwise two identical calls in the
+        // same batch would both find an empty cache and both execute.
+        const started = batch.map((call) => {
+          const callKey = `${call.function.name}:${JSON.stringify(call.function.arguments)}`;
+          const reused = executedCalls.has(callKey);
           writeStreamEvent(res, {
-            type: "complete",
-            conversationId,
+            type: "tool_request",
             messageId: activeAssistantId,
-            runId: agentRunId,
-            status: "waiting-for-approval"
+            callId: call.id,
+            tool: call.function.name,
+            arguments: call.function.arguments,
+            status: "running"
           });
-          if (routingEventId) database.finishRoutingEvent(routingEventId, {
-            messageId: activeAssistantId, status: "waiting-for-approval", outcome: "tool approval required"
+          if (!reused) {
+            agentRuntime.consumeBudget(agentRunId, { toolCalls: 1 });
+            executedCalls.set(callKey, toolRegistry.execute(call.function.name, call.function.arguments, {
+              conversationId,
+              messageId: activeAssistantId,
+              agentRunId,
+              providerId,
+              model: selectedModel,
+              vaultAllowed,
+              projectId: activeProject.id,
+              ...(packCommand ? {
+                packPermissions: packCommand.grantedPermissions,
+              } : {})
+            }));
+          }
+          agentRuntime.recordEffect(agentRunId, agentStepId, "before", "tool.execute", {
+            callId: call.id, toolName: call.function.name, cached: reused
           });
-          res.end();
-          return;
+          return { call, callKey, reused, pending: executedCalls.get(callKey) };
+        });
+
+        // allSettled rather than all: one rejection must not leave the other
+        // three unobserved, which is how a legible tool failure turns into an
+        // unhandled rejection warning next to it.
+        const settled = await Promise.allSettled(started.map((entry) => entry.pending));
+
+        for (const [index, entry] of started.entries()) {
+          const outcome = settled[index];
+          if (outcome.status === "rejected") {
+            // A failure is not a result worth reusing; drop it so a later
+            // identical call gets a real attempt rather than this rejection.
+            executedCalls.delete(entry.callKey);
+            throw outcome.reason;
+          }
+          const { call, reused } = entry;
+          const result = outcome.value;
+          agentRuntime.recordEffect(agentRunId, agentStepId, "after", "tool.execute", {
+            callId: call.id,
+            toolName: call.function.name,
+            cached: reused,
+            ok: Boolean(result.ok),
+            pendingApproval: Boolean(result.pendingApproval),
+            durationMs: reused ? 0 : result.durationMs
+          });
+          const toolOutput = reused
+            ? `${result.output}\n[duplicate call — cached result reused; do not repeat this call]`
+            : result.output;
+          database.addMessage({
+            conversationId,
+            role: "tool",
+            content: toolOutput,
+            status: result.pendingApproval ? "pending-approval" : result.ok ? "complete" : "error",
+            toolName: call.function.name,
+            toolCallId: call.id,
+            metadata: { runId: result.runId, agentRunId, durationMs: result.durationMs, untrusted: true, pendingApproval: Boolean(result.pendingApproval), ...(reused ? { cached: true } : {}) }
+          });
+          messages.push({ role: "tool", tool_name: call.function.name, tool_call_id: call.id, content: toolOutput });
+          writeStreamEvent(res, {
+            type: "tool_result",
+            callId: call.id,
+            runId: result.runId,
+            tool: call.function.name,
+            status: result.pendingApproval ? "approval_required" : result.ok ? "completed" : "failed",
+            cached: reused,
+            durationMs: reused ? 0 : result.durationMs,
+            output: toolOutput
+          });
+          if (result.pendingApproval) {
+            // Approval-gated tools are batched alone, so nothing else in this
+            // batch is mid-flight when the run suspends here.
+            const waitingRun = agentRuntime.waitForApproval(agentRunId, {
+              toolRunId: result.runId,
+              toolName: call.function.name
+            });
+            writeStreamEvent(res, { type: "run", runId: agentRunId, stepId: agentStepId, state: waitingRun.state, budgets: waitingRun.budgets });
+            writeStreamEvent(res, {
+              type: "complete",
+              conversationId,
+              messageId: activeAssistantId,
+              runId: agentRunId,
+              status: "waiting-for-approval"
+            });
+            if (routingEventId) database.finishRoutingEvent(routingEventId, {
+              messageId: activeAssistantId, status: "waiting-for-approval", outcome: "tool approval required"
+            });
+            res.end();
+            return;
+          }
         }
       }
       if (totalCalls >= 6) {

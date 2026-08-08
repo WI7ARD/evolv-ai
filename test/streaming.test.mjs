@@ -375,6 +375,94 @@ test("tool loop stops at the round limit", async () => {
   assert.equal(events.filter((event) => event.type === "tool_result").length, 4);
 });
 
+test("a round's tool calls run four at a time, in order, without racing an approval", async () => {
+  const { batchToolCalls, TOOL_BATCH_SIZE } = await import("../lib/tool-batching.mjs");
+  const call = (name) => ({ id: name, function: { name, arguments: {} } });
+  // Only the automatic tiers may overlap; an approval-gated tool suspends the
+  // whole run the moment it returns, so it is never started beside a sibling.
+  const registry = { isAutomatic: (name) => name.startsWith("read") };
+
+  assert.equal(TOOL_BATCH_SIZE, 4);
+  assert.deepEqual(
+    batchToolCalls(["read1", "read2", "read3", "read4", "read5"].map(call), registry).map((batch) => batch.map((entry) => entry.id)),
+    [["read1", "read2", "read3", "read4"], ["read5"]],
+    "a fifth call waits for the next batch rather than widening this one"
+  );
+  assert.deepEqual(
+    batchToolCalls(["read1", "propose", "read2", "read3"].map(call), registry).map((batch) => batch.map((entry) => entry.id)),
+    [["read1"], ["propose"], ["read2", "read3"]],
+    "the approval-gated call gets a batch to itself and does not reorder its neighbours"
+  );
+  // A registry that cannot answer is treated as gated: refusing to parallelize
+  // is the safe guess, and an unknown name is about to fail anyway.
+  assert.deepEqual(
+    batchToolCalls([call("a"), call("b")], {}).map((batch) => batch.length),
+    [1, 1]
+  );
+});
+
+test("four tools asked for at once are executed together and recorded in order", async () => {
+  mock.setCapabilities(["completion", "tools"]);
+  const expressions = ["1+1", "2+2", "3+3", "4+4"];
+  mock.setScript((body) => {
+    if (body.messages.some((message) => message.role === "tool")) return [{ content: "All four are done." }];
+    return [{
+      tool_calls: expressions.map((expression, index) => ({
+        id: `call-${index}`,
+        function: { name: "calculate", arguments: { expression } }
+      }))
+    }];
+  });
+  const conversation = await createConversation("batch");
+  const events = await readEvents(await chat(conversation.id, { text: "four sums", model: "batch-model" }));
+
+  // All four are announced as running before any of them reports back, which
+  // is what running concurrently looks like from the outside.
+  const kinds = events.filter((event) => event.type === "tool_request" || event.type === "tool_result").map((event) => event.type);
+  assert.deepEqual(kinds, ["tool_request", "tool_request", "tool_request", "tool_request",
+    "tool_result", "tool_result", "tool_result", "tool_result"]);
+
+  // The transcript still reads in the order the model asked, whatever order
+  // they actually finished in.
+  const outputs = events.filter((event) => event.type === "tool_result").map((event) => event.output);
+  assert.deepEqual(outputs.map((output) => JSON.parse(output).result), [2, 4, 6, 8]);
+
+  // The persisted transcript is what the model reads back on the next round,
+  // so its order is the one that actually matters.
+  const persisted = await (await client.fetch(`/api/conversations/${conversation.id}`)).json();
+  const toolMessages = persisted.messages.filter((message) => message.role === "tool");
+  assert.deepEqual(toolMessages.map((message) => JSON.parse(message.content).result), [2, 4, 6, 8]);
+  assert.deepEqual(toolMessages.map((message) => message.toolCallId), ["call-0", "call-1", "call-2", "call-3"]);
+});
+
+test("identical calls inside one batch still execute only once", async () => {
+  mock.setCapabilities(["completion", "tools"]);
+  mock.setScript((body) => {
+    if (body.messages.some((message) => message.role === "tool")) return [{ content: "Both agree." }];
+    return [{
+      tool_calls: [
+        { id: "same-a", function: { name: "calculate", arguments: { expression: "7+7" } } },
+        { id: "same-b", function: { name: "calculate", arguments: { expression: "7+7" } } }
+      ]
+    }];
+  });
+  const conversation = await createConversation("batch-dupe");
+  const events = await readEvents(await chat(conversation.id, { text: "twice", model: "batch-dupe-model" }));
+
+  // Concurrency is where the dedupe map is easiest to break: both calls look
+  // up an empty cache at the same instant unless the map holds the in-flight
+  // promise rather than the settled result.
+  const results = events.filter((event) => event.type === "tool_result");
+  assert.equal(results.length, 2);
+  assert.equal(Boolean(results[0].cached), false);
+  assert.equal(results[1].cached, true);
+  assert.match(results[1].output, /duplicate call/);
+
+  const runsPayload = await (await client.fetch("/api/tool-runs?limit=200")).json();
+  const runs = runsPayload.runs.filter((run) => run.conversationId === conversation.id);
+  assert.equal(runs.length, 1, "the duplicate must not have executed a second tool run");
+});
+
 test("duplicate tool calls reuse the cached result", async () => {
   mock.setCapabilities(["completion", "tools"]);
   mock.setScript((body, callIndex) => {

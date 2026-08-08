@@ -169,7 +169,7 @@ const [appPath] = await packager({
   platform,
   arch,
   overwrite: true,
-  asar: { unpack: "**/*.{node,ps1}", unpackDir: "{electron/voice-assets,node_modules/ffmpeg-static}" },
+  asar: { unpack: "**/*.{node,ps1}", unpackDir: "electron/voice-assets" },
   executableName: "Evolv",
   icon: path.join(root, "build", "icon"),
   ignore: shouldIgnore,

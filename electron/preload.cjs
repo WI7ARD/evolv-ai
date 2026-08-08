@@ -16,13 +16,6 @@ contextBridge.exposeInMainWorld("evolvDesktopVoice", Object.freeze({
   openModelDownloads: () => ipcRenderer.invoke("voice:open-model-downloads")
 }));
 
-contextBridge.exposeInMainWorld("evolvDemo", Object.freeze({
-  arm: () => ipcRenderer.invoke("demo:arm"),
-  disarm: () => ipcRenderer.invoke("demo:disarm"),
-  save: (bytes, name) => ipcRenderer.invoke("demo:save", { bytes, name }),
-  reveal: (path) => ipcRenderer.invoke("demo:reveal", { path })
-}));
-
 contextBridge.exposeInMainWorld("evolvObsidian", Object.freeze({
   chooseVault: () => ipcRenderer.invoke("obsidian:choose-vault")
 }));

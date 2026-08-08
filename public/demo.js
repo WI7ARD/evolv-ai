@@ -1,13 +1,16 @@
-// The demo: Evolv running an experiment on itself, narrated, and recorded.
+// The demo: Evolv running an experiment on itself, narrated.
 //
-// Three things happen at once — the window is captured, Piper speaks the
-// narration at 1.5x, and the script drives the real UI. None of it is faked:
-// the physics is the same solver the sandbox uses, and the chat answer is
-// generated live by whatever model is configured.
+// The script drives the real UI while Piper speaks the narration at 1.5x. None
+// of it is faked: the physics is the same solver the sandbox uses, and the chat
+// answer is generated live by whatever model is configured.
 //
-// Recording, conversion, and Piper are desktop-only. In a browser the demo
-// still runs and still speaks, through the system voice, and says plainly that
-// it cannot record rather than failing silently.
+// Evolv does not record itself — that is left to whatever screen recorder the
+// viewer already has, which works where the built-in one did not. Narration
+// plays through the speakers, so it lands in the recording along with the
+// picture.
+//
+// Piper is desktop-only. In a browser the demo still runs and still speaks,
+// through the system voice.
 
 import { DEMO_SCRIPTS, pickScript } from "./demo-scripts.js";
 import { syncPhysicsFrame } from "./physics.js";
@@ -17,8 +20,7 @@ const $ = (selector) => document.querySelector(selector);
 const state = {
   api: null, toast: null, sendMessage: null, switchView: null,
   running: false, cancelled: false,
-  recorder: null, chunks: [], stream: null, audio: null, mixer: null,
-  names: new Map(), lastPath: ""
+  audio: null, names: new Map()
 };
 
 const NARRATION_RATE = 1.5;
@@ -37,15 +39,11 @@ function status(text, { busy = false } = {}) {
   if (hudText && busy) hudText.textContent = text;
 }
 
-function desktop() {
-  return Boolean(window.evolvDemo && window.evolvDesktopVoice);
-}
-
 // ---------------------------------------------------------------- narration
 
-// Piper returns a WAV. Playing it through an AudioContext rather than an
-// <audio> element is what lets the same sound be fed to the recorder; an
-// element's output cannot be captured without re-routing it anyway.
+// Piper returns a WAV, played through an AudioContext. The context is created
+// lazily and shared, so a demo that speaks thirty lines does not open thirty
+// contexts — browsers cap how many a page may hold.
 async function speak(line) {
   if (!line || state.cancelled) return;
   const piper = window.evolvDesktopVoice;
@@ -78,7 +76,6 @@ function playWav(base64) {
       const source = audio.createBufferSource();
       source.buffer = buffer;
       source.connect(audio.destination);
-      if (state.mixer) source.connect(state.mixer);
       source.onended = resolve;
       source.start();
     }, () => resolve());
@@ -98,97 +95,31 @@ function speakWithSystemVoice(line) {
   });
 }
 
-// ---------------------------------------------------------------- recording
-
-// Two ways in, because either can be refused depending on the machine.
-// getDisplayMedia is the modern path and goes through display-capture
-// permission; the constraint form asks for a specific window by id and does
-// not. Reporting both failures matters — "Permission denied" alone says
-// nothing about which layer said no.
-async function captureWindow(sourceId) {
-  const failures = [];
-  try {
-    return await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
-  } catch (error) {
-    failures.push(`display: ${error.message}`);
-  }
-  if (sourceId) {
-    try {
-      return await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: sourceId, maxFrameRate: 30 } }
-      });
-    } catch (error) {
-      failures.push(`window: ${error.message}`);
-    }
-  } else {
-    failures.push("window: no source id");
-  }
-  throw new Error(failures.join(" · "));
-}
-
-async function startRecording(title) {
-  if (!desktop()) return false;
-  try {
-    const armed = await window.evolvDemo.arm();
-    const display = await captureWindow(armed?.sourceId || "");
-    state.stream = display;
-
-    // Narration is mixed in as a track rather than relying on system audio
-    // capture, which is unavailable on some platforms and would also pick up
-    // whatever else the machine happens to be playing.
-    state.mixer = ensureAudio().createMediaStreamDestination();
-    state.mixer.stream.getAudioTracks().forEach((track) => display.addTrack(track));
-
-    state.chunks = [];
-    state.recorder = new MediaRecorder(display, { mimeType: "video/webm;codecs=vp9,opus" });
-    state.recorder.ondataavailable = (event) => { if (event.data.size) state.chunks.push(event.data); };
-    state.recorder.start(1000);
-    return { converter: armed?.converter !== false };
-  } catch (error) {
-    await window.evolvDemo.disarm().catch(() => {});
-    // Not fatal: the experiment is still worth watching without a file at the
-    // end, so say what happened and carry on rather than aborting.
-    state.toast(`Recording unavailable (${error.message}). The demo will run without saving a video.`, "error");
-    state.stream = null;
-    state.recorder = null;
-    return false;
-  }
-}
-
-async function finishRecording(title) {
-  if (!state.recorder) {
-    state.mixer = null;
-    return null;
-  }
-  const stopped = new Promise((resolve) => { state.recorder.onstop = resolve; });
-  state.recorder.stop();
-  await stopped;
-  state.stream?.getTracks().forEach((track) => track.stop());
-  await window.evolvDemo.disarm().catch(() => {});
-
-  const blob = new Blob(state.chunks, { type: "video/webm" });
-  state.recorder = null;
-  state.stream = null;
-  state.mixer = null;
-  if (!blob.size) return null;
-
-  status("Converting to MP4…", { busy: true });
-  try {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    return await window.evolvDemo.save(Array.from(bytes), title);
-  } catch (error) {
-    state.toast(`The recording could not be saved: ${error.message}`, "error");
-    return null;
-  }
-}
-
 // ------------------------------------------------------------------ running
 
 // "$ball" refers to whatever the step that declared `as: "ball"` created.
 function resolve(value) {
   if (typeof value !== "string" || !value.startsWith("$")) return value;
   return state.names.get(value.slice(1)) || value;
+}
+
+// Put the canvas in the viewport and keep it there.
+//
+// The panel header and the toolbar are together about 560px tall, so a fresh
+// physics view starts with the world below the fold and a running demo looks
+// like it is doing nothing. scrollIntoView alone is not enough: called straight
+// after the view is shown, the canvas has not been sized yet, so it centres a
+// zero-height box and scrolls nowhere. This runs after a frame has been drawn
+// and checks the result rather than assuming it.
+function focusCanvas() {
+  const canvas = document.querySelector("#physics-canvas");
+  const scroller = document.scrollingElement;
+  if (!canvas || !scroller) return;
+  const box = canvas.getBoundingClientRect();
+  if (!box.height) return;
+  if (box.top >= 0 && box.bottom <= window.innerHeight) return;
+  const centred = scroller.scrollTop + box.top - Math.max(0, (window.innerHeight - box.height) / 2);
+  scroller.scrollTop = Math.max(0, Math.min(centred, scroller.scrollHeight - window.innerHeight));
 }
 
 async function physics(actions = []) {
@@ -204,6 +135,84 @@ async function physics(actions = []) {
   // Show what was just built. Without this the demo is invisible: the server
   // has the objects, the canvas has nothing.
   await syncPhysicsFrame().catch(() => {});
+  focusCanvas();
+}
+
+// A step may declare what it believes it just built. Checked against the same
+// perception the AI gets, so a script that silently builds the wrong thing
+// stops here rather than being narrated over confidently.
+//
+// Everything is asserted against `perceive()` because that is the picture the
+// canvas draws — the previous round proved that "the action returned an id" and
+// "there is something on screen" are different questions.
+const WORLD = Object.freeze({ width: 800, height: 600 });
+
+// `lookup` is injectable so this can be exercised headlessly against the real
+// engine, where the ids come from that run rather than from a demo's state.
+export function checkExpectation(expect, scene, lookup = resolve) {
+  const objects = scene?.objects || [];
+  const failures = [];
+
+  if (typeof expect.objects === "number" && objects.length !== expect.objects) {
+    failures.push(`expected ${expect.objects} objects, found ${objects.length}`);
+  }
+  if (typeof expect.atLeast === "number" && objects.length < expect.atLeast) {
+    failures.push(`expected at least ${expect.atLeast} objects, found ${objects.length}`);
+  }
+
+  for (const name of expect.visible || []) {
+    const id = lookup(name);
+    const object = objects.find((candidate) => candidate.id === id);
+    if (!object) {
+      failures.push(`${name} is not in the scene`);
+      continue;
+    }
+    // Off the edge of the world is off the edge of the canvas. An object that
+    // fell through the floor still exists and still reports a position.
+    if (object.x < 0 || object.x > WORLD.width || object.y < 0 || object.y > WORLD.height) {
+      failures.push(`${name} is outside the world at ${Math.round(object.x)},${Math.round(object.y)}`);
+    }
+  }
+
+  // `moved` names objects that should not still be where the step started.
+  // This is the one that catches a scene which builds but does nothing — a
+  // count cannot see that, and neither can a bounds check.
+  for (const name of expect.moved || []) {
+    const id = lookup(name);
+    const object = objects.find((candidate) => candidate.id === id);
+    if (!object) {
+      failures.push(`${name} is not in the scene`);
+      continue;
+    }
+    const before = (expect.$before || {})[name];
+    if (!before) continue;
+    const distance = Math.hypot(object.x - before.x, object.y - before.y);
+    if (distance < (expect.movedBy || 20)) {
+      failures.push(`${name} barely moved (${Math.round(distance)} px)`);
+    }
+  }
+
+  return failures;
+}
+
+// Positions of the objects a step expects to move, read before it runs. The
+// script cannot supply these — where a crate starts is the simulation's answer,
+// not the author's.
+async function positionsBefore(expect) {
+  if (!expect?.moved?.length) return {};
+  const scene = await state.api("/api/physics");
+  const before = {};
+  for (const name of expect.moved) {
+    const object = scene.objects.find((candidate) => candidate.id === resolve(name));
+    if (object) before[name] = { x: object.x, y: object.y };
+  }
+  return before;
+}
+
+async function verify(expect, before) {
+  const scene = await state.api("/api/physics");
+  const failures = checkExpectation({ ...expect, $before: before }, scene);
+  if (failures.length) throw new Error(`The demo did not build what it described: ${failures.join("; ")}.`);
 }
 
 async function runSteps(steps) {
@@ -214,18 +223,21 @@ async function runSteps(steps) {
 
     if (step.physics) await physics(step.physics);
     if (step.ask && state.sendMessage) {
-      // Typed into the real composer so the recording shows it being asked.
+      // Typed into the real composer so a recording shows it being asked.
       const prompt = $("#prompt");
       if (prompt) prompt.value = "";
       await state.sendMessage(step.prompt || "");
     }
 
-    // The narration and the simulation advance together, so the clip is paced
-    // by the sentence rather than by a delay someone guessed.
+    const before = await positionsBefore(step.expect);
+
+    // The narration and the simulation advance together, so the pacing comes
+    // from the sentence rather than from a delay someone guessed.
     const spoken = speak(step.say);
     if (step.run) await runPhysicsFor(step.run);
     await spoken;
 
+    if (step.expect) await verify(step.expect, before);
     if (step.measure) await announce(step.measure);
   }
 }
@@ -236,6 +248,7 @@ async function runPhysicsFor(totalSteps) {
     const batch = Math.min(6, totalSteps - done);
     await state.api("/api/physics/step", { method: "POST", body: JSON.stringify({ steps: batch }) });
     await syncPhysicsFrame().catch(() => {});
+    focusCanvas();
     done += batch;
     await new Promise((resolve) => setTimeout(resolve, 24));
   }
@@ -253,9 +266,14 @@ async function announce(measure) {
     if (!first || !second) return;
     const axis = measure.axis === "y" ? "y" : "x";
     const gap = Math.round(Math.abs(second[axis] - first[axis]));
+    // Which one won is read off the scene, not assumed. The result here is not
+    // in much doubt, but a demo that announces the answer it was hoping for is
+    // no longer showing you the simulation.
+    const [firstName, secondName] = measure.names || ["the first", "the second"];
+    const ahead = second[axis] > first[axis] ? secondName : firstName;
     await speak(gap < 10
       ? `They finished within ${gap} pixels of each other.`
-      : `The ice crate finished ${gap} pixels further along. Same shape, same slope, same gravity — the only thing that changed was friction.`);
+      : `The ${ahead} crate finished ${gap} pixels further along. Same shape, same slope, same gravity — the only thing that changed was friction.`);
     return;
   }
   if (measure.report === "settled") {
@@ -277,43 +295,23 @@ export async function runDemo(id = "") {
   try {
     if (script.kind === "physics") {
       state.switchView("physics");
-      // Put the world on screen. The panel header and toolbar are tall enough
-      // that a fresh view starts scrolled above the canvas, which makes a
-      // running demo look like it is doing nothing.
-      $("#physics-canvas")?.scrollIntoView({ block: "center", behavior: "smooth" });
+      // The canvas is not laid out yet at this point; focusCanvas runs again
+      // after each frame is drawn, which is when its size is real.
+      await syncPhysicsFrame().catch(() => {});
+      focusCanvas();
     } else {
       state.switchView("chat");
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const recording = await startRecording(script.title);
-    if (!recording) {
-      status(desktop() ? "Running without a recording." : "Running. Recording needs the desktop app.", { busy: true });
-    } else {
-      status("Recording…", { busy: true });
-    }
-
+    status("Running…", { busy: true });
     await runSteps(script.steps.map((step) => ({ ...step, prompt: script.prompt })));
     if (!state.cancelled) await speak("That was Evolv, running locally on this computer.");
-
-    const saved = await finishRecording(script.title);
-    if (saved?.path) {
-      state.lastPath = saved.path;
-      $("#demo-reveal")?.classList.remove("hidden");
-      status(saved.converted
-        ? `Saved ${saved.path}`
-        : `Saved ${saved.path} — ${saved.reason || "kept as WebM."}`);
-    } else {
-      status(state.cancelled ? "Demo stopped." : "Demo finished.");
-    }
+    status(state.cancelled ? "Demo stopped." : "Demo finished.");
   } catch (error) {
     state.toast(error.message, "error");
-    await finishRecording(script.title).catch(() => {});
     status("Demo stopped.");
   } finally {
-    await state.audio?.close().catch(() => {});
-    state.audio = null;
-    state.mixer = null;
     state.running = false;
     status($("#demo-status")?.textContent || "Ready.", { busy: false });
   }
@@ -338,12 +336,4 @@ export function initDemo({ api, toast, sendMessage, switchView }) {
   };
   $("#demo-stop")?.addEventListener("click", stopDemo);
   $("#demo-hud-stop")?.addEventListener("click", stopDemo);
-  $("#demo-reveal")?.addEventListener("click", () => {
-    if (state.lastPath) window.evolvDemo?.reveal(state.lastPath);
-  });
-
-  const note = $("#demo-note");
-  if (note && !desktop()) {
-    note.textContent = "This is the browser version. The demo will run and narrate, but recording to MP4 needs the desktop app.";
-  }
 }
