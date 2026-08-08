@@ -83,6 +83,38 @@ test("CI builds and uploads both installers", async () => {
   assert.equal(manifest.scripts["installer:linux"], "node scripts/make-installers.mjs --platform=linux");
 });
 
+test("the Git LFS guard can actually fire", async (t) => {
+  // `find -size -1k` rounds sizes up to whole blocks, so a 133-byte LFS
+  // pointer counts as 1k and "smaller than 1k" matches nothing whatsoever.
+  // Written that way the guard passes on a checkout containing no voice models
+  // at all — which is how an installer ships with 133-byte stubs where Piper
+  // and Whisper should be, and only fails when someone first uses voice.
+  const workflow = await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+  // The command itself, not the file: the comment above it names the broken
+  // form deliberately, to explain why it is not used.
+  const commands = workflow.split("\n").filter((line) => /\bfind\b.*voice-assets/.test(line) && !line.trimStart().startsWith("#"));
+  assert.ok(commands.length, "the guard should still exist");
+  for (const command of commands) {
+    assert.doesNotMatch(command, /-size -1k\b/, "a block-rounded size test can never match a pointer file");
+    assert.match(command, /-size -1024c/);
+  }
+
+  // Proven rather than asserted: build a pointer file and check both forms.
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const scratch = await mkdtemp(path.join(tmpdir(), "evolv-lfs-"));
+  t.after(async () => { await rm(scratch, { recursive: true, force: true }); });
+  await writeFile(path.join(scratch, "model.onnx"),
+    "version https://git-lfs.github.com/spec/v1\noid sha256:0\nsize 632012\n");
+
+  const seek = (size) => run("find", [scratch, "-type", "f", "-size", size, "-exec", "grep", "-l", "^version https://git-lfs", "{}", "+"])
+    .then((result) => result.stdout.trim())
+    .catch(() => "");
+
+  assert.equal(await seek("-1k"), "", "confirms the old form was blind to pointers");
+  assert.match(await seek("-1024c"), /model\.onnx/, "the form in the workflow must catch one");
+});
+
 test("an installer build refuses when there is no package to wrap", async (t) => {
   // Pointed at an empty output directory, so this never depends on whether a
   // package happens to be lying around from an earlier build.

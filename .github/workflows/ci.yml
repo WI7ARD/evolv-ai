@@ -134,7 +134,12 @@ jobs:
       # and then fails the first time someone uses Piper.
       - name: Verify Git LFS assets were materialised
         run: |
-          pointers=$(find electron/voice-assets -type f -size -1k -exec grep -l '^version https://git-lfs' {} + || true)
+          # -size -1024c, in bytes. `-size -1k` looks equivalent and is not:
+          # find rounds sizes up to whole blocks, so a 133-byte pointer counts
+          # as 1k and "less than 1k" matches nothing at all. That form is a
+          # guard that can never fire, which is worse than no guard — it
+          # reports success on a tree with no models in it.
+          pointers=$(find electron/voice-assets -type f -size -1024c -exec grep -l '^version https://git-lfs' {} + || true)
           if [ -n "$pointers" ]; then echo "$pointers"; echo "Voice assets are still Git LFS pointers."; exit 1; fi
           echo "All voice assets are real files."
       - name: Install installer tooling
