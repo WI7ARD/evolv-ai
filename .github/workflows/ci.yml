@@ -107,3 +107,55 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+
+  # The installers people actually double-click: an NSIS .exe for Windows and an
+  # AppImage for Linux. Both are built on one Linux runner because both formats
+  # cross-build — NSIS is a Linux package and an AppImage is a squashfs image
+  # with a runtime in front of it — and because building them here means the
+  # same job produces the matching pair from the same commit.
+  #
+  # These wrap the packages scripts/pack-win.mjs produces rather than packaging
+  # again. That script swaps in the Electron-ABI better_sqlite3.node and lifts
+  # the voice assets out of the asar; a second pipeline would lose both quietly.
+  installers:
+    name: Installers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          # Node 20 for the same reason the Windows package job pins it.
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # An installer whose voice assets are LFS pointer stubs installs happily
+      # and then fails the first time someone uses Piper.
+      - name: Verify Git LFS assets were materialised
+        run: |
+          pointers=$(find electron/voice-assets -type f -size -1k -exec grep -l '^version https://git-lfs' {} + || true)
+          if [ -n "$pointers" ]; then echo "$pointers"; echo "Voice assets are still Git LFS pointers."; exit 1; fi
+          echo "All voice assets are real files."
+      - name: Install installer tooling
+        run: sudo apt-get update && sudo apt-get install -y nsis squashfs-tools
+      - run: npm run dist:win
+      - run: npm run installer:win
+      - run: npm run dist:linux
+      - run: npm run installer:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Evolv-Windows-Installer
+          path: |
+            out/make/nsis/win32/x64/*.exe
+            out/make/nsis/win32/x64/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Evolv-Linux-AppImage
+          path: |
+            out/make/appimage/linux/x64/*.AppImage
+            out/make/appimage/linux/x64/*.sha256
+          if-no-files-found: error
+          retention-days: 14

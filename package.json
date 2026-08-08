@@ -28,6 +28,8 @@
     "package:linux": "electron-forge package --platform=linux --arch=x64",
     "make:linux": "electron-forge make --platform=linux --arch=x64",
     "dist:linux": "node scripts/pack-win.mjs --platform=linux",
+    "installer:win": "node scripts/make-installers.mjs --platform=win32",
+    "installer:linux": "node scripts/make-installers.mjs --platform=linux",
     "linux:validate": "node scripts/validate-linux.mjs",
     "itch:validate": "node scripts/itch-release.mjs validate",
     "itch:push": "node scripts/itch-release.mjs push",
