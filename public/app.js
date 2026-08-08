@@ -2,6 +2,7 @@ import { initAgentWorkspace, refreshAgentWorkspace } from "./agent-workspace.js"
 import { initSandboxWorkspace, refreshSandboxes } from "./sandbox.js";
 import { initPhysics, refreshPhysics, suspendPhysics } from "./physics.js";
 import { initLab, refreshLab, suspendLab } from "./lab.js";
+import { initDemo } from "./demo.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -1121,6 +1122,11 @@ async function init() {
   initSandboxWorkspace({ api, toast, project: activeProject });
   initPhysics({ api, toast });
   initLab({ api, toast, project: activeProject });
+  initDemo({ api, toast, sendMessage, switchView });
+  $("#demo-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
   $("#lab-back-to-chat")?.addEventListener("click", () => {
     switchView("chat");
     elements.prompt.focus();
@@ -1787,7 +1793,8 @@ const COMPOSER_COMMANDS = [
   { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal },
   { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox },
   { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") },
-  { name: "/lab", description: "Open the lab display", run: () => switchView("lab") }
+  { name: "/lab", description: "Open the lab display", run: () => switchView("lab") },
+  { name: "/demo", description: "Watch Evolv run and record an experiment", run: () => switchView("demo") }
 ];
 
 function openSandbox() {

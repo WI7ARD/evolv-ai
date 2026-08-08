@@ -930,6 +930,18 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 
 /* A grid rather than a row: fourteen tools wrap into something scannable
    instead of a line that runs off the edge or scrolls sideways. */
+.demo-hud {
+  position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid rgba(255, 68, 102, .45); border-radius: 999px;
+  background: rgba(10, 13, 14, .94); padding: 9px 12px 9px 16px;
+  font-size: 12px; color: var(--ink); box-shadow: 0 8px 30px rgba(0, 0, 0, .45);
+}
+.demo-hud .secondary-button { padding: 6px 12px; font-size: 10px; }
+.demo-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff4466; animation: demo-blink 1.4s ease-in-out infinite; }
+@keyframes demo-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .demo-dot { animation: none; } }
+
 .physics-scenes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .physics-scenes input, .physics-scenes select {
   border: 1px solid var(--line); background: transparent; color: var(--ink);
@@ -958,7 +970,19 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .physics-readout { font-variant-numeric: tabular-nums; min-height: 1.2em; }
 @media (max-width: 620px) {
   .physics-controls .physics-danger { margin-left: 0; }
-  .physics-scenes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .demo-hud {
+  position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid rgba(255, 68, 102, .45); border-radius: 999px;
+  background: rgba(10, 13, 14, .94); padding: 9px 12px 9px 16px;
+  font-size: 12px; color: var(--ink); box-shadow: 0 8px 30px rgba(0, 0, 0, .45);
+}
+.demo-hud .secondary-button { padding: 6px 12px; font-size: 10px; }
+.demo-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff4466; animation: demo-blink 1.4s ease-in-out infinite; }
+@keyframes demo-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .demo-dot { animation: none; } }
+
+.physics-scenes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .physics-scenes input, .physics-scenes select {
   border: 1px solid var(--line); background: transparent; color: var(--ink);
   border-radius: 6px; padding: 8px 10px; font-size: 11px; font-family: inherit;

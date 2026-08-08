@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } from "electron";
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, safeStorage, session, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createElectronSecretStore } from "../lib/secrets.mjs";
@@ -7,6 +7,8 @@ import { DesktopVoiceService } from "./voice-service.mjs";
 import { DesktopVaultHost } from "./vault-host.mjs";
 import { DesktopProjectHost } from "./project-host.mjs";
 import { DesktopUpdateService } from "./update-service.mjs";
+import { DemoRecorder } from "./demo-recorder.mjs";
+import { createRequire } from "node:module";
 
 const electronRoot = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,9 +24,50 @@ let vaultHost;
 let projectHost;
 let updateService;
 let desktopLogger;
+let demoRecorder;
+// Screen capture is off unless a demo asked for it moments ago. A standing
+// permission would let any script in the window record it silently.
+let demoCaptureArmedUntil = 0;
 
 function trustedVoiceRequest(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Voice request was rejected.");
+}
+
+// ffmpeg-static exports the path inside node_modules. Packaged, that path is
+// inside app.asar, where a binary cannot be executed — the packer unpacks it,
+// so the asar segment is rewritten to the unpacked copy. Same trick the voice
+// assets use, just derived rather than hard-coded.
+function resolveFfmpeg() {
+  try {
+    const resolved = createRequire(import.meta.url)("ffmpeg-static");
+    if (typeof resolved !== "string" || !resolved) return "";
+    return app.isPackaged ? resolved.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : resolved;
+  } catch {
+    return "";
+  }
+}
+
+function registerDemoBridge() {
+  const handle = (channel, handler) => ipcMain.handle(channel, async (event, payload = {}) => {
+    trustedVoiceRequest(event);
+    return handler(payload);
+  });
+  // A short window, not a flag: if a demo fails between arming and recording,
+  // the capability lapses on its own rather than staying open until quit.
+  handle("demo:arm", () => {
+    demoCaptureArmedUntil = Date.now() + 15_000;
+    return { armed: true, converter: demoRecorder.available() };
+  });
+  handle("demo:disarm", () => {
+    demoCaptureArmedUntil = 0;
+    return { armed: false };
+  });
+  handle("demo:save", async ({ bytes, name }) => demoRecorder.save(Buffer.from(bytes || []), { name }));
+  handle("demo:reveal", ({ path: target }) => {
+    // Only ever reveals what this session just wrote.
+    if (typeof target === "string" && target.startsWith(demoRecorder.outputDir)) shell.showItemInFolder(target);
+    return { ok: true };
+  });
 }
 
 function registerVoiceBridge() {
@@ -193,7 +236,13 @@ async function createWindow() {
       : path.join(electronRoot, "windows-speech.ps1"),
     platform: process.platform
   });
+  demoRecorder = new DemoRecorder({
+    ffmpegPath: resolveFfmpeg(),
+    outputDir: path.join(app.getPath("videos"), "Evolv"),
+    logger: desktopLogger
+  });
   registerVoiceBridge();
+  registerDemoBridge();
   registerVaultBridge();
   registerProjectBridge();
   registerAppBridge();
@@ -202,11 +251,25 @@ async function createWindow() {
   const local = await serverModule.ready;
   const origin = local.url;
 
+  // Answered only while a demo is armed, and only ever with this window — so
+  // the recording cannot become a view of the rest of the desktop.
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    if (Date.now() > demoCaptureArmedUntil || !mainWindow) return callback({});
+    try {
+      const sources = await desktopCapturer.getSources({ types: ["window"] });
+      const own = sources.find((source) => source.id === mainWindow.getMediaSourceId());
+      callback(own ? { video: own } : {});
+    } catch {
+      callback({});
+    }
+  }, { useSystemPicker: false });
+
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const requestingOrigin = new URL(webContents.getURL()).origin;
     const mediaTypes = details?.mediaTypes || [];
     const trustedMedia = permission === "camera" || permission === "microphone"
-      || (permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => ["audio", "video"].includes(type)));
+      || (permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => ["audio", "video"].includes(type)))
+      || (permission === "display-capture" && Date.now() <= demoCaptureArmedUntil);
     callback(requestingOrigin === origin && trustedMedia);
   });
 
