@@ -360,19 +360,112 @@ test("approval-required tools pause the run and a reviewed decision resumes the 
   assert.equal(resumed.findLast((event) => event.type === "run").state, "completed");
 });
 
-test("tool loop stops at the round limit", async () => {
+// Rewritten deliberately. This used to assert that a model asking for tools
+// forever ended in a TOOL_LOOP_LIMIT error with status "limit". That is no
+// longer the contract: the last round is asked without tools, so the turn ends
+// with the model answering instead of with a red error about a ceiling it was
+// never told about.
+test("a model that never stops asking for tools still ends with an answer", async () => {
   mock.setCapabilities(["completion", "tools"]);
-  mock.setScript((body, callIndex) => [
-    { tool_calls: [{ function: { name: "calculate", arguments: { expression: `${callIndex + 1}+${callIndex}` } } }] }
-  ]);
+  mock.setScript((body, callIndex) => (body.tools
+    ? [{ tool_calls: [{ function: { name: "calculate", arguments: { expression: `${callIndex + 1}+${callIndex}` } } }] }]
+    : [{ content: "I have run as many tools as this turn allows; here is the answer." }]));
   const conversation = await createConversation("loop");
-  const response = await chat(conversation.id, { text: "loop forever", model: "loop-model" });
-  const events = await readEvents(response);
-  const errorEvent = events.find((event) => event.type === "error");
-  assert.equal(errorEvent.code, "TOOL_LOOP_LIMIT");
+  const events = await readEvents(await chat(conversation.id, { text: "loop forever", model: "loop-model" }));
+
+  assert.equal(events.find((event) => event.type === "error"), undefined, "running out of rounds is not an error");
   const complete = events.findLast((event) => event.type === "complete");
-  assert.equal(complete.status, "limit");
-  assert.equal(events.filter((event) => event.type === "tool_result").length, 4);
+  assert.equal(complete.status, "complete");
+
+  // Eleven tool rounds, then a twelfth asked without tools that produces the
+  // reply. The point is that the reply exists at all.
+  assert.equal(events.filter((event) => event.type === "tool_result").length, 11);
+  const answer = events.filter((event) => event.type === "content").map((event) => event.delta).join("");
+  assert.match(answer, /here is the answer/);
+});
+
+// How many calls have actually come back so far. Derived from the transcript
+// rather than a counter in the test, because routing and title generation also
+// reach the mock and would advance a closure variable that is not a tool round.
+const completedToolCalls = (body) => body.messages.filter((message) => message.role === "tool").length;
+
+test("a turn asking for ten tools runs four and is told which six did not run", async () => {
+  mock.setCapabilities(["completion", "tools"]);
+  const sent = [];
+  mock.setScript((body) => {
+    sent.push(body);
+    if (completedToolCalls(body)) return [{ content: "Done." }];
+    return [{
+      tool_calls: Array.from({ length: 10 }, (unused, index) => ({
+        id: `wanted-${index}`,
+        function: { name: "calculate", arguments: { expression: `${index}+1` } }
+      }))
+    }];
+  });
+  const conversation = await createConversation("overflow");
+  const events = await readEvents(await chat(conversation.id, { text: "ten sums", model: "overflow-model" }));
+
+  // Four run. The other six used to vanish with no event, no transcript entry
+  // and nothing said to the model, which is how a scene came out half-built.
+  const results = events.filter((event) => event.type === "tool_result");
+  assert.equal(results.length, 4);
+
+  // And the model is told, by name, what it still has to ask for.
+  const notices = sent.flatMap((body) => body.messages.filter((message) => /Only 4 tool calls run per turn/.test(message.content || "")));
+  assert.ok(notices.length, "the model was never told its extra calls did not run");
+  assert.match(notices[0].content, /calculate, calculate, calculate, calculate, calculate, calculate/);
+  assert.equal(events.find((event) => event.type === "error"), undefined);
+});
+
+test("what a turn defers is really executed on the turns that follow", async () => {
+  mock.setCapabilities(["completion", "tools"]);
+  // Ten sums asked at once, then re-asked for whatever has not come back. That
+  // is the shape a model takes once it is told what did not run.
+  mock.setScript((body) => {
+    const done = completedToolCalls(body);
+    if (done >= 10) return [{ content: "All ten are done." }];
+    return [{
+      tool_calls: Array.from({ length: 10 - done }, (unused, index) => ({
+        id: `sum-${done + index}`,
+        function: { name: "calculate", arguments: { expression: `${done + index}+1` } }
+      }))
+    }];
+  });
+  const conversation = await createConversation("resume");
+  const events = await readEvents(await chat(conversation.id, { text: "ten sums, properly", model: "resume-model" }));
+
+  // Ten requested, ten executed, across 4 / 4 / 2. Nothing lost in the middle.
+  const results = events.filter((event) => event.type === "tool_result");
+  assert.equal(results.length, 10);
+  assert.deepEqual(
+    results.map((event) => JSON.parse(event.output).result).sort((a, b) => a - b),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  );
+  assert.equal(events.findLast((event) => event.type === "complete").status, "complete");
+});
+
+test("a long tool sequence is no longer cut off at six calls", async () => {
+  mock.setCapabilities(["completion", "tools"]);
+  // Two calls a turn, four turns. Under the old ceiling the seventh and eighth
+  // were dropped and the request finished early — twice over, once by the
+  // slice and once by a chat run budget clamped down to six.
+  mock.setScript((body) => {
+    const done = completedToolCalls(body);
+    if (done >= 8) return [{ content: "Eight calls, all of them run." }];
+    return [{
+      tool_calls: [0, 1].map((offset) => ({
+        id: `long-${done + offset}`,
+        function: { name: "calculate", arguments: { expression: `${done + offset}+100` } }
+      }))
+    }];
+  });
+  const conversation = await createConversation("long");
+  const events = await readEvents(await chat(conversation.id, { text: "eight calls", model: "long-model" }));
+
+  assert.equal(events.filter((event) => event.type === "tool_result").length, 8);
+  assert.equal(events.findLast((event) => event.type === "complete").status, "complete");
+  const answer = events.filter((event) => event.type === "content").map((event) => event.delta).join("");
+  assert.match(answer, /all of them run/);
 });
 
 test("a round's tool calls run four at a time, in order, without racing an approval", async () => {

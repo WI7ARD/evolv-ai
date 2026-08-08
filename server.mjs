@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createDatabase } from "./lib/database.mjs";
-import { batchToolCalls } from "./lib/tool-batching.mjs";
+import { batchToolCalls, TOOL_BATCH_SIZE } from "./lib/tool-batching.mjs";
 import { createAuthService } from "./lib/auth.mjs";
 import { createAccountStore } from "./lib/accounts.mjs";
 import { createProfileManager } from "./lib/profiles.mjs";
@@ -54,6 +54,10 @@ const OLLAMA_URL = (process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(
 const MAX_BODY = 25 * 1024 * 1024;
 const SMALL_BODY = 256 * 1024;
 const AUTH_BODY = 16 * 1024;
+// How many times a chat turn may come back asking for more tools. With four
+// calls run per round, this is what gives a model room to build something
+// larger a few at a time instead of losing the remainder.
+const MAX_TOOL_ROUNDS = 12;
 // Explicit positive values are trusted verbatim (tests use very small ones).
 const STREAM_IDLE_TIMEOUT_MS = Number(process.env.OLLAMA_STREAM_IDLE_MS) > 0
   ? Number(process.env.OLLAMA_STREAM_IDLE_MS)
@@ -1453,7 +1457,13 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
       budgets: {
         maxSteps: 1,
         maxRuntimeMs: body.agentBudgets?.maxRuntimeMs,
-        maxToolCalls: Math.min(6, Number(body.agentBudgets?.maxToolCalls) || 6),
+        // Enough for every round to spend its four. This used to be
+        // Math.min(6, …), which clamped the budget *down* and silently
+        // overrode the larger default the runtime already carried — so a turn
+        // died of RUN_BUDGET_EXCEEDED long before the loop was finished. The
+        // loop's own round structure is the real limit now; this is the
+        // backstop behind it, and agent-runtime still bounds it to 100.
+        maxToolCalls: Number(body.agentBudgets?.maxToolCalls) || MAX_TOOL_ROUNDS * TOOL_BATCH_SIZE,
         maxRetries: body.agentBudgets?.maxRetries,
         maxTokens: Math.max(maxTokens, Number(body.agentBudgets?.maxTokens) || maxTokens),
         maxCostUnits: body.agentBudgets?.maxCostUnits
@@ -1559,7 +1569,11 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
   // burn the call budget re-running the same tool; repeats reuse the result.
   const executedCalls = new Map();
   try {
-    for (let round = 0; round < 4; round += 1) {
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+      // The last round is asked without tools, so the turn always ends with the
+      // model answering in words rather than with an error about a limit it
+      // could not see. Everything it gathered is still in `messages`.
+      const finalRound = round === MAX_TOOL_ROUNDS - 1;
       agentRuntime.assertCanContinue(agentRunId);
       activeAssistantId = database.addMessage({
         conversationId,
@@ -1575,7 +1589,7 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
       const ollamaBody = {
         model: selectedModel,
         messages,
-        tools: enabledTools.length ? enabledTools : undefined,
+        tools: enabledTools.length && !finalRound ? enabledTools : undefined,
         options: {
           temperature,
           num_ctx: numCtx,
@@ -1623,7 +1637,11 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
       emitFiltered(thinkFilter.flush());
       lastContent = content;
       lastThinking = thinking;
-      const normalizedCalls = toolCalls.slice(0, Math.max(0, 6 - totalCalls)).map((call) => ({
+      // Four calls run per round. A model that asks for ten is not failed and
+      // its extra calls are not quietly dropped — they are named back to it
+      // below so it can ask again, which turns ten into 4 / 4 / 2 instead of
+      // six built and four silently lost.
+      const normalize = (call) => ({
         id: call.id || crypto.randomUUID(),
         type: "function",
         function: {
@@ -1634,7 +1652,13 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
             })()
             : call.function?.arguments || {}
         }
-      }));
+      });
+      // On the final round the tools were not offered, so anything a provider
+      // returns anyway is ignored rather than run — that round exists to
+      // produce an answer, and honouring a call there would loop past the cap.
+      const requestedCalls = finalRound ? [] : toolCalls;
+      const normalizedCalls = requestedCalls.slice(0, TOOL_BATCH_SIZE).map(normalize);
+      const deferredCalls = requestedCalls.slice(TOOL_BATCH_SIZE).map(normalize);
       database.updateMessage(activeAssistantId, {
         content,
         thinking,
@@ -1797,23 +1821,32 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
           }
         }
       }
-      if (totalCalls >= 6) {
+      // Hand the overflow back by name. Without this the model has no way to
+      // know part of what it asked for never happened, and will describe a
+      // result it does not have.
+      if (deferredCalls.length) {
+        const names = deferredCalls.map((call) => call.function.name).join(", ");
         messages.push({
           role: "system",
-          content: "The tool-call budget is exhausted. Answer using the information already available and do not request more tools."
+          content: `Only ${TOOL_BATCH_SIZE} tool calls run per turn. These were not run and have no result: ${names}. Request them again now, up to ${TOOL_BATCH_SIZE} at a time.`
         });
       }
     }
+    // Not reachable in normal operation: the final round is asked without
+    // tools and therefore always takes the completion branch above. This stays
+    // as a safety net so a provider doing something unexpected still ends the
+    // request deliberately rather than by falling off the end of the handler.
+    const limitMessage = `The tool loop reached its ${MAX_TOOL_ROUNDS}-round limit.`;
     database.updateMessage(activeAssistantId, {
       content: lastContent,
       thinking: lastThinking,
       status: "limit",
       metadata: { error: "Tool round limit reached.", provider: providerId, routing: routeMetadata, agentRunId }
     });
-    const limitedRun = agentRuntime.fail(agentRunId, Object.assign(new Error("The tool loop reached its four-round limit."), { code: "TOOL_LOOP_LIMIT" }));
+    const limitedRun = agentRuntime.fail(agentRunId, Object.assign(new Error(limitMessage), { code: "TOOL_LOOP_LIMIT" }));
     evolutionService.evaluateRun(agentRunId, { messageId: activeAssistantId });
     writeStreamEvent(res, { type: "run", runId: agentRunId, stepId: agentStepId, state: limitedRun.state, budgets: limitedRun.budgets });
-    writeStreamEvent(res, { type: "error", code: "TOOL_LOOP_LIMIT", error: "The tool loop reached its four-round limit." });
+    writeStreamEvent(res, { type: "error", code: "TOOL_LOOP_LIMIT", error: limitMessage });
     writeStreamEvent(res, { type: "complete", conversationId, messageId: activeAssistantId, runId: agentRunId, status: "limit" });
     if (routingEventId) database.finishRoutingEvent(routingEventId, { messageId: activeAssistantId, status: "limit", outcome: "tool loop limit" });
     res.end();
