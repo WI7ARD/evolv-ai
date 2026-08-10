@@ -1794,7 +1794,7 @@ const COMPOSER_COMMANDS = [
   { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox },
   { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") },
   { name: "/lab", description: "Open the lab display", run: () => switchView("lab") },
-  { name: "/demo", description: "Watch Evolv run and record an experiment", run: () => switchView("demo") }
+  { name: "/demo", description: "Watch Evolv run a narrated experiment", run: () => switchView("demo") }
 ];
 
 function openSandbox() {

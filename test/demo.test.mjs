@@ -122,6 +122,29 @@ test("no half-removed recorder is left behind", async () => {
   const html = await readFile(path.join(root, "public", "index.html"), "utf8");
   assert.doesNotMatch(html, /id="demo-reveal"/);
   assert.match(html, /screen recorder you already use/);
+
+  // Prose, not just API names. The sweep above greps for MediaRecorder and
+  // friends, which is why the /demo command description sat there for three
+  // commits still telling people Evolv would "record an experiment" — a promise
+  // in plain English that no identifier match could ever catch.
+  // Sentences only. `voice.recording` and the "recording" CSS class are the
+  // microphone, which is a real feature and must not trip this — so the sweep
+  // looks at quoted prose and at rendered HTML text, not at identifiers.
+  const app = await readFile(path.join(root, "public", "app.js"), "utf8");
+  const prose = [
+    ...(app.match(/"[^"\n]{16,}"|'[^'\n]{16,}'/g) || []),
+    ...html.replace(/<[^>]*>/g, " ").split(/(?<=[.!?])\s+/)
+  ];
+  // "Knowledge record deleted" is a database record, not a claim about video,
+  // so a sentence only counts when it pairs a record-verb with the thing that
+  // would be recorded.
+  const allowed = /screen recorder you already use|does not record itself/;
+  for (const sentence of prose) {
+    if (!/\brecord(s|ed|ing|er)?\b/i.test(sentence)) continue;
+    if (!/\b(demo|screen|video|mp4|clip|capture|experiment)\b/i.test(sentence)) continue;
+    assert.match(sentence, allowed,
+      `user-facing text still claims Evolv records: ${sentence.trim().slice(0, 120)}`);
+  }
 });
 
 test("the demo stays stoppable after it navigates away from its own panel", async () => {
