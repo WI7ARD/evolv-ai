@@ -302,6 +302,30 @@ test("supports persisted conversation lifecycle", async () => {
   assert.equal((await client.fetch(`/api/conversations/${created.id}?permanent=true`, { method: "DELETE" })).status, 200);
 });
 
+test("rewinding and saving a conversation refuse rather than half-succeed", async () => {
+  const created = await (await client.fetch("/api/conversations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Edit and save" })
+  })).json();
+
+  // Editing rewinds the conversation to a specific message. A message id that
+  // is not in this conversation must change nothing at all.
+  const truncated = await client.fetch(`/api/conversations/${created.id}/truncate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ messageId: "no-such-message" })
+  });
+  assert.equal(truncated.status, 404);
+  assert.equal((await (await client.fetch(`/api/conversations/${created.id}`)).json()).messages.length, 0);
+
+  // Saving a chat writes into the user's vault. With no vault connected it has
+  // to say so, not fail somewhere inside the writer.
+  const saved = await client.fetch(`/api/conversations/${created.id}/vault-note`, { method: "POST", body: "{}" });
+  assert.equal(saved.status, 409);
+  assert.match((await saved.json()).error, /Connect an Obsidian vault/);
+});
+
 test("exposes bounded tool configuration", async () => {
   const response = await client.fetch("/api/tools");
   assert.equal(response.status, 200);

@@ -22,6 +22,10 @@ const elements = {
   healthDot: $("#status-dot"),
   healthLabel: $("#status-label"),
   healthDetail: $("#status-detail"),
+  commandMenu: $("#command-menu"),
+  editBanner: $("#edit-banner"),
+  editCancel: $("#edit-cancel"),
+  saveChat: $("#save-chat-button"),
   localSetup: $("#local-setup"),
   localSetupTitle: $("#local-setup-title"),
   localSetupDetail: $("#local-setup-detail"),
@@ -1817,10 +1821,15 @@ function messageNode(message, index) {
         </div>` : ""}
       </details>
     `).join("")}</div>` : ""}
+    ${!isAssistant && !message.streaming ? `<div class="message-actions">
+      <button class="feedback-button edit-button" title="Edit and resend" aria-label="Edit and resend this message">✎</button>
+      <button class="feedback-button copy-button" title="Copy" aria-label="Copy this message">⧉</button>
+    </div>` : ""}
     ${isAssistant && !message.streaming ? `<div class="message-actions">
       <button class="feedback-button ${message.feedback === "up" ? "selected" : ""}" data-rating="up" title="Helpful">↑</button>
       <button class="feedback-button ${message.feedback === "down" ? "selected" : ""}" data-rating="down" title="Needs work">↓</button>
       <button class="feedback-button speak-button" title="Read aloud" aria-label="Read this response aloud">◖</button>
+      <button class="feedback-button copy-button" title="Copy" aria-label="Copy this response">⧉</button>
       ${index === app.messages.length - 1 || ["error", "interrupted", "limit"].includes(message.status) ? `
         <button class="feedback-button regen-button" title="Regenerate response" aria-label="Regenerate response">↻</button>` : ""}
     </div>` : ""}
@@ -1830,6 +1839,10 @@ function messageNode(message, index) {
       button.addEventListener("click", () => speakText(message.content));
     } else if (button.classList.contains("regen-button")) {
       button.addEventListener("click", regenerateResponse);
+    } else if (button.classList.contains("copy-button")) {
+      button.addEventListener("click", () => copyText(message.content, button));
+    } else if (button.classList.contains("edit-button")) {
+      button.addEventListener("click", () => startEditingMessage(index));
     } else {
       button.addEventListener("click", () => giveFeedback(index, button.dataset.rating));
     }
@@ -1972,6 +1985,79 @@ function openSandbox() {
   switchView("sandbox");
 }
 
+// A response is worth more outside Evolv than inside it. Code blocks already
+// had this; whole messages did not, which left selecting the text by hand.
+async function copyText(text, button) {
+  try {
+    await navigator.clipboard.writeText(String(text || ""));
+    if (button) {
+      const original = button.textContent;
+      button.textContent = "✓";
+      setTimeout(() => { button.textContent = original; }, 1200);
+    }
+  } catch {
+    toast("Clipboard is unavailable.", "error");
+  }
+}
+
+// The slash commands existed but could only be reached by typing one from
+// memory. The menu appears as soon as a "/" is typed and lists what is there.
+function renderCommandMenu() {
+  const match = elements.prompt.value.match(/^\/([a-z0-9-]*)$/i);
+  const matches = match
+    ? COMPOSER_COMMANDS.filter((command) => command.name.slice(1).startsWith(match[1].toLowerCase()))
+    : [];
+  elements.commandMenu.classList.toggle("hidden", !matches.length);
+  if (!matches.length) return;
+  elements.commandMenu.innerHTML = matches.map((command) => `
+    <button type="button" data-command="${escapeHtml(command.name)}">
+      <strong>${escapeHtml(command.name)}</strong><span>${escapeHtml(command.description)}</span>
+    </button>`).join("");
+}
+
+function hideCommandMenu() {
+  elements.commandMenu?.classList.add("hidden");
+}
+
+// Editing loads the message back into the composer and marks the point the
+// conversation will be rewound to. Nothing is deleted until the edited message
+// is actually sent, so backing out costs nothing.
+function startEditingMessage(index) {
+  const message = app.messages[index];
+  if (!message || message.role !== "user" || app.generating) return;
+  app.editing = { id: message.id, index };
+  elements.prompt.value = message.content || "";
+  elements.editBanner.classList.remove("hidden");
+  resizePrompt();
+  elements.prompt.focus();
+  elements.prompt.setSelectionRange(elements.prompt.value.length, elements.prompt.value.length);
+}
+
+function cancelEditing() {
+  if (!app.editing) return false;
+  app.editing = null;
+  elements.prompt.value = "";
+  elements.editBanner.classList.add("hidden");
+  resizePrompt();
+  return true;
+}
+
+async function saveChatToVault() {
+  if (!app.conversationId || !app.messages.length) {
+    toast("There is no chat to save yet.", "error");
+    return;
+  }
+  try {
+    const result = await api(`/api/conversations/${encodeURIComponent(app.conversationId)}/vault-note`, {
+      method: "POST",
+      body: "{}"
+    });
+    toast(`Saved to ${result.path}`);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
 function matchComposerCommand(text) {
   const match = String(text).trim().match(/^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i);
   if (!match) return null;
@@ -1993,6 +2079,27 @@ function openAgentGoal(objective = "") {
 
 async function sendMessage(text) {
   if (!text.trim() || app.generating) return;
+  hideCommandMenu();
+
+  // An edited question replaces itself and the replies it drew. The rewind
+  // happens first and only once: if it fails, nothing is sent and the
+  // conversation is exactly as it was.
+  if (app.editing) {
+    const { id } = app.editing;
+    try {
+      await api(`/api/conversations/${encodeURIComponent(app.conversationId)}/truncate`, {
+        method: "POST",
+        body: JSON.stringify({ messageId: id })
+      });
+    } catch (error) {
+      toast(error.message, "error");
+      return;
+    }
+    app.editing = null;
+    elements.editBanner.classList.add("hidden");
+    await openConversation(app.conversationId);
+  }
+
   const composerCommand = matchComposerCommand(text);
   if (composerCommand) {
     elements.prompt.value = "";
@@ -3681,9 +3788,31 @@ function bindEvents() {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       elements.composer.requestSubmit();
+      return;
+    }
+    // Up-arrow in an empty composer edits the last thing you said, the way a
+    // shell recalls the last command.
+    if (event.key === "ArrowUp" && !elements.prompt.value && !app.generating) {
+      const offset = [...app.messages].reverse().findIndex((message) => message.role === "user");
+      if (offset >= 0) {
+        event.preventDefault();
+        startEditingMessage(app.messages.length - 1 - offset);
+      }
     }
   });
-  elements.prompt.addEventListener("input", resizePrompt);
+  elements.prompt.addEventListener("input", () => {
+    resizePrompt();
+    renderCommandMenu();
+  });
+  elements.commandMenu?.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-command]");
+    if (!button) return;
+    elements.prompt.value = button.dataset.command;
+    hideCommandMenu();
+    elements.composer.requestSubmit();
+  });
+  elements.editCancel?.addEventListener("click", cancelEditing);
+  elements.saveChat?.addEventListener("click", saveChatToVault);
   elements.stop.addEventListener("click", async () => {
     const activeMessage = [...app.messages].reverse().find((message) => message.streaming && message.agentRun?.id);
     try {
@@ -4595,6 +4724,19 @@ function bindEvents() {
       event.preventDefault();
       switchView("marketplace");
       $("#marketplace-search")?.focus();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
+      event.preventDefault();
+      startNewChat().catch((error) => toast(error.message, "error"));
+      return;
+    }
+    // Escape backs out of whatever is in progress, nearest first: the command
+    // menu, then an edit, then a running generation.
+    if (event.key === "Escape") {
+      if (!elements.commandMenu?.classList.contains("hidden")) return hideCommandMenu();
+      if (cancelEditing()) return;
+      if (app.generating) elements.stop.click();
     }
   });
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));

@@ -31,6 +31,7 @@ import {
 } from "./lib/memory.mjs";
 import { mineToolSequences, validateMacroDefinition } from "./lib/macros.mjs";
 import { extractWikilinks, buildVaultFiles, parseVaultMarkdown } from "./lib/obsidian.mjs";
+import { conversationToMarkdown, vaultNotePath } from "./lib/conversation-export.mjs";
 import { generatedRecipeSchema, validateGeneratedRecipe } from "./lib/tool-recipes.mjs";
 import { currentClockContext } from "./lib/time.mjs";
 import {
@@ -2696,12 +2697,39 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/conversations") {
       return json(res, 201, database.createConversation(await readBody(req, SMALL_BODY)));
     }
-    const conversationMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)(?:\/(chat|restore))?$/);
+    const conversationMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)(?:\/(chat|restore|truncate|vault-note))?$/);
     if (conversationMatch) {
       const conversationId = decodeURIComponent(conversationMatch[1]);
       const action = conversationMatch[2];
       if (req.method === "POST" && action === "chat") {
         return await handlePersistedChat(req, res, await loadState(), conversationId, await readBody(req, MAX_BODY));
+      }
+      // Editing a question removes it and every reply that followed, because
+      // those replies answered a question that no longer exists. The edited
+      // text is then sent as an ordinary new message.
+      if (req.method === "POST" && action === "truncate") {
+        const { messageId } = await readBody(req, SMALL_BODY);
+        const removed = database.deleteMessagesFrom(conversationId, messageId);
+        if (!removed) throw Object.assign(new Error("That message is no longer part of this conversation."), { status: 404 });
+        return json(res, 200, { removed, conversation: database.getConversation(conversationId) });
+      }
+      if (req.method === "POST" && action === "vault-note") {
+        const conversation = database.getConversation(conversationId);
+        if (!conversation) throw Object.assign(new Error("Conversation not found."), { status: 404 });
+        if (!vaultService.connected()) {
+          throw Object.assign(new Error("Connect an Obsidian vault in Settings first."), { status: 409, code: "VAULT_NOT_CONNECTED", expose: true });
+        }
+        // Written through the same propose-then-approve path every other vault
+        // write uses, so saving a chat cannot bypass the approval ledger.
+        const change = vaultService.proposeChange({
+          kind: "create",
+          path: vaultNotePath(conversation),
+          content: conversationToMarkdown(conversation),
+          summary: `Save chat "${conversation.title}" to the vault`,
+          conversationId
+        });
+        await vaultService.decideChange(change.id, "approved");
+        return json(res, 201, { path: change.relativePath || vaultNotePath(conversation) });
       }
       if (req.method === "POST" && action === "restore") {
         if (!database.restoreConversation(conversationId)) throw Object.assign(new Error("Conversation not found."), { status: 404 });

@@ -108,6 +108,13 @@ body::before {
 /* Reachable but nothing to run: neither ready nor broken, and the amber is the
    difference between the two greens people would otherwise read as the same. */
 .status-dot.needs-model { background: #d6a84a; box-shadow: 0 0 8px #d6a84a; }
+.command-menu { margin: 0 auto 8px; width: min(760px, 92%); border: 1px solid var(--line); background: #171b1a; display: grid; }
+.command-menu button { display: flex; justify-content: space-between; gap: 14px; padding: 9px 13px; background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); color: var(--text); font-size: 11px; text-align: left; cursor: pointer; }
+.command-menu button:last-child { border-bottom: 0; }
+.command-menu button:hover, .command-menu button.active { background: #1f2523; }
+.command-menu strong { font: 11px "DM Mono", monospace; color: var(--acid); }
+.command-menu span { color: var(--muted); }
+.edit-banner { margin: 0 auto 8px; width: min(760px, 92%); display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); background: #171b1a; padding: 8px 13px; font-size: 11px; color: var(--muted); }
 .local-setup { margin: 0 auto 10px; width: min(760px, 92%); border: 1px solid var(--line); background: #171b1a; padding: 14px 16px; display: grid; gap: 12px; }
 .local-setup-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .local-setup-copy strong { display: block; font-size: 12px; }
