@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install-deps
       - run: npm test
 
   # Linux is a supported target (see LINUX-MINT.md and `npm run dist:linux`),
@@ -52,7 +52,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci --omit=dev
+      - uses: ./.github/actions/install-deps
+        with:
+          args: --omit=dev
       - run: npm test
 
   # Builds a real, runnable Windows package on every change and attaches it to
@@ -74,7 +76,7 @@ jobs:
           # extract-zip path that scripts/patch-extract-zip.mjs works around.
           node-version: 20
           cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install-deps
       # A packaged app whose voice assets are Git LFS pointer stubs looks fine
       # until Piper or Whisper is used, so fail here rather than ship one.
       - name: Verify Git LFS assets were materialised
@@ -129,7 +131,7 @@ jobs:
           # Node 20 for the same reason the Windows package job pins it.
           node-version: 20
           cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install-deps
       # An installer whose voice assets are LFS pointer stubs installs happily
       # and then fails the first time someone uses Piper.
       - name: Verify Git LFS assets were materialised

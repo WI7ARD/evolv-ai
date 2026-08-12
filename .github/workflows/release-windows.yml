@@ -24,7 +24,7 @@ jobs:
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag must equal v$version" }
-      - run: npm ci
+      - uses: ./.github/actions/install-deps
       - run: npm test
       - run: npm run make:win
       - name: Create SHA-256 release file

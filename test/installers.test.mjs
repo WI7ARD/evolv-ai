@@ -121,6 +121,30 @@ test("the Git LFS guard can actually fire", async (t) => {
   assert.match(await seek("-1024c"), /model\.onnx/, "the form in the workflow must catch one");
 });
 
+test("no workflow installs dependencies without retrying", async () => {
+  // A single socket hang-up while better-sqlite3 fetched its prebuilt binary
+  // failed a whole build: the install fell back to compiling from source, and
+  // the compiler fallback is dead on the current Windows image, which ships a
+  // Visual Studio the bundled node-gyp reads as unsupported. The install has to
+  // survive a blip on its own.
+  const { readdir } = await import("node:fs/promises");
+  const directory = path.join(root, ".github", "workflows");
+
+  for (const file of await readdir(directory)) {
+    const workflow = await readFile(path.join(directory, file), "utf8");
+    const bare = workflow.split("\n").filter((line) => /^\s*-\s*(name:.*\n\s*)?run:\s*npm ci\b/.test(line));
+    assert.deepEqual(bare, [], `${file} installs with a bare npm ci, which fails the build on one dropped connection`);
+    assert.match(workflow, /uses: \.\/\.github\/actions\/install-deps/, `${file} should install through the retrying step`);
+  }
+
+  const action = await readFile(path.join(root, ".github", "actions", "install-deps", "action.yml"), "utf8");
+  assert.match(action, /using: composite/);
+  assert.match(action, /for attempt in 1 2 3/, "one attempt is what caused the failure");
+  // Through the environment, so an argument cannot become part of the script.
+  assert.match(action, /npm ci \$NPM_CI_ARGS/);
+  assert.doesNotMatch(action.slice(action.indexOf("run: |")), /\$\{\{/, "inputs must not be interpolated into the script");
+});
+
 // A dropped connection while fetching the AppImage runtime failed a CI build
 // that had already packaged both platforms successfully. Nothing was wrong with
 // the commit, and nothing about a retry is guesswork — so these two tests drive

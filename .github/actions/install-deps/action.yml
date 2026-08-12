@@ -1,0 +1,41 @@
+name: Install dependencies
+description: npm ci, retried, because a dropped download is not a broken commit.
+
+# better-sqlite3 installs by fetching a prebuilt binary and falling back to
+# compiling from source: `prebuild-install || node-gyp rebuild`. Neither half of
+# that is as safe as it looks.
+#
+# The download has no retry, so a single socket hang-up sends the install into
+# the compiler. And the compiler fallback no longer works on the Windows runner
+# at all: the image now ships Visual Studio 2026, which the bundled node-gyp
+# reads as "unsupported version: 18" and then reports as no Visual Studio
+# installed. A transient blip therefore fails the whole build rather than
+# costing a slow compile.
+#
+# Retrying the install is what actually fixes it — on the prebuilt path no
+# compiler is needed on any platform.
+
+inputs:
+  args:
+    description: Extra arguments for npm ci. The Linux jobs omit development dependencies.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      # Passed through the environment rather than interpolated into the script,
+      # so the argument stays an argument.
+      env:
+        NPM_CI_ARGS: ${{ inputs.args }}
+      run: |
+        for attempt in 1 2 3; do
+          # npm ci clears node_modules itself, so a retry starts clean.
+          if npm ci $NPM_CI_ARGS; then exit 0; fi
+          delay=$((attempt * 10))
+          echo "npm ci failed (attempt $attempt of 3); retrying in ${delay}s…"
+          sleep "$delay"
+        done
+        echo "npm ci failed three times. That is a network or registry failure rather than a broken commit."
+        exit 1
