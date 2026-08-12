@@ -14,6 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { retrySync } from "./lib/retry.mjs";
 
 const require = createRequire(import.meta.url);
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -119,14 +120,42 @@ fs.rmSync(stageRoot, { recursive: true, force: true });
 fs.cpSync(path.join(root, "node_modules", "better-sqlite3"), stage, { recursive: true });
 fs.rmSync(path.join(stage, "build", "Release", "better_sqlite3.node"), { force: true });
 console.log("Downloading Electron-ABI better-sqlite3 prebuild…");
-const prebuild = spawnSync(process.execPath, [
-  require.resolve("prebuild-install/bin.js"),
-  "--runtime", "electron", "--target", electronVersion, "--arch", arch, "--platform", platform
-], { cwd: stage, stdio: "inherit" });
 const electronBinary = path.join(stage, "build", "Release", "better_sqlite3.node");
-if (prebuild.status !== 0 || !fs.existsSync(electronBinary)) {
-  console.error(`\nNo prebuilt better-sqlite3 for Electron ${electronVersion}. Pin electron to a version`);
-  console.error("with a published prebuild (see README) or install a C++ toolchain to compile from source.");
+
+// prebuild-install has no retry of its own, and a socket hang up here used to
+// print "pin electron to a version with a published prebuild" — advice that
+// sends you looking for a version problem when the network simply dropped.
+// Output is captured rather than inherited so the two cases can be told apart:
+// no published binary is an answer and is not worth repeating, while anything
+// else is worth another attempt.
+const missing = /no prebuilt binaries found/i;
+let output = "";
+
+function downloadPrebuild() {
+  const prebuild = spawnSync(process.execPath, [
+    require.resolve("prebuild-install/bin.js"),
+    "--runtime", "electron", "--target", electronVersion, "--arch", arch, "--platform", platform
+  ], { cwd: stage, encoding: "utf8" });
+  output = `${prebuild.stdout || ""}${prebuild.stderr || ""}`.trim();
+  if (output) console.log(output);
+  if (prebuild.status !== 0 || !fs.existsSync(electronBinary)) {
+    throw new Error(output.split("\n").pop() || `prebuild-install exited ${prebuild.status}`);
+  }
+}
+
+try {
+  retrySync(downloadPrebuild, {
+    label: "The better-sqlite3 prebuild download",
+    retryable: () => !missing.test(output)
+  });
+} catch {
+  if (missing.test(output)) {
+    console.error(`\nNo prebuilt better-sqlite3 for Electron ${electronVersion}. Pin electron to a version`);
+    console.error("with a published prebuild (see README) or install a C++ toolchain to compile from source.");
+  } else {
+    console.error(`\nCould not download the better-sqlite3 prebuild for Electron ${electronVersion}.`);
+    console.error("The prebuild exists; the download failed. This is a network failure, so re-running should fix it.");
+  }
   process.exit(1);
 }
 

@@ -26,6 +26,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { retrySync } from "./lib/retry.mjs";
 
 const require = createRequire(import.meta.url);
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -160,13 +161,8 @@ SectionEnd
 // One network call stands between a green build and a red one, and it is the
 // last step of a job that has already spent five minutes packaging. A dropped
 // connection there is not a broken commit, so it is retried rather than
-// reported as a build failure. Tests shorten the wait.
-const RETRY_DELAY_MS = Number(process.env.EVOLV_RETRY_DELAY_MS) || 2000;
+// reported as a build failure.
 const RETRY_ATTEMPTS = 4;
-
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
 
 function fetchRuntime(destination) {
   if (fs.existsSync(destination) && fs.statSync(destination).size > 100_000) return destination;
@@ -179,26 +175,27 @@ function fetchRuntime(destination) {
   const partial = `${destination}.part`;
   fs.rmSync(partial, { force: true });
 
-  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt += 1) {
-    try {
-      execFileSync("curl", ["-sSL", "--fail", "--connect-timeout", "20", "-o", partial, APPIMAGE_RUNTIME_URL], { stdio: "inherit" });
-      if (fs.statSync(partial).size < 100_000) throw new Error("the download looks truncated");
-      fs.renameSync(partial, destination);
-      return destination;
-    } catch (error) {
-      fs.rmSync(partial, { force: true });
-      if (attempt === RETRY_ATTEMPTS) {
-        throw new Error(
-          `Could not download the AppImage runtime from ${APPIMAGE_RUNTIME_URL} after ${RETRY_ATTEMPTS} attempts `
-          + `(${error.message}). This is a network failure, not a problem with the build.`
-        );
+  try {
+    retrySync(() => {
+      try {
+        execFileSync("curl", ["-sSL", "--fail", "--connect-timeout", "20", "-o", partial, APPIMAGE_RUNTIME_URL], { stdio: "inherit" });
+        if (fs.statSync(partial).size < 100_000) throw new Error("the download looks truncated");
+      } catch (error) {
+        // Cleared on every failed attempt, so a partial file can never be
+        // mistaken for a finished one by the next attempt or the next build.
+        fs.rmSync(partial, { force: true });
+        throw error;
       }
-      const wait = RETRY_DELAY_MS * 2 ** (attempt - 1);
-      console.log(`Download failed (attempt ${attempt} of ${RETRY_ATTEMPTS}); retrying in ${Math.round(wait / 1000)}s…`);
-      sleepSync(wait);
-    }
+    }, { attempts: RETRY_ATTEMPTS, label: "The AppImage runtime download" });
+  } catch (error) {
+    throw new Error(
+      `Could not download the AppImage runtime from ${APPIMAGE_RUNTIME_URL} after ${RETRY_ATTEMPTS} attempts `
+      + `(${error.message}). This is a network failure, not a problem with the build.`
+    );
   }
-  throw new Error("unreachable");
+
+  fs.renameSync(partial, destination);
+  return destination;
 }
 
 function buildAppImage() {
