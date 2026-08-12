@@ -76,7 +76,10 @@ export async function startMockOllama({ capabilities = ["completion", "tools"], 
     }
     if (req.url === "/api/show") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ capabilities: currentCapabilities }));
+      // A created model remembers the prompt it was built with, which is how
+      // Evolv tells a current model from one built before the prompt changed.
+      const built = createRequests.find((request) => request.model === body.model);
+      res.end(JSON.stringify({ capabilities: currentCapabilities, ...(built ? { system: built.system } : {}) }));
       return;
     }
     if (req.url === "/api/embed") {

@@ -36,8 +36,20 @@ Two constraints, both held by tests:
 - It must not contain `"""`, which would close the `SYSTEM` block early and
   silently truncate the model's personality.
 - Changing it does not change an already-installed `evolv:latest`. Ollama built
-  that model from the prompt as it read at install time; a new prompt reaches a
-  user only when the model is created again.
+  that model from the prompt as it read at install time.
+
+That second one would make the prompt un-editable in practice — an improvement
+would reach only people installing for the first time — so Evolv checks. On
+each status read it asks Ollama for the installed model's stored prompt
+(`/api/show`) and compares it with the current one, ignoring whitespace. A
+difference sets `evolvModelStale`, and the interface offers **Rebuild Evolv
+Local**: the base model is already on disk, so a rebuild is the `create` step
+alone and downloads nothing.
+
+The comparison is cached against the model's digest, because a model that has
+not been rebuilt cannot have changed, and status is polled. A model Ollama
+cannot describe is never called stale — sending someone to rebuild a working
+model because one request failed is worse than saying nothing.
 
 ## The base model
 
@@ -103,7 +115,8 @@ Modelfile if it is rejected, so Evolv builds a model either side of that change.
 | Ollama unreachable | red | "Ollama isn't running." |
 | Reachable, no models | amber | "Ollama is running, but no AI models are installed." + **Get Evolv Local** |
 | Models, but no `evolv:latest` | green | Their models work; a quiet offer to install Evolv Local |
-| `evolv:latest` present | green | "Evolv Local ready" |
+| `evolv:latest`, older prompt | green | "Evolv Local ready · Update available" + **Rebuild Evolv Local** |
+| `evolv:latest`, current | green | "Evolv Local ready" |
 
 The third state never blocks anything. A model someone pulled themselves is a
 working install, and Evolv has no business talking them out of it.

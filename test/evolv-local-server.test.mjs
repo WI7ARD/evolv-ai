@@ -100,6 +100,8 @@ test("after installing, Evolv recognises Evolv Local on the next start", async (
 
   assert.equal(health.evolvModelInstalled, true);
   assert.equal(health.baseModelInstalled, true);
+  // Built moments ago from the current prompt, so there is nothing to rebuild.
+  assert.equal(health.evolvModelStale, false);
   assert.ok(health.modelCount >= 2);
   assert.ok(health.models.includes("evolv:latest"));
 });

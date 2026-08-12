@@ -11,7 +11,7 @@ const BASE = evolvModelDefinition().base;
 // no network. The real client is exercised separately against a fake fetch,
 // and the whole flow is exercised against the mock server in
 // evolv-local-server.test.mjs.
-function fakeClient({ models = [], version = "0.5.0", unreachable = false, onPull, onCreate } = {}) {
+function fakeClient({ models = [], version = "0.5.0", unreachable = false, onPull, onCreate, storedPrompt = EVOLV_SYSTEM_PROMPT } = {}) {
   let installed = [...models];
   const calls = [];
   const unreachableError = () => Object.assign(new Error("Ollama stopped responding. Start Ollama and try again."), { code: "OLLAMA_UNREACHABLE" });
@@ -38,6 +38,11 @@ function fakeClient({ models = [], version = "0.5.0", unreachable = false, onPul
       await onCreate?.();
       onEvent?.({ status: "writing manifest" });
       installed = [...installed, name];
+      storedPrompt = definition.system;
+    },
+    async show() {
+      calls.push(["show"]);
+      return storedPrompt === null ? null : { system: storedPrompt };
     }
   };
 }
@@ -78,6 +83,51 @@ test("evolv:latest present reports ready", async () => {
   assert.equal(status.evolvModelInstalled, true);
   assert.equal(status.baseModelInstalled, true);
   assert.equal(status.evolvModelLabel, "Evolv Local");
+});
+
+test("a model built from an older prompt is flagged, and rebuilding clears it", async () => {
+  // Editing the system prompt does not change a model Ollama already built.
+  // Without this, an improved prompt would reach only new installs and the
+  // prompt would be un-editable in practice.
+  const client = fakeClient({ models: [BASE, "evolv:latest"], storedPrompt: "an older set of instructions" });
+  const service = createEvolvLocalService({ client });
+
+  const before = await service.status();
+  assert.equal(before.evolvModelInstalled, true);
+  assert.equal(before.evolvModelStale, true);
+
+  const run = service.install();
+  await run.done;
+  assert.deepEqual(client.calls.filter(([name]) => name === "pull"), [], "a rebuild downloads nothing");
+
+  const after = await service.status();
+  assert.equal(after.evolvModelStale, false);
+});
+
+test("a current model is not called stale, and is only asked once", async () => {
+  const client = fakeClient({ models: [BASE, "evolv:latest"] });
+  const service = createEvolvLocalService({ client });
+
+  assert.equal((await service.status()).evolvModelStale, false);
+  await service.status();
+  await service.status();
+  // Status is polled; a model that has not been rebuilt cannot have changed.
+  assert.equal(client.calls.filter(([name]) => name === "show").length, 1);
+});
+
+test("a model that cannot be inspected is left alone rather than called stale", async () => {
+  // Sending someone to rebuild a working model because one request failed is
+  // worse than saying nothing.
+  const client = fakeClient({ models: [BASE, "evolv:latest"], storedPrompt: null });
+  assert.equal((await createEvolvLocalService({ client }).status()).evolvModelStale, false);
+});
+
+test("whitespace is not a reason to rebuild", async () => {
+  const client = fakeClient({
+    models: [BASE, "evolv:latest"],
+    storedPrompt: `  ${EVOLV_SYSTEM_PROMPT.replace(/\n/g, "\n ")}\n`
+  });
+  assert.equal((await createEvolvLocalService({ client }).status()).evolvModelStale, false);
 });
 
 test("a model pulled without a tag still counts as installed", async () => {
@@ -304,4 +354,9 @@ test("the interface distinguishes all four states and offers the install", async
   // number when there are none yet.
   assert.match(app, /snapshot\.percent/);
   assert.match(app, /indeterminate/);
+
+  // Rebuilding after the prompt changes, without re-downloading anything.
+  assert.match(app, /Rebuild \$\{label\}/);
+  assert.match(app, /older version of its instructions/);
+  assert.match(app, /nothing is re-downloaded/);
 });

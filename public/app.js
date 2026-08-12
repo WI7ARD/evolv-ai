@@ -1294,6 +1294,11 @@ function localStatusOf(health) {
       setup: "optional"
     };
   }
+  if (health.evolvModelStale) {
+    // Installed and working, but built before its instructions last changed.
+    // Not a fault, so the dot stays green.
+    return { dot: "connected", label: "Evolv Local ready", detail: "Update available", setup: "stale" };
+  }
   return { dot: "connected", label: "Evolv Local ready", detail: `v${health.version}`, setup: "none" };
 }
 
@@ -1316,7 +1321,8 @@ function renderLocalSetup(status, health) {
   const installing = health.install?.phase === "pulling" || health.install?.phase === "creating";
   const label = health.evolvModelLabel || "Evolv Local";
 
-  if (status.setup === "none" || (status.setup === "optional" && app.dismissedLocalSetup)) {
+  const dismissible = status.setup === "optional" || status.setup === "stale";
+  if (status.setup === "none" || (dismissible && app.dismissedLocalSetup)) {
     if (!installing) return elements.localSetup.classList.add("hidden");
   }
 
@@ -1324,6 +1330,8 @@ function renderLocalSetup(status, health) {
     offline: ["Ollama isn't running.", "Start Ollama on this computer, then refresh."],
     empty: ["Ollama is running, but no AI models are installed.", `Install ${label} to start chatting.`],
     optional: [`${label} isn't installed yet.`, "Your existing models still work. Installing adds Evolv's own local assistant."],
+    stale: [`${label} was built from an older version of its instructions.`,
+      "Rebuilding takes a few seconds — the model itself is already downloaded, and nothing is re-downloaded."],
     none: [`${label} is ready.`, "You can start chatting."]
   }[status.setup];
 
@@ -1331,9 +1339,11 @@ function renderLocalSetup(status, health) {
   elements.localSetupDetail.textContent = copy[1];
   // Nothing to install while Ollama is unreachable — there is nowhere to put it.
   elements.installButton.classList.toggle("hidden", status.setup === "offline" || status.setup === "none");
-  elements.installButton.textContent = health.baseModelInstalled && !health.evolvModelInstalled
-    ? `Finish setting up ${label}`
-    : `Get ${label}`;
+  elements.installButton.textContent = status.setup === "stale"
+    ? `Rebuild ${label}`
+    : health.baseModelInstalled && !health.evolvModelInstalled
+      ? `Finish setting up ${label}`
+      : `Get ${label}`;
   elements.localSetup.classList.remove("hidden");
 
   if (installing) attachToInstall();
