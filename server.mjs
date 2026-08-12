@@ -15,6 +15,9 @@ import { handleSandboxRoutes } from "./server/sandbox-routes.mjs";
 import { handlePhysicsRoutes } from "./server/physics-routes.mjs";
 import { handleHudRoutes } from "./server/hud-routes.mjs";
 import { createUnavailableSecretStore } from "./lib/secrets.mjs";
+import { createOllamaClient } from "./lib/ollama-client.mjs";
+import { createEvolvLocalService } from "./lib/evolv-local.mjs";
+import { DEFAULT_EVOLV_MODEL } from "./lib/evolv-models.mjs";
 import { createLogger } from "./lib/logger.mjs";
 import {
   retrieveMemory as retrieveMemoryGraph,
@@ -51,6 +54,15 @@ const logger = createLogger({ dataDir: DATA_DIR, component: "server" });
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 const PORT = Number(process.env.PORT ?? process.env.EVOLV_PORT ?? 3000);
 const OLLAMA_URL = (process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
+// Model management — what is installed, and building Evolv Local — is separate
+// from the provider service, which owns chat, capabilities and cloud keys.
+// These two are the only things in the process that talk to Ollama about
+// models rather than about conversations.
+const ollamaClient = createOllamaClient({ baseUrl: OLLAMA_URL });
+const evolvLocal = createEvolvLocalService({
+  client: ollamaClient,
+  log: (event, detail) => logger.info(event, detail)
+});
 const MAX_BODY = 25 * 1024 * 1024;
 const SMALL_BODY = 256 * 1024;
 const AUTH_BODY = 16 * 1024;
@@ -882,15 +894,42 @@ async function handleModels(res, providerId = "ollama") {
   json(res, 200, { models, provider: providerId, ollamaUrl: providerId === "ollama" ? OLLAMA_URL : undefined });
 }
 
+// Reachable and useful are different questions. Ollama running with no models
+// pulled answers /api/version perfectly while being unable to hold a
+// conversation, and reporting that as "connected" is what sends someone into
+// their first message expecting it to work. `connected` keeps its old meaning
+// for anything already reading it; the model fields are what let the interface
+// tell a working install from an empty one.
 async function handleHealth(res) {
-  try {
-    const response = await ollamaFetch("/api/version");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const payload = await response.json();
-    json(res, 200, { connected: true, version: payload.version, ollamaUrl: OLLAMA_URL });
-  } catch (error) {
-    json(res, 200, { connected: false, error: error.message, ollamaUrl: OLLAMA_URL });
-  }
+  const status = await evolvLocal.status();
+  json(res, 200, {
+    connected: status.ollamaReachable,
+    version: status.version,
+    ollamaUrl: OLLAMA_URL,
+    error: status.ollamaReachable ? undefined : `Cannot reach Ollama at ${OLLAMA_URL}. Start Ollama, then refresh.`,
+    ...status
+  });
+}
+
+// Streams an install as NDJSON, the same shape chat already streams, so the
+// interface reads it with the reader it already has. A client that arrives
+// while a download is running joins it rather than starting a second one.
+async function handleEvolvInstall(req, res, body) {
+  const run = evolvLocal.install({ model: body.model || DEFAULT_EVOLV_MODEL });
+  res.writeHead(200, {
+    "content-type": "application/x-ndjson; charset=utf-8",
+    "cache-control": "no-store",
+    "x-accel-buffering": "no"
+  });
+
+  const unsubscribe = run.subscribe((snapshot) => writeStreamEvent(res, { type: "install", ...snapshot }));
+  // Leaving the page must not cancel a download that has minutes left in it —
+  // it detaches, and the run carries on for whoever comes back to it.
+  req.on("close", unsubscribe);
+  await run.done;
+  unsubscribe();
+  writeStreamEvent(res, { type: "install", ...run.snapshot() });
+  if (!res.writableEnded) res.end();
 }
 
 function writeStreamEvent(res, event) {
@@ -2359,6 +2398,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/health") return await handleHealth(res);
+    if (req.method === "GET" && url.pathname === "/api/ollama/status") {
+      return json(res, 200, await evolvLocal.status());
+    }
+    if (req.method === "POST" && url.pathname === "/api/ollama/install-evolv") {
+      return await handleEvolvInstall(req, res, await readBody(req, SMALL_BODY));
+    }
+    if (req.method === "POST" && url.pathname === "/api/ollama/install-evolv/cancel") {
+      return json(res, 200, { cancelled: evolvLocal.cancel(), install: evolvLocal.state() });
+    }
     if (req.method === "GET" && url.pathname === "/api/models") {
       return await handleModels(res, url.searchParams.get("provider") || "ollama");
     }

@@ -105,6 +105,26 @@ body::before {
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #d6a84a; box-shadow: 0 0 8px #d6a84a; }
 .status-dot.connected { background: var(--acid); box-shadow: 0 0 8px var(--acid); }
 .status-dot.error { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+/* Reachable but nothing to run: neither ready nor broken, and the amber is the
+   difference between the two greens people would otherwise read as the same. */
+.status-dot.needs-model { background: #d6a84a; box-shadow: 0 0 8px #d6a84a; }
+.local-setup { margin: 0 auto 10px; width: min(760px, 92%); border: 1px solid var(--line); background: #171b1a; padding: 14px 16px; display: grid; gap: 12px; }
+.local-setup-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.local-setup-copy strong { display: block; font-size: 12px; }
+.local-setup-copy p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.local-setup-progress { display: grid; gap: 7px; }
+.progress-head, .progress-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--muted); }
+.progress-head span:last-child { font: 10px "DM Mono", monospace; }
+.progress-track { height: 6px; border: 1px solid var(--line); background: #0d100f; overflow: hidden; }
+.progress-bar { height: 100%; width: 0; background: var(--acid); transition: width .25s linear; }
+/* No width to animate until Ollama reports byte totals, so an unknown size
+   reads as motion rather than as a bar stuck at zero. */
+.progress-bar.indeterminate { width: 35%; animation: progress-sweep 1.1s ease-in-out infinite; }
+@keyframes progress-sweep { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.progress-actions { display: flex; gap: 8px; }
+.progress-actions .secondary-button { padding: 6px 10px; }
+.local-setup-error { font-size: 11px; color: var(--muted); }
+.local-setup-error pre { white-space: pre-wrap; word-break: break-word; font: 10px "DM Mono", monospace; margin: 6px 0 0; }
 .privacy-note { display: flex; gap: 9px; color: var(--muted-2); padding: 8px; font-size: 10px; line-height: 1.45; }
 .privacy-note span { color: var(--acid); }
 .privacy-note p { margin: 0; }

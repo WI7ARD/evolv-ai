@@ -22,6 +22,19 @@ const elements = {
   healthDot: $("#status-dot"),
   healthLabel: $("#status-label"),
   healthDetail: $("#status-detail"),
+  localSetup: $("#local-setup"),
+  localSetupTitle: $("#local-setup-title"),
+  localSetupDetail: $("#local-setup-detail"),
+  installButton: $("#install-evolv-local"),
+  installProgress: $("#local-setup-progress"),
+  installPhase: $("#local-setup-phase"),
+  installBytes: $("#local-setup-bytes"),
+  installBar: $("#local-setup-bar"),
+  installStatus: $("#local-setup-status"),
+  installCancel: $("#local-setup-cancel"),
+  installHide: $("#local-setup-hide"),
+  installError: $("#local-setup-error"),
+  installErrorDetail: $("#local-setup-error-detail"),
   activeVersion: $("#active-version"),
   proposalDot: $("#proposal-dot"),
   intelligenceDot: $("#intelligence-dot"),
@@ -1252,12 +1265,165 @@ function initializeDesktopUpdates() {
   }, 4_000);
 }
 
+// Four states, not two. Ollama answering its version endpoint while holding no
+// models is the state that used to show green and then fail on the first
+// message, so it gets its own colour and its own instruction.
+function localStatusOf(health) {
+  if (!health.connected) {
+    return { dot: "error", label: "Ollama offline", detail: "Start Ollama to chat", setup: "offline" };
+  }
+  if (!health.modelCount) {
+    return {
+      dot: "needs-model",
+      label: "Ollama connected — model needed",
+      detail: `${health.evolvModelLabel || "Evolv Local"} not installed`,
+      setup: "empty"
+    };
+  }
+  if (!health.evolvModelInstalled) {
+    // Whatever they pulled themselves works fine. This is an offer, not a
+    // blocker, and it must never talk anyone out of a model they already have.
+    return {
+      dot: "connected",
+      label: "Ollama connected",
+      detail: `${health.modelCount} model${health.modelCount === 1 ? "" : "s"} · Evolv Local not installed`,
+      setup: "optional"
+    };
+  }
+  return { dot: "connected", label: "Evolv Local ready", detail: `v${health.version}`, setup: "none" };
+}
+
 async function refreshHealth() {
   const health = await api("/api/health");
-  elements.healthDot.classList.toggle("connected", health.connected);
-  elements.healthDot.classList.toggle("error", !health.connected);
-  elements.healthLabel.textContent = health.connected ? "Ollama connected" : "Ollama offline";
-  elements.healthDetail.textContent = health.connected ? `v${health.version}` : "Start Ollama to chat";
+  app.health = health;
+  const status = localStatusOf(health);
+
+  for (const name of ["connected", "error", "needs-model"]) {
+    elements.healthDot.classList.toggle(name, status.dot === name);
+  }
+  elements.healthLabel.textContent = status.label;
+  elements.healthDetail.textContent = status.detail;
+  renderLocalSetup(status, health);
+  return health;
+}
+
+function renderLocalSetup(status, health) {
+  if (!elements.localSetup) return;
+  const installing = health.install?.phase === "pulling" || health.install?.phase === "creating";
+  const label = health.evolvModelLabel || "Evolv Local";
+
+  if (status.setup === "none" || (status.setup === "optional" && app.dismissedLocalSetup)) {
+    if (!installing) return elements.localSetup.classList.add("hidden");
+  }
+
+  const copy = {
+    offline: ["Ollama isn't running.", "Start Ollama on this computer, then refresh."],
+    empty: ["Ollama is running, but no AI models are installed.", `Install ${label} to start chatting.`],
+    optional: [`${label} isn't installed yet.`, "Your existing models still work. Installing adds Evolv's own local assistant."],
+    none: [`${label} is ready.`, "You can start chatting."]
+  }[status.setup];
+
+  elements.localSetupTitle.textContent = copy[0];
+  elements.localSetupDetail.textContent = copy[1];
+  // Nothing to install while Ollama is unreachable — there is nowhere to put it.
+  elements.installButton.classList.toggle("hidden", status.setup === "offline" || status.setup === "none");
+  elements.installButton.textContent = health.baseModelInstalled && !health.evolvModelInstalled
+    ? `Finish setting up ${label}`
+    : `Get ${label}`;
+  elements.localSetup.classList.remove("hidden");
+
+  if (installing) attachToInstall();
+}
+
+function formatProgress(snapshot) {
+  if (!snapshot.total) return "";
+  return `${formatBytes(snapshot.completed)} / ${formatBytes(snapshot.total)}`;
+}
+
+function renderInstallProgress(snapshot) {
+  const running = snapshot.phase === "pulling" || snapshot.phase === "creating";
+  elements.installProgress.classList.toggle("hidden", !running);
+  elements.installButton.disabled = running;
+  elements.installPhase.textContent = snapshot.phase === "creating"
+    ? "Configuring Evolv Local…"
+    : "Downloading Evolv Local";
+  elements.installBytes.textContent = formatProgress(snapshot);
+  elements.installStatus.textContent = snapshot.status || "";
+  // Percentages come from Ollama's own byte counts; when it has not reported
+  // any yet the bar sweeps instead of inventing a number.
+  const known = typeof snapshot.percent === "number";
+  elements.installBar.classList.toggle("indeterminate", running && !known);
+  elements.installBar.style.width = known ? `${snapshot.percent}%` : "";
+
+  const failed = snapshot.phase === "error";
+  elements.installError.classList.toggle("hidden", !failed);
+  if (failed) {
+    elements.localSetupTitle.textContent = snapshot.error?.message || "Evolv Local couldn't finish downloading.";
+    elements.localSetupDetail.textContent = "Nothing was changed. You can try again.";
+    elements.installErrorDetail.textContent = snapshot.error?.detail || "";
+    elements.installButton.textContent = "Try again";
+  }
+}
+
+// One install at a time. The server enforces it too — this only keeps a second
+// click from opening a second stream to the same run.
+let installStream = null;
+
+async function attachToInstall() {
+  if (installStream) return installStream;
+  installStream = (async () => {
+    try {
+      const response = await fetch("/api/ollama/install-evolv", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({})
+      });
+      if (!response.ok || !response.body) throw new Error(`Install failed to start (${response.status}).`);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let last = null;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let index = buffer.indexOf("\n");
+        while (index >= 0) {
+          const line = buffer.slice(0, index).trim();
+          buffer = buffer.slice(index + 1);
+          index = buffer.indexOf("\n");
+          if (!line) continue;
+          last = JSON.parse(line);
+          renderInstallProgress(last);
+        }
+      }
+
+      if (last?.phase === "ready") await finishInstall();
+      else if (last?.cancelled) toast("Installation cancelled.");
+    } catch (error) {
+      renderInstallProgress({ phase: "error", error: { message: "Evolv Local couldn't finish downloading.", detail: error.message } });
+    } finally {
+      installStream = null;
+      elements.installButton.disabled = false;
+    }
+  })();
+  return installStream;
+}
+
+async function finishInstall() {
+  const health = await refreshHealth();
+  await refreshModels();
+  // Select it only if the person has not chosen something else in the meantime.
+  const target = health.evolvModel;
+  if (target && app.models.some((model) => model.name === target) && (app.settings.model === "auto" || !app.settings.model)) {
+    app.settings.model = target;
+    elements.model.value = target;
+    configureReasoning(target);
+    saveLocal();
+  }
+  elements.localSetup.classList.add("hidden");
+  toast(`${health.evolvModelLabel || "Evolv Local"} is ready.`);
 }
 
 async function refreshModels() {
@@ -1267,7 +1433,12 @@ async function refreshModels() {
     elements.model.innerHTML = "";
     elements.model.add(new Option("Auto · Balanced", "auto"));
     if (!models.length) {
-      elements.model.add(new Option("No manual models available", ""));
+      // "No manual models available" read as a detail about the dropdown. It is
+      // not: with no models there is nothing to chat with at all, and the empty
+      // selector is the second place that has to say so.
+      const empty = new Option("No local models installed", "");
+      empty.disabled = true;
+      elements.model.add(empty);
       elements.model.value = "auto";
       app.settings.model = "auto";
       configureReasoning("auto");
@@ -4401,6 +4572,23 @@ function bindEvents() {
       event.currentTarget.reset();
       toast("Starter .evolvpack generated.");
     } catch (error) { toast(error.message, "error"); }
+  });
+  elements.installButton?.addEventListener("click", () => {
+    elements.installError.classList.add("hidden");
+    attachToInstall();
+  });
+  elements.installCancel?.addEventListener("click", async () => {
+    try {
+      await api("/api/ollama/install-evolv/cancel", { method: "POST", body: "{}" });
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  });
+  elements.installHide?.addEventListener("click", () => {
+    // Hides the panel, not the download: the run lives on the server and keeps
+    // going, and the next refresh finds it again.
+    app.dismissedLocalSetup = true;
+    elements.localSetup.classList.add("hidden");
   });
   window.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {

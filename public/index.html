@@ -149,6 +149,36 @@
             </div>
           </div>
 
+          <!-- First-run setup. Hidden once a local model is installed, and the
+               only thing on screen that can start a model download. -->
+          <div id="local-setup" class="local-setup hidden" role="status" aria-live="polite">
+            <div class="local-setup-main">
+              <div class="local-setup-copy">
+                <strong id="local-setup-title">Ollama is running, but no AI models are installed.</strong>
+                <p id="local-setup-detail">Install Evolv Local to start chatting.</p>
+              </div>
+              <button id="install-evolv-local" class="primary-button" type="button">Get Evolv Local</button>
+            </div>
+            <div id="local-setup-progress" class="local-setup-progress hidden">
+              <div class="progress-head">
+                <span id="local-setup-phase">Downloading Evolv Local</span>
+                <span id="local-setup-bytes"></span>
+              </div>
+              <div class="progress-track"><div id="local-setup-bar" class="progress-bar"></div></div>
+              <div class="progress-foot">
+                <small id="local-setup-status">pulling manifest</small>
+                <span class="progress-actions">
+                  <button id="local-setup-cancel" class="secondary-button" type="button">Cancel</button>
+                  <button id="local-setup-hide" class="secondary-button" type="button">Hide</button>
+                </span>
+              </div>
+            </div>
+            <details id="local-setup-error" class="local-setup-error hidden">
+              <summary>Details</summary>
+              <pre id="local-setup-error-detail"></pre>
+            </details>
+          </div>
+
           <div class="composer-wrap">
             <form id="composer" class="composer">
               <div id="attachment-strip" class="attachment-strip hidden"></div>
