@@ -238,3 +238,50 @@ test("a failed provider call repeats what the provider actually said", async () 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("a provider that cannot be reached says so instead of raising a server error", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "evolv-unreachable-"));
+  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "u.db"), defaultPrompt: "test" });
+  const secretStore = { available: true, description: "t", async encrypt(v) { return v; }, async decrypt(v) { return v; } };
+
+  // A port nothing is listening on: exactly a first run with Ollama not started.
+  const dead = "http://127.0.0.1:1";
+  const service = createProviderService({ database, secretStore, ollamaUrl: dead });
+
+  try {
+    // Before this was handled, the refused connection escaped as a bare
+    // TypeError with no status, and the request handler turned it into
+    // "Unexpected server error. Reference: <uuid>" — the first thing a new
+    // user saw, and it told them nothing they could act on.
+    await assert.rejects(
+      () => service.models("ollama"),
+      (error) => {
+        assert.equal(error.code, "PROVIDER_UNREACHABLE");
+        // 503 specifically: the request handler exposes messages on 4xx and
+        // 503 only, so any other status would hide this text again.
+        assert.equal(error.status, 503);
+        assert.match(error.message, /Cannot reach Ollama at http:\/\/127\.0\.0\.1:1\./);
+        assert.match(error.message, /Start Ollama, then refresh\./);
+        return true;
+      }
+    );
+
+    // A cloud provider is a different problem and gets different advice.
+    await service.saveCredentials("openai", { apiKey: "sk-test-key-value" });
+    const cloud = createProviderService({
+      database, secretStore, ollamaUrl: dead, providerBaseUrls: { openai: dead }
+    });
+    await assert.rejects(
+      () => cloud.models("openai"),
+      (error) => {
+        assert.equal(error.code, "PROVIDER_UNREACHABLE");
+        assert.match(error.message, /Cannot reach OpenAI\./);
+        assert.match(error.message, /internet connection/);
+        return true;
+      }
+    );
+  } finally {
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
