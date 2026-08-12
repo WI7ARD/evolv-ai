@@ -99,7 +99,13 @@ test("the Git LFS guard can actually fire", async (t) => {
     assert.match(command, /-size -1024c/);
   }
 
-  // Proven rather than asserted: build a pointer file and check both forms.
+  // Proven rather than asserted: build a pointer file and check both forms
+  // against the real `find`. Skipped on Windows, where `find.exe` is an
+  // unrelated string-search tool and these arguments mean nothing — the step
+  // being validated is a bash step that only ever runs on ubuntu-latest, so
+  // there is nothing here for a Windows runner to verify.
+  if (process.platform === "win32") return;
+
   const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const scratch = await mkdtemp(path.join(tmpdir(), "evolv-lfs-"));
