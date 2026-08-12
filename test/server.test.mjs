@@ -26,7 +26,17 @@ test.before(async () => {
     },
     stdio: "ignore"
   });
-  await delay(350);
+  // Waiting a fixed 350ms was a guess about how long a machine takes to open a
+  // socket, and it expired the moment the server grew another import: every
+  // test in this file failed on CI while passing locally. Ask instead.
+  let ready = false;
+  for (let attempt = 0; attempt < 60 && !ready; attempt += 1) {
+    try {
+      ready = (await fetch(`${BASE}/api/auth/status`)).ok;
+    } catch {}
+    if (!ready) await delay(100);
+  }
+  if (!ready) throw new Error("Server did not become ready.");
   client = await createAuthenticatedClient(BASE);
 });
 
