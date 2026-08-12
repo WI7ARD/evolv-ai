@@ -139,7 +139,15 @@ test("no workflow installs dependencies without retrying", async () => {
 
   const action = await readFile(path.join(root, ".github", "actions", "install-deps", "action.yml"), "utf8");
   assert.match(action, /using: composite/);
-  assert.match(action, /for attempt in 1 2 3/, "one attempt is what caused the failure");
+  assert.match(action, /seq 1 \$attempts/, "one attempt is what caused the failure");
+  // Waiting after the last attempt delays the failure and helps nothing.
+  assert.match(action, /if \[ "\$attempt" -eq "\$attempts" \]; then break; fi/);
+  // Retrying only covers a download that is intermittently failing. The cache
+  // is what removes the dependency once a run has succeeded.
+  assert.match(action, /actions\/cache/);
+  assert.match(action, /cache-hit != 'true'/, "a restored tree must not be reinstalled");
+  assert.match(action, /hashFiles\('package-lock\.json'\)/);
+  assert.match(action, /steps\.node\.outputs\.version/, "a tree with a compiled binary is Node-version specific");
   // Through the environment, so an argument cannot become part of the script.
   assert.match(action, /npm ci \$NPM_CI_ARGS/);
   assert.doesNotMatch(action.slice(action.indexOf("run: |")), /\$\{\{/, "inputs must not be interpolated into the script");

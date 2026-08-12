@@ -24,18 +24,46 @@ inputs:
 runs:
   using: composite
   steps:
-    - shell: bash
+    # The cache is the part that actually survives a bad day upstream. Retrying
+    # only helps while the download is intermittently failing; when GitHub's
+    # release assets are unreachable from a runner for minutes at a time — which
+    # is what took Windows down three attempts in a row — the install has to not
+    # need the download at all.
+    #
+    # Keyed on the lockfile, the runner, and the Node version, because the tree
+    # contains a compiled better_sqlite3.node: restoring one built for a
+    # different Node ABI would be worse than a slow install.
+    - id: node
+      shell: bash
+      run: echo "version=$(node -v)" >> "$GITHUB_OUTPUT"
+    - id: cache
+      uses: actions/cache@v4
+      with:
+        path: node_modules
+        key: node-modules-${{ runner.os }}-${{ steps.node.outputs.version }}-${{ inputs.args == '' && 'full' || 'prod' }}-${{ hashFiles('package-lock.json') }}
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
       # Passed through the environment rather than interpolated into the script,
       # so the argument stays an argument.
       env:
         NPM_CI_ARGS: ${{ inputs.args }}
       run: |
-        for attempt in 1 2 3; do
+        # Four attempts spread over about two minutes. Three inside one minute
+        # was not enough: a Windows runner lost all three to the same dropped
+        # download while another runner, on the same commit, succeeded — so the
+        # outage to ride out is longer than the window that was being given it.
+        attempts=4
+        for attempt in $(seq 1 $attempts); do
           # npm ci clears node_modules itself, so a retry starts clean.
           if npm ci $NPM_CI_ARGS; then exit 0; fi
-          delay=$((attempt * 10))
-          echo "npm ci failed (attempt $attempt of 3); retrying in ${delay}s…"
+          # No wait after the final attempt — nothing follows it. The old loop
+          # slept 30 seconds on its way to failing.
+          if [ "$attempt" -eq "$attempts" ]; then break; fi
+          delay=$((attempt * 20))
+          echo "npm ci failed (attempt $attempt of $attempts); retrying in ${delay}s…"
           sleep "$delay"
         done
-        echo "npm ci failed three times. That is a network or registry failure rather than a broken commit."
+        echo "npm ci failed $attempts times over about two minutes."
+        echo "The usual cause is better-sqlite3's prebuilt binary failing to download, which is a network"
+        echo "failure rather than a broken commit. Re-running this job normally clears it."
         exit 1
