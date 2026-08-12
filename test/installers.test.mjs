@@ -121,6 +121,93 @@ test("the Git LFS guard can actually fire", async (t) => {
   assert.match(await seek("-1024c"), /model\.onnx/, "the form in the workflow must catch one");
 });
 
+// A dropped connection while fetching the AppImage runtime failed a CI build
+// that had already packaged both platforms successfully. Nothing was wrong with
+// the commit, and nothing about a retry is guesswork — so these two tests drive
+// the real script with a `curl` that misbehaves on purpose.
+//
+// Skipped on Windows: the shims are /bin/sh scripts, and the AppImage path only
+// ever runs on the Linux runner.
+async function withFakeTools(t, curlBehaviour) {
+  const { mkdtemp, writeFile, mkdir, chmod } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { rm } = await import("node:fs/promises");
+
+  const scratch = await mkdtemp(path.join(tmpdir(), "evolv-appimage-"));
+  t.after(async () => { await rm(scratch, { recursive: true, force: true }); });
+
+  // The package the installer wraps. Its contents do not matter here; that it
+  // exists does, because the script refuses without it.
+  await mkdir(path.join(scratch, "Evolv-linux-x64"), { recursive: true });
+  await writeFile(path.join(scratch, "Evolv-linux-x64", "Evolv"), "#!/bin/sh\n");
+
+  const shims = path.join(scratch, "bin");
+  await mkdir(shims, { recursive: true });
+
+  await writeFile(path.join(shims, "curl"), `#!/bin/sh
+count=$(cat "$SHIM_STATE/curl-count" 2>/dev/null || echo 0)
+count=$((count + 1))
+echo "$count" > "$SHIM_STATE/curl-count"
+out=""
+while [ $# -gt 0 ]; do
+  [ "$1" = "-o" ] && out="$2"
+  shift
+done
+${curlBehaviour}
+`);
+  // mksquashfs is probed with -VERSION before it is used.
+  await writeFile(path.join(shims, "mksquashfs"), `#!/bin/sh
+[ "$1" = "-VERSION" ] && exit 0
+head -c 4096 /dev/zero > "$2"
+`);
+  await chmod(path.join(shims, "curl"), 0o755);
+  await chmod(path.join(shims, "mksquashfs"), 0o755);
+
+  return {
+    scratch,
+    build: () => run(process.execPath, [script, "--platform=linux"], {
+      env: {
+        ...process.env,
+        PATH: `${shims}${path.delimiter}${process.env.PATH}`,
+        SHIM_STATE: scratch,
+        EVOLV_OUT_DIR: scratch,
+        EVOLV_RETRY_DELAY_MS: "10"
+      }
+    }),
+    curlCalls: async () => Number((await readFile(path.join(scratch, "curl-count"), "utf8")).trim())
+  };
+}
+
+test("a dropped connection retries instead of failing the build", async (t) => {
+  if (process.platform === "win32") return;
+
+  // curl exit 56 is the failure CI actually hit: the connection died mid
+  // transfer. The third attempt succeeds.
+  const { scratch, build, curlCalls } = await withFakeTools(t, `
+if [ "$count" -lt 3 ]; then exit 56; fi
+head -c 200000 /dev/zero > "$out"`);
+
+  await build();
+  assert.equal(await curlCalls(), 3, "the first two failures should have been retried, not reported");
+
+  const image = path.join(scratch, "make", "appimage", "linux", "x64", "Evolv-0.6.3-x86_64.AppImage");
+  assert.ok(existsSync(image), "the build should finish once the download succeeds");
+});
+
+test("a truncated runtime is never left behind to be reused", async (t) => {
+  if (process.platform === "win32") return;
+
+  // A short read that curl itself calls a success. Cached at the destination it
+  // would satisfy the next run's "already downloaded" check and get pasted onto
+  // the front of an AppImage that cannot start.
+  const { scratch, build, curlCalls } = await withFakeTools(t, `head -c 64 /dev/zero > "$out"`);
+
+  await assert.rejects(build, (error) => /network failure, not a problem with the build/.test(error.stderr || ""));
+  assert.equal(await curlCalls(), 4, "it should give up rather than retry forever");
+  assert.equal(existsSync(path.join(scratch, "appimage-runtime-x86_64")), false,
+    "a bad download must not be cached as a good one");
+});
+
 test("an installer build refuses when there is no package to wrap", async (t) => {
   // Pointed at an empty output directory, so this never depends on whether a
   // package happens to be lying around from an earlier build.

@@ -38,9 +38,9 @@ if (!["win32", "linux"].includes(platform)) {
   throw new Error("Supported installer platforms are win32 and linux.");
 }
 
-// The AppImage runtime is fetched rather than vendored, and pinned to a release
-// tag rather than `continuous` so a build is reproducible and a moving upstream
-// cannot change what ships without the commit changing.
+// The AppImage runtime is fetched rather than vendored: it is a 200KB ELF that
+// upstream publishes, and carrying a binary blob in the repository to save one
+// download is a worse trade. `continuous` is upstream's only channel for it.
 const APPIMAGE_RUNTIME_URL = "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64";
 
 const packageDir = path.join(outDir, platform === "win32" ? "Evolv-win32-x64" : "Evolv-linux-x64");
@@ -157,12 +157,48 @@ SectionEnd
 
 // ----------------------------------------------------------------------- Linux
 
+// One network call stands between a green build and a red one, and it is the
+// last step of a job that has already spent five minutes packaging. A dropped
+// connection there is not a broken commit, so it is retried rather than
+// reported as a build failure. Tests shorten the wait.
+const RETRY_DELAY_MS = Number(process.env.EVOLV_RETRY_DELAY_MS) || 2000;
+const RETRY_ATTEMPTS = 4;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function fetchRuntime(destination) {
   if (fs.existsSync(destination) && fs.statSync(destination).size > 100_000) return destination;
   console.log("Downloading the AppImage runtime…");
-  execFileSync("curl", ["-sSL", "--fail", "-o", destination, APPIMAGE_RUNTIME_URL], { stdio: "inherit" });
-  if (fs.statSync(destination).size < 100_000) throw new Error("The AppImage runtime download looks truncated.");
-  return destination;
+
+  // Downloaded beside the target and moved into place only once the size checks
+  // out. A half-written file left at the destination would satisfy the cache
+  // test above on the next run and get concatenated into an AppImage that
+  // cannot start.
+  const partial = `${destination}.part`;
+  fs.rmSync(partial, { force: true });
+
+  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      execFileSync("curl", ["-sSL", "--fail", "--connect-timeout", "20", "-o", partial, APPIMAGE_RUNTIME_URL], { stdio: "inherit" });
+      if (fs.statSync(partial).size < 100_000) throw new Error("the download looks truncated");
+      fs.renameSync(partial, destination);
+      return destination;
+    } catch (error) {
+      fs.rmSync(partial, { force: true });
+      if (attempt === RETRY_ATTEMPTS) {
+        throw new Error(
+          `Could not download the AppImage runtime from ${APPIMAGE_RUNTIME_URL} after ${RETRY_ATTEMPTS} attempts `
+          + `(${error.message}). This is a network failure, not a problem with the build.`
+        );
+      }
+      const wait = RETRY_DELAY_MS * 2 ** (attempt - 1);
+      console.log(`Download failed (attempt ${attempt} of ${RETRY_ATTEMPTS}); retrying in ${Math.round(wait / 1000)}s…`);
+      sleepSync(wait);
+    }
+  }
+  throw new Error("unreachable");
 }
 
 function buildAppImage() {
@@ -208,13 +244,16 @@ exec "\${HERE}/Evolv" --no-sandbox "$@"
   fs.rmSync(target, { force: true });
 
   const squashfs = path.join(stage, "evolv.squashfs");
+  // Before compression, not after: squashing 600MB takes half a minute, and
+  // there is no reason to spend it only to discover the network is down.
+  const runtime = fetchRuntime(path.join(outDir, "appimage-runtime-x86_64"));
+
   console.log(`Building AppImage from ${packageDir}…`);
   // -root-owned so the image does not carry whichever uid happened to build it.
   execFileSync("mksquashfs", [appDir, squashfs, "-root-owned", "-noappend", "-comp", "zstd", "-Xcompression-level", "19"], {
     stdio: "inherit"
   });
 
-  const runtime = fetchRuntime(path.join(outDir, "appimage-runtime-x86_64"));
   fs.writeFileSync(target, Buffer.concat([fs.readFileSync(runtime), fs.readFileSync(squashfs)]));
   fs.chmodSync(target, 0o755);
   fs.rmSync(stage, { recursive: true, force: true });
