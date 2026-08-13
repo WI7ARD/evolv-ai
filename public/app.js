@@ -1451,7 +1451,10 @@ function modelOption(model) {
   // The size is known before the model is ever run, so a model this computer
   // cannot hold says so in the list rather than failing mid-reply.
   const fit = { over: "⚠ too big for this computer", tight: "⚠ tight fit" }[model.fit?.level] || "";
-  return new Option([model.name, detail, badges, fit].filter(Boolean).join("  ·  "), model.name);
+  // What happened last time. A model that has failed twice running says so
+  // here, rather than being picked again because the list looks the same.
+  const failing = model.health?.failing ? `⚠ ${model.health.reason}` : "";
+  return new Option([model.name, detail, badges, fit, failing].filter(Boolean).join("  ·  "), model.name);
 }
 
 function addModelGroup(label, models) {
@@ -1493,7 +1496,10 @@ async function toggleFavoriteModel() {
 // failed for a reason the person could have been told about up front.
 function warnAboutFit() {
   const model = app.models.find((item) => item.name === elements.model.value);
-  if (model?.fit?.note) toast(`${model.name}: ${model.fit.note}`, model.fit.level === "over" ? "error" : "");
+  if (!model) return;
+  // The record of real failures outranks the estimate: it already happened.
+  if (model.health?.failing) return toast(`${model.name}: ${model.health.reason}`, "error");
+  if (model.fit?.note) toast(`${model.name}: ${model.fit.note}`, model.fit.level === "over" ? "error" : "");
 }
 
 async function refreshModels() {

@@ -33,6 +33,7 @@ import { mineToolSequences, validateMacroDefinition } from "./lib/macros.mjs";
 import { extractWikilinks, buildVaultFiles, parseVaultMarkdown } from "./lib/obsidian.mjs";
 import { conversationToMarkdown, vaultNotePath } from "./lib/conversation-export.mjs";
 import { assessModelFit, isFavorite, toggleFavorite } from "./lib/model-fit.mjs";
+import { classifyModelFailure, FAILURES_BEFORE_WARNING } from "./lib/model-health.mjs";
 import os from "node:os";
 import { generatedRecipeSchema, validateGeneratedRecipe } from "./lib/tool-recipes.mjs";
 import { currentClockContext } from "./lib/time.mjs";
@@ -896,13 +897,18 @@ async function handleModels(res, providerId = "ollama") {
   const models = await providerService.models(providerId);
   const favorites = database.getSettings().favoriteModels || [];
   const totalMemory = os.totalmem();
+  const health = new Map(database.listModelHealth(providerId).map((row) => [row.model, row]));
   json(res, 200, {
-    // Both facts the dropdown cannot work out for itself: whether this machine
-    // can run the model, and whether the person marked it as one they use.
+    // Three facts the dropdown cannot work out for itself: whether this machine
+    // can run the model, whether the person marked it as one they use, and what
+    // happened the last time it was asked to answer.
     models: models.map((model) => ({
       ...model,
       fit: assessModelFit(model.size, totalMemory),
-      favorite: isFavorite(favorites, providerId, model.name)
+      favorite: isFavorite(favorites, providerId, model.name),
+      health: (health.get(model.name)?.failures || 0) >= FAILURES_BEFORE_WARNING
+        ? { failing: true, reason: health.get(model.name).reason, at: health.get(model.name).lastFailedAt }
+        : { failing: false, reason: "", at: null }
     })),
     provider: providerId,
     totalMemory,
@@ -1750,6 +1756,8 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
           costUnits: providerId === "ollama" ? 0 : 1
         });
         evolutionService.evaluateRun(agentRunId, { messageId: activeAssistantId });
+        // It answered. Whatever it did before, it works now.
+        database.recordModelResult({ provider: providerId, model: selectedModel, ok: true });
         writeStreamEvent(res, { type: "run", runId: agentRunId, stepId: agentStepId, state: completedRun.state, budgets: completedRun.budgets });
         writeStreamEvent(res, { type: "complete", conversationId, messageId: activeAssistantId, runId: agentRunId, status: "complete" });
         if (routingEventId) database.finishRoutingEvent(routingEventId, { messageId: activeAssistantId, status: "complete", outcome: "response completed" });
@@ -1914,6 +1922,15 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
         : agentRuntime.fail(agentRunId, error);
     }
     const runInterrupted = interrupted || ["paused", "cancelled"].includes(run?.state);
+    // Only the model's own failures are remembered against it. Ollama being
+    // shut down fails every model at once, and marking them all broken would
+    // fill the list with warnings about a problem that starting Ollama fixes.
+    if (!runInterrupted) {
+      const blame = classifyModelFailure(error.message);
+      if (blame.blame === "model") {
+        database.recordModelResult({ provider: providerId, model: selectedModel, ok: false, reason: blame.reason });
+      }
+    }
     if (activeAssistantId) {
       database.updateMessage(activeAssistantId, {
         content: lastContent,

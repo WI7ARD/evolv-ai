@@ -10,6 +10,8 @@ Select a provider and model, or choose **Auto · Balanced**. Auto shows the sele
 
 The star beside the model list adds the selected model to **Favourites**, which are grouped at the top of the list. Favourites are per provider, so starring a model from one provider does not star the same name from another.
 
+Evolv also remembers what happened last time each model was asked to answer. A model that fails twice running for its own reason — not installed, out of memory, no tool support, out of context — is labelled with that reason in the list, and **Auto** routes around it in favour of one that works. A single failure is treated as a bad moment rather than a broken model, and any successful reply clears the record. Failures that are not the model's fault, such as Ollama being shut down or a rejected API key, are never counted against it, because they would otherwise mark every model at once.
+
 Models are labelled with what they can do (🔧 tools, 👁 images, 🧠 reasoning) and, for local models, whether they fit in this computer's memory. **⚠ too big for this computer** means the model needs more memory than the machine has; it may fail to load or fall back to swapping. **⚠ tight fit** means it will load but leave little room, which shows up as slowness in long conversations. Neither is a block — a machine with a large GPU may cope — but the warning is shown when the model is selected rather than after a reply has already failed.
 
 Use **Projects** to keep work scoped. **Load verified demo** creates a real local demo with tasks and indexed evidence; it is safe to remove like any other project. Connect a folder only when you want Evolv's bounded read tools to inspect it.
