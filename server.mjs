@@ -1747,7 +1747,9 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
             withheld: vaultConnected && !vaultAllowed,
             excerpts: retrievedMemory.filter((item) => item.vault).length
           },
-          tool_calls: normalizedCalls
+          // Stored only when there were calls, matching what is sent. Storing an
+          // empty array here is what put `tool_calls: []` into replayed history.
+          ...(normalizedCalls.length ? { tool_calls: normalizedCalls } : {})
         }
       });
       messages.push({ role: "assistant", content, thinking, ...(normalizedCalls.length ? { tool_calls: normalizedCalls } : {}) });
