@@ -228,6 +228,48 @@ test("Gemini filters non-chat models and bridges generateContent responses", asy
   });
 });
 
+test("a repaired conversation reaches every provider in a shape it accepts", async () => {
+  // The conversation Evolv's 80-message window can produce after a truncation:
+  // an orphaned tool result at the top, a call whose answer never arrived, and
+  // an assistant turn with nothing in it. Sent as-is, each provider refuses it
+  // with a different sentence naming an index into the request.
+  const { sanitizeConversation } = await import("../lib/message-hygiene.mjs");
+  const damaged = [
+    { role: "system", content: "Be brief." },
+    { role: "tool", tool_call_id: "call_above_the_window", content: "orphaned output" },
+    { role: "assistant", content: "" },
+    { role: "user", content: "hi" },
+    { role: "assistant", content: "Working on it.", tool_calls: [{ id: "call_unanswered", function: { name: "read", arguments: "{}" } }] }
+  ];
+  const messages = sanitizeConversation(damaged);
+
+  await withService(async (service) => {
+    await service.saveCredentials("anthropic", { apiKey: "sk-ant-test-key" });
+    await service.saveCredentials("gemini", { apiKey: "gemini-test-key" });
+
+    for (const [providerId, model, url] of [
+      ["anthropic", "claude-4-sonnet", "/anthropic/messages"],
+      ["gemini", "gemini-2.5-flash", null]
+    ]) {
+      await service.streamRound(providerId, {
+        model, messages, options: { temperature: 0, maxTokens: 1024 }
+      }, AbortSignal.timeout(5000), () => {});
+
+      const request = lastRequest((item) => (url ? item === url : item.includes("streamGenerateContent")));
+      const body = JSON.parse(request.body);
+      const turns = body.messages || body.contents;
+
+      assert.ok(turns.length, `${providerId} received a conversation`);
+      // The two shapes every provider rejects.
+      assert.equal(turns.some((turn) => !(turn.content || turn.parts)?.length), false,
+        `${providerId} was sent a message with no content`);
+      assert.equal(JSON.stringify(turns).includes("call_above_the_window"), false,
+        `${providerId} was sent a result for a call it never saw`);
+      assert.equal(turns[0].role, "user", `${providerId} needs the conversation to start with the user`);
+    }
+  });
+});
+
 test("a revoked Gemini key becomes a provider error without impersonating an Evolv login failure", async () => {
   await withService(async (service) => {
     await service.saveCredentials("gemini", { apiKey: "revoked-gemini-key" });
