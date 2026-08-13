@@ -86,7 +86,12 @@ test("a Linux update rebuilds the AppImage from the copy already installed", asy
   // one is kept beside it rather than destroyed.
   assert.ok((await fs.readFile(appImagePath)).equals(published));
   assert.ok((await fs.readFile(`${appImagePath}.previous`)).equals(installed));
-  assert.equal((await fs.stat(appImagePath)).mode & 0o111, 0o111, "and it is still executable");
+  // Windows has no execute bit and chmod is a no-op there, so this asks about
+  // the platform the code path is for. Everything above it is filesystem
+  // behaviour that is worth checking everywhere.
+  if (process.platform !== "win32") {
+    assert.equal((await fs.stat(appImagePath)).mode & 0o111, 0o111, "and it is still executable");
+  }
 });
 
 test("a block map describing some other file is refused", async (t) => {
