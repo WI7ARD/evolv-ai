@@ -33,7 +33,7 @@ import { mineToolSequences, validateMacroDefinition } from "./lib/macros.mjs";
 import { extractWikilinks, buildVaultFiles, parseVaultMarkdown } from "./lib/obsidian.mjs";
 import { conversationToMarkdown, vaultNotePath } from "./lib/conversation-export.mjs";
 import { assessModelFit, isFavorite, toggleFavorite } from "./lib/model-fit.mjs";
-import { classifyModelFailure, FAILURES_BEFORE_WARNING } from "./lib/model-health.mjs";
+import { classifyModelFailure, isFailing } from "./lib/model-health.mjs";
 import os from "node:os";
 import { generatedRecipeSchema, validateGeneratedRecipe } from "./lib/tool-recipes.mjs";
 import { currentClockContext } from "./lib/time.mjs";
@@ -908,7 +908,7 @@ async function handleModels(res, providerId = "ollama") {
       ...model,
       fit: assessModelFit(model.size, totalMemory),
       favorite: isFavorite(favorites, providerId, model.name),
-      health: (health.get(model.name)?.failures || 0) >= FAILURES_BEFORE_WARNING
+      health: isFailing(health.get(model.name))
         ? { failing: true, reason: health.get(model.name).reason, at: health.get(model.name).lastFailedAt }
         : { failing: false, reason: "", at: null }
     })),
@@ -1930,7 +1930,9 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
     if (!runInterrupted) {
       const blame = classifyModelFailure(error.message);
       if (blame.blame === "model") {
-        database.recordModelResult({ provider: providerId, model: selectedModel, ok: false, reason: blame.reason });
+        database.recordModelResult({
+          provider: providerId, model: selectedModel, ok: false, reason: blame.reason, permanent: blame.permanent
+        });
       }
     }
     if (activeAssistantId) {

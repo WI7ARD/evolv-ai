@@ -4,7 +4,7 @@ import path from "node:path";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createDatabase } from "../lib/database.mjs";
-import { classifyModelFailure, healthLabel, FAILURES_BEFORE_WARNING } from "../lib/model-health.mjs";
+import { classifyModelFailure, healthLabel, isFailing, FAILURES_BEFORE_WARNING } from "../lib/model-health.mjs";
 
 async function withDatabase(run) {
   const directory = await mkdtemp(path.join(tmpdir(), "evolv-health-"));
@@ -27,6 +27,44 @@ test("only the model's own failures are blamed on the model", () => {
     assert.equal(classifyModelFailure(message).blame, "model", message);
     assert.ok(classifyModelFailure(message).reason, "a blamed model needs a reason to show");
   }
+});
+
+test("a retired model is believed the first time, not the second", async () => {
+  // Google's own wording when a model is withdrawn. The provider is stating a
+  // fact about the future, not reporting a bad moment, so a second attempt
+  // spends a real request to be told the same thing.
+  const retired = classifyModelFailure(
+    "This model models/gemini-2.5-pro is no longer available to new users. Please update your code to use a newer model.");
+  assert.equal(retired.blame, "model");
+  assert.equal(retired.permanent, true);
+  assert.match(retired.reason, /retired by the provider/);
+
+  for (const message of [
+    "gpt-4-vision-preview has been deprecated",
+    "This model is not available to new customers",
+    "model_deprecated: use a newer model"
+  ]) {
+    assert.equal(classifyModelFailure(message).permanent, true, message);
+  }
+
+  // Everything else might work on the next attempt and keeps needing two.
+  assert.equal(classifyModelFailure("model requires more system memory").permanent, false);
+
+  await withDatabase((database) => {
+    const once = database.recordModelResult({
+      provider: "gemini", model: "gemini-2.5-pro", ok: false, reason: "retired by the provider", permanent: true
+    });
+    assert.equal(isFailing(once), true, "one attempt is enough when it can never recover");
+
+    // An ordinary failure still needs the second one.
+    const ordinary = database.recordModelResult({ provider: "ollama", model: "big:70b", ok: false, reason: "out of memory" });
+    assert.equal(isFailing(ordinary), false);
+
+    // If a provider brings a model back, the record must not outlive that.
+    const revived = database.recordModelResult({ provider: "gemini", model: "gemini-2.5-pro", ok: true });
+    assert.equal(isFailing(revived), false);
+    assert.equal(revived.failures, 0);
+  });
 });
 
 test("a provider that is down does not mark every model broken", () => {
