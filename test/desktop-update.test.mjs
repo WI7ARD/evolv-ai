@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { buildBlockMap } from "../lib/block-delta.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +22,116 @@ test("the updater checks the repository that actually publishes the releases", a
   const workflow = await fs.readFile(new URL("../.github/workflows/release-windows.yml", import.meta.url), "utf8");
   assert.match(workflow, /gh release create/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+});
+
+test("a Linux update rebuilds the AppImage from the copy already installed", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolv-appimage-"));
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+
+  // An AppImage is mostly Electron, which does not change between releases.
+  const shared = randomBytes(400 * 1024);
+  const installed = Buffer.concat([shared, Buffer.from("application code v0.6.2".padEnd(4096, "."))]);
+  const published = Buffer.concat([shared, Buffer.from("application code v0.6.3".padEnd(4096, "."))]);
+
+  const appImagePath = path.join(root, "Evolv-0.6.2-x86_64.AppImage");
+  await fs.writeFile(appImagePath, installed);
+  const publishedPath = path.join(root, "published.AppImage");
+  await fs.writeFile(publishedPath, published);
+  const blocks = await buildBlockMap(publishedPath, { blockSize: 4096 });
+  const sha256 = createHash("sha256").update(published).digest("hex");
+
+  let rangedBytes = 0;
+  let fullDownloads = 0;
+  const service = new DesktopUpdateService({
+    currentVersion: "0.6.2",
+    userDataPath: path.join(root, "userData"),
+    executablePath: path.join(root, "unused"),
+    platform: "linux",
+    appImagePath,
+    spawnImpl: () => ({ unref() {} }),
+    fetchImpl: async (url, options) => {
+      const name = String(url).split("/").pop();
+      if (String(url).includes("api.github.com")) {
+        return new Response(JSON.stringify({
+          tag_name: "v0.6.3",
+          assets: ["Evolv-0.6.3-x86_64.AppImage", "Evolv-0.6.3-x86_64.AppImage.sha256", "Evolv-0.6.3-x86_64.AppImage.blocks"]
+            .map((asset) => ({ name: asset, browser_download_url: `https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/${asset}` }))
+        }), { status: 200 });
+      }
+      if (name.endsWith(".sha256")) return new Response(`${sha256}  Evolv-0.6.3-x86_64.AppImage\n`, { status: 200 });
+      if (name.endsWith(".blocks")) return new Response(blocks, { status: 200 });
+      const range = options?.headers?.range?.match(/bytes=(\d+)-(\d+)/);
+      if (!range) {
+        fullDownloads += 1;
+        return new Response(published, { status: 200 });
+      }
+      const [, start, end] = range.map(Number);
+      rangedBytes += end - start + 1;
+      return new Response(published.subarray(start, end + 1), { status: 206 });
+    }
+  });
+
+  assert.equal((await service.check()).release.available, true);
+  const downloaded = await service.download();
+
+  assert.equal(downloaded.phase, "ready");
+  assert.equal(fullDownloads, 0, "the whole image was never downloaded");
+  // The changed tail only, not the 400 KB of shared bytes ahead of it.
+  assert.ok(rangedBytes < published.length / 4, `fetched ${rangedBytes} of ${published.length} bytes`);
+  assert.equal(downloaded.savings.reusedBytes + downloaded.savings.fetchedBytes, published.length);
+
+  const installedResult = await service.prepareInstall();
+  assert.equal(installedResult.willRestart, true);
+  // The running image is replaced by the new one, byte for byte, and the old
+  // one is kept beside it rather than destroyed.
+  assert.ok((await fs.readFile(appImagePath)).equals(published));
+  assert.ok((await fs.readFile(`${appImagePath}.previous`)).equals(installed));
+  assert.equal((await fs.stat(appImagePath)).mode & 0o111, 0o111, "and it is still executable");
+});
+
+test("a block map describing some other file is refused", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolv-appimage-bad-"));
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+
+  // The attack the map has to be checked against: a map for a different file
+  // would assemble that file instead, and it would pass its own hash check.
+  const appImagePath = path.join(root, "Evolv-0.6.2-x86_64.AppImage");
+  await fs.writeFile(appImagePath, randomBytes(8192));
+  const otherPath = path.join(root, "other.bin");
+  await fs.writeFile(otherPath, randomBytes(8192));
+  const blocks = await buildBlockMap(otherPath, { blockSize: 4096 });
+
+  const service = new DesktopUpdateService({
+    currentVersion: "0.6.2",
+    userDataPath: path.join(root, "userData"),
+    executablePath: path.join(root, "unused"),
+    platform: "linux",
+    appImagePath,
+    fetchImpl: async (url) => {
+      const name = String(url).split("/").pop();
+      if (String(url).includes("api.github.com")) {
+        return new Response(JSON.stringify({
+          tag_name: "v0.6.3",
+          assets: ["Evolv-0.6.3-x86_64.AppImage", "Evolv-0.6.3-x86_64.AppImage.sha256", "Evolv-0.6.3-x86_64.AppImage.blocks"]
+            .map((asset) => ({ name: asset, browser_download_url: `https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/${asset}` }))
+        }), { status: 200 });
+      }
+      if (name.endsWith(".sha256")) return new Response(`${"a".repeat(64)}  x\n`, { status: 200 });
+      return new Response(blocks, { status: 200 });
+    }
+  });
+
+  await service.check();
+  await assert.rejects(() => service.download(), /does not describe the published release/);
+});
+
+test("Linux updates are offered only to an installed AppImage", () => {
+  const base = { currentVersion: "0.6.2", userDataPath: os.tmpdir(), executablePath: path.join(os.tmpdir(), "evolv") };
+  // Run from source or unpacked by a package manager, Evolv does not own the
+  // files and must not replace them.
+  assert.equal(new DesktopUpdateService({ ...base, platform: "linux", appImagePath: "" }).status().supported, false);
+  assert.equal(new DesktopUpdateService({ ...base, platform: "linux", appImagePath: "/opt/Evolv.AppImage" }).status().supported, true);
+  assert.equal(new DesktopUpdateService({ ...base, platform: "darwin", appImagePath: "" }).status().supported, false);
 });
 
 test("desktop update versions are strict and stable releases must be newer", () => {

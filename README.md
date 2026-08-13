@@ -91,6 +91,17 @@ verifies the packaged executable and application archive, then replaces the
 portable app folder and restarts. It never installs drafts or prereleases and
 never downloads an update silently.
 
+On Linux, the AppImage updates itself in place and downloads only the parts
+that changed. Most of the image is Electron, which is identical between
+releases, so an update is normally a few megabytes rather than three hundred:
+Evolv fetches a block map published beside the AppImage, finds those blocks in
+the copy already installed, and asks the server only for the rest. The
+assembled file must match the release's published SHA-256 before anything is
+replaced, and the previous AppImage is kept beside the new one until Evolv has
+started successfully once. Updates are offered only when Evolv is running as an
+AppImage; a copy installed by a package manager or run from source owns its own
+updates.
+
 The repository checked for updates is read from `package.json`, so it cannot
 drift from the one the release workflow publishes to. Set
 `EVOLV_UPDATE_REPOSITORY` to override it. See

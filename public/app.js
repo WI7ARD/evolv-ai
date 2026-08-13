@@ -1219,13 +1219,16 @@ function renderDesktopUpdateStatus(status) {
   elements.desktopUpdateNotes.textContent = status?.release?.notes || "";
   elements.desktopUpdateNotes.classList.toggle("hidden", !status?.release?.notes);
   if (!supported) {
-    elements.desktopUpdateStatus.textContent = "Automatic updates are available in the packaged Windows app.";
+    elements.desktopUpdateStatus.textContent = "Automatic updates are available in the packaged Windows app and the Linux AppImage.";
   } else if (status.phase === "checking") {
     elements.desktopUpdateStatus.textContent = "Checking the verified GitHub releaseâ€¦";
   } else if (status.phase === "downloading") {
     elements.desktopUpdateStatus.textContent = "Downloading and verifying the updateâ€¦";
   } else if (status.phase === "ready") {
-    elements.desktopUpdateStatus.textContent = `Evolv ${status.release.version} is verified and ready to install.`;
+    // Worth saying plainly: the reason it finished so quickly is that most of
+    // the new version was already on disk.
+    elements.desktopUpdateStatus.textContent = `Evolv ${status.release.version} is verified and ready to install.${
+      status.savings?.reusedBytes ? ` Downloaded ${formatBytes(status.savings.fetchedBytes)} of ${formatBytes(status.savings.totalBytes)}; the rest was reused from the copy you already have.` : ""}`;
   } else if (status.phase === "installing") {
     elements.desktopUpdateStatus.textContent = "Installing the update; Evolv will restart.";
   } else if (status.phase === "available") {

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { parseBlockMap } from "../lib/block-delta.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -224,6 +226,26 @@ head -c 200000 /dev/zero > "$out"`);
 
   const image = path.join(scratch, "make", "appimage", "linux", "x64", "Evolv-0.6.3-x86_64.AppImage");
   assert.ok(existsSync(image), "the build should finish once the download succeeds");
+
+  // Without this beside the image, every update is a full 300 MB download and
+  // nothing anywhere says so — the updater just quietly falls back.
+  const map = `${image}.blocks`;
+  assert.ok(existsSync(map), "the block map is built alongside the AppImage");
+  const parsed = parseBlockMap(await readFile(map));
+  assert.equal(parsed.sha256, createHash("sha256").update(await readFile(image)).digest("hex"),
+    "and it describes the image that was actually built");
+  assert.ok(existsSync(`${map}.sha256`), "with its own checksum, like every other published asset");
+});
+
+test("the release pipeline publishes the block map, not just the image", async () => {
+  const workflow = await readFile(path.join(root, ".github", "workflows", "release-linux.yml"), "utf8");
+
+  // A release missing the map still installs; it just costs every user a full
+  // download, so the job fails rather than publishing a half-useful release.
+  assert.match(workflow, /Missing release asset/);
+  assert.match(workflow, /AppImage\.blocks/);
+  assert.match(workflow, /gh release create[\s\S]*?\|\|\s*gh release upload/,
+    "the Windows job may have created the release first");
 });
 
 test("a truncated runtime is never left behind to be reused", async (t) => {

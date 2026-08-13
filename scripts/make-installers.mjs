@@ -27,6 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { retrySync } from "./lib/retry.mjs";
+import { buildBlockMap } from "../lib/block-delta.mjs";
 
 const require = createRequire(import.meta.url);
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -256,7 +257,20 @@ exec "\${HERE}/Evolv" --no-sandbox "$@"
   fs.rmSync(stage, { recursive: true, force: true });
 
   report(target);
+  return target;
+}
+
+// The map that lets an installed copy update itself without downloading the
+// whole image again. Most of an AppImage is Electron, which is identical
+// between releases; published alongside the image, this is what lets the
+// updater ask for only the parts that differ.
+async function writeBlockMap(target) {
+  const mapPath = `${target}.blocks`;
+  fs.writeFileSync(mapPath, await buildBlockMap(target));
+  const size = fs.statSync(mapPath).size;
+  console.log(`Block map: ${path.basename(mapPath)} (${(size / 1024).toFixed(0)} KB)`);
+  report(mapPath);
 }
 
 if (platform === "win32") buildWindowsInstaller();
-else buildAppImage();
+else await writeBlockMap(buildAppImage());

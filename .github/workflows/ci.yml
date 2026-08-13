@@ -164,5 +164,6 @@ jobs:
           path: |
             out/make/appimage/linux/x64/*.AppImage
             out/make/appimage/linux/x64/*.sha256
+            out/make/appimage/linux/x64/*.blocks
           if-no-files-found: error
           retention-days: 14

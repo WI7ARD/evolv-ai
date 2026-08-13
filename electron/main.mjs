@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } from "electron";
 import path from "node:path";
+import fsPromises from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createElectronSecretStore } from "../lib/secrets.mjs";
 import { createLogger } from "../lib/logger.mjs";
@@ -140,6 +141,13 @@ async function createWindow() {
     userDataPath: app.getPath("userData"),
     executablePath: process.execPath
   });
+  // A Linux update keeps the previous AppImage beside the new one so a failed
+  // update can be undone by renaming one file. Reaching this point is proof the
+  // new one starts, which is when those 300 MB stop being insurance.
+  if (process.env.APPIMAGE) {
+    fsPromises.rm(`${process.env.APPIMAGE}.previous`, { force: true })
+      .catch((error) => desktopLogger?.warn?.("Could not remove the previous AppImage", { error: error.message }));
+  }
   vaultHost = new DesktopVaultHost({
     dialog,
     shell,
