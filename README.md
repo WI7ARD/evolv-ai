@@ -86,13 +86,14 @@ On Windows, you can also double-click `start.cmd`.
 
 Evolv 0.6.3 is the first updater-capable Windows build. In the packaged app,
 open **Settings â†’ Software updates**. Evolv checks the stable release from
-`WI7ARD/evolv-personal`, requires an exact release ZIP and `.sha256` file,
+`WI7ARD/evolv-ai`, requires an exact release ZIP and `.sha256` file,
 verifies the packaged executable and application archive, then replaces the
 portable app folder and restarts. It never installs drafts or prereleases and
 never downloads an update silently.
 
-The GitHub repository and release workflow are prepared locally but cannot be
-published until GitHub CLI is reauthenticated. See
+The repository checked for updates is read from `package.json`, so it cannot
+drift from the one the release workflow publishes to. Set
+`EVOLV_UPDATE_REPOSITORY` to override it. See
 [docs/GITHUB-RELEASES.md](docs/GITHUB-RELEASES.md) for the release procedure.
 Version 0.6.3 must be installed manually once; subsequent stable releases can
 be installed inside Evolv.

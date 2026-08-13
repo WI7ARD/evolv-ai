@@ -194,7 +194,7 @@ const configSaved = await evaluate(`(async () => {
 })()`, 20_000);
 
 console.log(JSON.stringify({ setup, promptTyping, updateStatus, ...result, configOpened, configSaved }, null, 2));
-if (promptTyping !== "keyboard input works" || updateStatus?.currentVersion !== "0.6.3" || updateStatus?.repository !== "WI7ARD/evolv-personal"
+if (promptTyping !== "keyboard input works" || updateStatus?.currentVersion !== "0.6.3" || updateStatus?.repository !== "WI7ARD/evolv-ai"
   || !updateStatus?.supported || !result.installed || !result.enabled || !result.dialogClosed || !result.chatReady
   || !result.conversationListUncapped || !configOpened.open || !configOpened.focused || configOpened.topLayer || !configOpened.actionsVisible
   || configSaved.typed !== "12" || configSaved.saved !== 12 || !configSaved.closed) process.exitCode = 1;

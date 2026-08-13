@@ -4,7 +4,24 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { compareVersions, DesktopUpdateService, normalizeVersion, selectRelease } from "../electron/update-service.mjs";
+import { compareVersions, DEFAULT_UPDATE_REPOSITORY, DesktopUpdateService, normalizeVersion, selectRelease } from "../electron/update-service.mjs";
+
+test("the updater checks the repository that actually publishes the releases", async () => {
+  // These had drifted apart: the updater checked WI7ARD/evolv-personal while
+  // the release workflow publishes with the token of the repository it runs in.
+  // Every check answered "no stable release is available" however many releases
+  // existed, and nothing in the product could report the mismatch.
+  const manifest = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const [, owner, repo] = manifest.repository.url.match(/github\.com[/:]([^/]+)\/(.+?)(?:\.git)?$/);
+
+  assert.equal(DEFAULT_UPDATE_REPOSITORY, `${owner}/${repo}`);
+
+  // The release workflow runs in this repository and publishes with its own
+  // token, so the manifest is what has to agree with it.
+  const workflow = await fs.readFile(new URL("../.github/workflows/release-windows.yml", import.meta.url), "utf8");
+  assert.match(workflow, /gh release create/);
+  assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+});
 
 test("desktop update versions are strict and stable releases must be newer", () => {
   assert.equal(normalizeVersion("v0.6.3"), "0.6.3");
@@ -21,10 +38,10 @@ test("new GitHub releases require exact ZIP and SHA-256 assets", () => {
   const selected = selectRelease({
     tag_name: "v0.6.3",
     name: "Evolv 0.6.3",
-    html_url: "https://github.com/WI7ARD/evolv-personal/releases/tag/v0.6.3",
+    html_url: "https://github.com/WI7ARD/evolv-ai/releases/tag/v0.6.3",
     assets: [
-      { name: "Evolv-win32-x64-0.6.3.zip", browser_download_url: "https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip" },
-      { name: "Evolv-win32-x64-0.6.3.zip.sha256", browser_download_url: "https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip.sha256" }
+      { name: "Evolv-win32-x64-0.6.3.zip", browser_download_url: "https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip" },
+      { name: "Evolv-win32-x64-0.6.3.zip.sha256", browser_download_url: "https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip.sha256" }
     ]
   }, "0.6.2");
   assert.equal(selected.available, true);
@@ -42,8 +59,8 @@ test("desktop updater verifies, stages, and prepares an atomic Windows restart",
   const release = {
     tag_name: "v0.6.3",
     assets: [
-      { name: "Evolv-win32-x64-0.6.3.zip", browser_download_url: "https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip" },
-      { name: "Evolv-win32-x64-0.6.3.zip.sha256", browser_download_url: "https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip.sha256" }
+      { name: "Evolv-win32-x64-0.6.3.zip", browser_download_url: "https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip" },
+      { name: "Evolv-win32-x64-0.6.3.zip.sha256", browser_download_url: "https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip.sha256" }
     ]
   };
   const fetchImpl = async (url) => {
@@ -102,7 +119,7 @@ test("update downloads reject redirects away from GitHub", async () => {
     fetchImpl: async () => new Response(null, { status: 302, headers: { location: "https://evil.example/update.zip" } }),
     platform: "win32"
   });
-  await assert.rejects(() => service.trustedFetch("https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/update.zip"), /not trusted/);
+  await assert.rejects(() => service.trustedFetch("https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/update.zip"), /not trusted/);
 });
 
 test("the renderer exposes clear update controls without receiving filesystem access", async () => {

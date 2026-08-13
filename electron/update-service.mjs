@@ -7,7 +7,12 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 
-export const DEFAULT_UPDATE_REPOSITORY = "WI7ARD/evolv-personal";
+import { EVOLV_REPOSITORY } from "../lib/version.mjs";
+
+// Read from package.json rather than written here, so the updater and the
+// release workflow cannot point at different repositories again. The fallback
+// only matters if the manifest is unreadable, which is a packaging accident.
+export const DEFAULT_UPDATE_REPOSITORY = EVOLV_REPOSITORY || "WI7ARD/evolv-ai";
 const MAX_UPDATE_BYTES = 2 * 1024 ** 3;
 const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
 const TRUSTED_DOWNLOAD_HOSTS = new Set([

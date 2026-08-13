@@ -11,7 +11,7 @@ Evolv 0.6.3 fixes the pack configuration layout shown in the August 2 screenshot
 ## GitHub updates
 
 - Settings includes **Software updates** with Check and Download & install controls.
-- Update checks use the stable `WI7ARD/evolv-personal` GitHub release and never download silently.
+- Update checks use the stable `WI7ARD/evolv-ai` GitHub release and never download silently.
 - Downloads require exact versioned ZIP and SHA-256 assets.
 - Redirects outside trusted GitHub hosts, drafts, prereleases, malformed versions, checksum mismatches, and invalid internal integrity manifests are rejected.
 - Installation replaces the portable application folder only after the app exits, restarts Evolv, and restores the previous folder if the updated process exits during startup.

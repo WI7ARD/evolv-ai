@@ -12,11 +12,11 @@
   "description": "A local-first, Ollama-powered chat that improves through explicit feedback and reversible prompt upgrades.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/WI7ARD/evolv-personal.git"
+    "url": "https://github.com/WI7ARD/evolv-ai.git"
   },
-  "homepage": "https://github.com/WI7ARD/evolv-personal",
+  "homepage": "https://github.com/WI7ARD/evolv-ai",
   "bugs": {
-    "url": "https://github.com/WI7ARD/evolv-personal/issues"
+    "url": "https://github.com/WI7ARD/evolv-ai/issues"
   },
   "scripts": {
     "postinstall": "node scripts/patch-extract-zip.mjs && node scripts/repair-electron.mjs",
