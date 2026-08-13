@@ -111,6 +111,27 @@ test("the model list the interface reads includes the new model", async () => {
   assert.ok(models.some((model) => model.name === "evolv:latest"), "the selector has something to select");
 });
 
+test("every listed model carries a memory verdict and a favourite flag", async () => {
+  const listed = await (await client.fetch("/api/models?provider=ollama")).json();
+
+  assert.ok(listed.totalMemory > 0, "the memory warning needs the machine's memory");
+  for (const model of listed.models) {
+    // Two things the dropdown cannot work out for itself, on every entry —
+    // a model with no verdict would be the one silently offered and then fail.
+    assert.ok(["ok", "tight", "over", "unknown"].includes(model.fit?.level), `${model.name} has no fit verdict`);
+    assert.equal(typeof model.favorite, "boolean");
+  }
+
+  await client.fetch("/api/models/favorite", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider: "ollama", model: "evolv:latest", favorite: true })
+  });
+  const after = await (await client.fetch("/api/models?provider=ollama")).json();
+  assert.equal(after.models.find((model) => model.name === "evolv:latest").favorite, true);
+  assert.equal(after.models.filter((model) => model.favorite).length, 1, "only the starred model");
+});
+
 test("a second install of an already-installed model does not download again", async () => {
   const before = mock.pullRequests.length;
   const response = await client.fetch("/api/ollama/install-evolv", { method: "POST", body: "{}" });

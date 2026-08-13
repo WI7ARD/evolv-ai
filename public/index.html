@@ -104,9 +104,13 @@
             </label>
             <label class="control">
               <span>MODEL</span>
-              <select id="model-select" aria-label="Ollama model">
-                <option value="">Loading models…</option>
-              </select>
+              <span class="model-control">
+                <select id="model-select" aria-label="Ollama model">
+                  <option value="">Loading models…</option>
+                </select>
+                <button id="favorite-model" class="favorite-button" type="button" aria-pressed="false"
+                  aria-label="Add this model to favourites" title="Add this model to favourites">☆</button>
+              </span>
             </label>
             <label class="control">
               <span>REASONING</span>

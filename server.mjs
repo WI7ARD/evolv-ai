@@ -32,6 +32,8 @@ import {
 import { mineToolSequences, validateMacroDefinition } from "./lib/macros.mjs";
 import { extractWikilinks, buildVaultFiles, parseVaultMarkdown } from "./lib/obsidian.mjs";
 import { conversationToMarkdown, vaultNotePath } from "./lib/conversation-export.mjs";
+import { assessModelFit, isFavorite, toggleFavorite } from "./lib/model-fit.mjs";
+import os from "node:os";
 import { generatedRecipeSchema, validateGeneratedRecipe } from "./lib/tool-recipes.mjs";
 import { currentClockContext } from "./lib/time.mjs";
 import {
@@ -892,7 +894,20 @@ async function getModelCapabilities(model, providerId = "ollama") {
 
 async function handleModels(res, providerId = "ollama") {
   const models = await providerService.models(providerId);
-  json(res, 200, { models, provider: providerId, ollamaUrl: providerId === "ollama" ? OLLAMA_URL : undefined });
+  const favorites = database.getSettings().favoriteModels || [];
+  const totalMemory = os.totalmem();
+  json(res, 200, {
+    // Both facts the dropdown cannot work out for itself: whether this machine
+    // can run the model, and whether the person marked it as one they use.
+    models: models.map((model) => ({
+      ...model,
+      fit: assessModelFit(model.size, totalMemory),
+      favorite: isFavorite(favorites, providerId, model.name)
+    })),
+    provider: providerId,
+    totalMemory,
+    ollamaUrl: providerId === "ollama" ? OLLAMA_URL : undefined
+  });
 }
 
 // Reachable and useful are different questions. Ollama running with no models
@@ -2410,6 +2425,18 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/models") {
       return await handleModels(res, url.searchParams.get("provider") || "ollama");
+    }
+    // A dedicated route rather than a settings patch: the list is built from
+    // one provider and one model name, so those are what it accepts.
+    if (req.method === "POST" && url.pathname === "/api/models/favorite") {
+      const body = await readBody(req, SMALL_BODY);
+      const model = String(body.model || "").trim();
+      const provider = String(body.provider || "").trim();
+      if (!model || !provider) throw Object.assign(new Error("A provider and model are required."), { status: 400 });
+      const favoriteModels = toggleFavorite(
+        database.getSettings().favoriteModels || [], provider, model, body.favorite === true);
+      database.patchSettings({ favoriteModels });
+      return json(res, 200, { favoriteModels });
     }
     if (req.method === "GET" && url.pathname === "/api/providers") {
       return json(res, 200, { providers: providerService.list() });

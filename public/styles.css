@@ -108,6 +108,10 @@ body::before {
 /* Reachable but nothing to run: neither ready nor broken, and the amber is the
    difference between the two greens people would otherwise read as the same. */
 .status-dot.needs-model { background: #d6a84a; box-shadow: 0 0 8px #d6a84a; }
+.model-control { display: flex; align-items: center; gap: 6px; }
+.favorite-button { background: transparent; border: 1px solid var(--line); color: var(--muted); padding: 2px 7px; font-size: 13px; line-height: 1.2; cursor: pointer; }
+.favorite-button:hover { color: var(--text); border-color: var(--muted); }
+.favorite-button[aria-pressed="true"] { color: var(--acid); border-color: var(--acid); }
 .command-menu { margin: 0 auto 8px; width: min(760px, 92%); border: 1px solid var(--line); background: #171b1a; display: grid; }
 .command-menu button { display: flex; justify-content: space-between; gap: 14px; padding: 9px 13px; background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); color: var(--text); font-size: 11px; text-align: left; cursor: pointer; }
 .command-menu button:last-child { border-bottom: 0; }

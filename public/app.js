@@ -22,6 +22,7 @@ const elements = {
   healthDot: $("#status-dot"),
   healthLabel: $("#status-label"),
   healthDetail: $("#status-detail"),
+  favoriteModel: $("#favorite-model"),
   commandMenu: $("#command-menu"),
   editBanner: $("#edit-banner"),
   editCancel: $("#edit-cancel"),
@@ -1440,6 +1441,61 @@ async function finishInstall() {
   toast(`${health.evolvModelLabel || "Evolv Local"} is ready.`);
 }
 
+function modelOption(model) {
+  const badges = [
+    model.capabilities?.includes("tools") ? "🔧" : "",
+    model.capabilities?.includes("vision") ? "👁" : "",
+    model.capabilities?.includes("thinking") ? "🧠" : ""
+  ].filter(Boolean).join("");
+  const detail = [model.parameterSize, formatBytes(model.size)].filter(Boolean).join(" · ");
+  // The size is known before the model is ever run, so a model this computer
+  // cannot hold says so in the list rather than failing mid-reply.
+  const fit = { over: "⚠ too big for this computer", tight: "⚠ tight fit" }[model.fit?.level] || "";
+  return new Option([model.name, detail, badges, fit].filter(Boolean).join("  ·  "), model.name);
+}
+
+function addModelGroup(label, models) {
+  if (!models.length) return;
+  const group = document.createElement("optgroup");
+  group.label = label;
+  for (const model of models) group.append(modelOption(model));
+  elements.model.add(group);
+}
+
+function updateFavoriteButton() {
+  const model = app.models.find((item) => item.name === elements.model.value);
+  const favorite = Boolean(model?.favorite);
+  elements.favoriteModel.textContent = favorite ? "★" : "☆";
+  elements.favoriteModel.setAttribute("aria-pressed", String(favorite));
+  const action = favorite ? "Remove this model from favourites" : "Add this model to favourites";
+  elements.favoriteModel.setAttribute("aria-label", action);
+  elements.favoriteModel.title = action;
+  // Auto is a routing choice rather than a model, so there is nothing to star.
+  elements.favoriteModel.disabled = !model;
+}
+
+async function toggleFavoriteModel() {
+  const model = app.models.find((item) => item.name === elements.model.value);
+  if (!model) return;
+  try {
+    await api("/api/models/favorite", {
+      method: "POST",
+      body: JSON.stringify({ provider: app.settings.provider || "ollama", model: model.name, favorite: !model.favorite })
+    });
+    await refreshModels();
+    toast(model.favorite ? `${model.name} removed from favourites` : `${model.name} added to favourites`);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+// Said once, when the model is chosen, rather than after a reply has already
+// failed for a reason the person could have been told about up front.
+function warnAboutFit() {
+  const model = app.models.find((item) => item.name === elements.model.value);
+  if (model?.fit?.note) toast(`${model.name}: ${model.fit.note}`, model.fit.level === "over" ? "error" : "");
+}
+
 async function refreshModels() {
   try {
     const { models } = await api(`/api/models?provider=${encodeURIComponent(app.settings.provider || "ollama")}`);
@@ -1456,22 +1512,23 @@ async function refreshModels() {
       elements.model.value = "auto";
       app.settings.model = "auto";
       configureReasoning("auto");
+      updateFavoriteButton();
       return;
     }
-    for (const model of models) {
-      const badges = [
-        model.capabilities?.includes("tools") ? "🔧" : "",
-        model.capabilities?.includes("vision") ? "👁" : "",
-        model.capabilities?.includes("thinking") ? "🧠" : ""
-      ].filter(Boolean).join("");
-      const detail = [model.parameterSize, formatBytes(model.size)].filter(Boolean).join(" · ");
-      const label = [model.name, detail, badges].filter(Boolean).join("  ·  ");
-      elements.model.add(new Option(label, model.name));
+    // Favourites first, under a heading, so a long list of pulled models stops
+    // burying the two or three anyone actually uses.
+    const favorites = models.filter((model) => model.favorite);
+    if (favorites.length) {
+      addModelGroup("Favourites", favorites);
+      addModelGroup("All models", models.filter((model) => !model.favorite));
+    } else {
+      for (const model of models) elements.model.add(modelOption(model));
     }
     const remembered = app.settings.model === "auto" || models.some((model) => model.name === app.settings.model) ? app.settings.model : "auto";
     elements.model.value = remembered;
     app.settings.model = remembered;
     configureReasoning(remembered);
+    updateFavoriteButton();
     saveLocal();
   } catch (error) {
     const provider = app.providers.find((item) => item.id === app.settings.provider);
@@ -1485,6 +1542,8 @@ async function refreshModels() {
     elements.model.value = "auto";
     app.settings.model = "auto";
     configureReasoning("auto");
+    app.models = [];
+    updateFavoriteButton();
     if (error.code === "PROVIDER_AUTH_FAILED") refreshProviders().catch(() => {});
     toast(error.message, "error");
   }
@@ -3851,8 +3910,11 @@ function bindEvents() {
   elements.model.addEventListener("change", () => {
     app.settings.model = elements.model.value;
     configureReasoning(elements.model.value);
+    updateFavoriteButton();
+    warnAboutFit();
     persistAiSettings();
   });
+  elements.favoriteModel.addEventListener("click", toggleFavoriteModel);
   elements.provider.addEventListener("change", async () => {
     app.settings.provider = elements.provider.value;
     app.settings.model = "";

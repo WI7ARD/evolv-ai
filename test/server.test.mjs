@@ -302,6 +302,38 @@ test("supports persisted conversation lifecycle", async () => {
   assert.equal((await client.fetch(`/api/conversations/${created.id}?permanent=true`, { method: "DELETE" })).status, 200);
 });
 
+test("favouriting a model persists it and survives a bad request", async () => {
+  const favorited = await client.fetch("/api/models/favorite", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider: "ollama", model: "evolv:latest", favorite: true })
+  });
+  assert.equal(favorited.status, 200);
+  assert.deepEqual((await favorited.json()).favoriteModels, ["ollama:evolv:latest"]);
+
+  // Favourites are settings, so they have to be there on the next read rather
+  // than only in the reply that set them.
+  assert.deepEqual((await (await client.fetch("/api/settings")).json()).favoriteModels, ["ollama:evolv:latest"]);
+
+  // A model name with no provider cannot be turned into a favourite key.
+  const rejected = await client.fetch("/api/models/favorite", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "evolv:latest", favorite: true })
+  });
+  assert.equal(rejected.status, 400);
+  assert.deepEqual((await (await client.fetch("/api/settings")).json()).favoriteModels, ["ollama:evolv:latest"]);
+
+  // Settings patches are allowlisted, so the list cannot be filled with junk
+  // through the general settings route.
+  const patched = await client.fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ favoriteModels: ["anything at all"] })
+  });
+  assert.equal(patched.status, 400);
+});
+
 test("rewinding and saving a conversation refuse rather than half-succeed", async () => {
   const created = await (await client.fetch("/api/conversations", {
     method: "POST",

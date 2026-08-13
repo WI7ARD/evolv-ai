@@ -8,6 +8,10 @@ Open `Evolv.exe`. Create a local account on first launch, use a password of at l
 
 Select a provider and model, or choose **Auto · Balanced**. Auto shows the selected provider, model, reasons, and any fallback. Cloud providers are excluded until enabled in Intelligence settings.
 
+The star beside the model list adds the selected model to **Favourites**, which are grouped at the top of the list. Favourites are per provider, so starring a model from one provider does not star the same name from another.
+
+Models are labelled with what they can do (🔧 tools, 👁 images, 🧠 reasoning) and, for local models, whether they fit in this computer's memory. **⚠ too big for this computer** means the model needs more memory than the machine has; it may fail to load or fall back to swapping. **⚠ tight fit** means it will load but leave little room, which shows up as slowness in long conversations. Neither is a block — a machine with a large GPU may cope — but the warning is shown when the model is selected rather than after a reply has already failed.
+
 Use **Projects** to keep work scoped. **Load verified demo** creates a real local demo with tasks and indexed evidence; it is safe to remove like any other project. Connect a folder only when you want Evolv's bounded read tools to inspect it.
 
 ## Marketplace packs
