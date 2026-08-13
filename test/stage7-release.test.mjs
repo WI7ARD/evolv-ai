@@ -34,7 +34,9 @@ test("Stage 7 static release gate passes and writes a truthful report", () => {
 test("personal release version is aligned across package metadata", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
   const lock = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
-  assert.equal(pkg.version, "0.6.3");
+  // Alignment is the point, not a particular number. Naming the version here
+  // made every release edit this test to bless the bump it was meant to check.
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[""].version, pkg.version);
   assert.equal(pkg.scripts["release:stage7"], "node scripts/release-stage7.mjs");

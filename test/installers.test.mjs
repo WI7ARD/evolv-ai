@@ -224,7 +224,10 @@ head -c 200000 /dev/zero > "$out"`);
   await build();
   assert.equal(await curlCalls(), 3, "the first two failures should have been retried, not reported");
 
-  const image = path.join(scratch, "make", "appimage", "linux", "x64", "Evolv-0.6.3-x86_64.AppImage");
+  // Named from the manifest, so a version bump does not fail the build test
+  // that has nothing to do with the version.
+  const { version } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  const image = path.join(scratch, "make", "appimage", "linux", "x64", `Evolv-${version}-x86_64.AppImage`);
   assert.ok(existsSync(image), "the build should finish once the download succeeds");
 
   // Without this beside the image, every update is a full 300 MB download and

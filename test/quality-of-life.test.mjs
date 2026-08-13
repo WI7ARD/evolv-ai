@@ -95,6 +95,33 @@ test("a chat title cannot escape the vault or break Obsidian", () => {
   assert.doesNotMatch(notePath, /\.\./);
 });
 
+test("copying works where the modern clipboard API does not", async () => {
+  const [app, main, server] = await Promise.all([
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
+    readFile(new URL("../electron/main.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../server.mjs", import.meta.url), "utf8")
+  ]);
+
+  // Chromium asks permission to write the clipboard, and the desktop app
+  // answered "no" to everything but media — which silently broke every copy
+  // button, including the ones that predate this.
+  assert.match(main, /clipboard-sanitized-write/);
+  // Reading the clipboard is the user's other applications. Never granted.
+  assert.doesNotMatch(main, /"clipboard-read"/);
+
+  // navigator.clipboard does not exist at all outside a secure context, and
+  // Evolv is a plain-HTTP server that can be opened from another machine.
+  assert.match(app, /document\.execCommand\("copy"\)/);
+  assert.match(app, /navigator\.clipboard\?\.writeText/);
+
+  // Exactly one call to the modern API, inside the helper. A second would be a
+  // copy button that skips the fallback and fails where the first one worked.
+  const rawCalls = app.match(/await navigator\.clipboard\.writeText/g) || [];
+  assert.equal(rawCalls.length, 1, "every copy goes through the one helper");
+
+  assert.match(server, /clipboard-write=\(self\)/);
+});
+
 test("the interface offers copy, edit, the command list, and the shortcuts", async () => {
   const [html, app] = await Promise.all([
     readFile(new URL("../public/index.html", import.meta.url), "utf8"),

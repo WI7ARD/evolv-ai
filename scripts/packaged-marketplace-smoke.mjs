@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+// Read rather than written here: a literal version in a smoke test fails the
+// release that bumps it, which is the one release it most needs to pass.
+import { EVOLV_VERSION } from "../lib/version.mjs";
 
 const executable = path.resolve(process.argv[2] || "");
 const port = Number(process.argv[3] || 9357);
@@ -194,7 +197,7 @@ const configSaved = await evaluate(`(async () => {
 })()`, 20_000);
 
 console.log(JSON.stringify({ setup, promptTyping, updateStatus, ...result, configOpened, configSaved }, null, 2));
-if (promptTyping !== "keyboard input works" || updateStatus?.currentVersion !== "0.6.3" || updateStatus?.repository !== "WI7ARD/evolv-ai"
+if (promptTyping !== "keyboard input works" || updateStatus?.currentVersion !== EVOLV_VERSION || updateStatus?.repository !== "WI7ARD/evolv-ai"
   || !updateStatus?.supported || !result.installed || !result.enabled || !result.dialogClosed || !result.chatReady
   || !result.conversationListUncapped || !configOpened.open || !configOpened.focused || configOpened.topLayer || !configOpened.actionsVisible
   || configSaved.typed !== "12" || configSaved.saved !== 12 || !configSaved.closed) process.exitCode = 1;

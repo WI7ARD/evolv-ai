@@ -213,9 +213,14 @@ async function createWindow() {
   // Chromium asks synchronously as well as asynchronously, and a missing
   // check handler answers "no" to the synchronous form — which is what a
   // getUserMedia call sees first.
+  // Writing to the clipboard is what a copy button does, and Chromium asks
+  // permission for it. Reading the clipboard is deliberately not granted: that
+  // is the user's other applications, and paste needs no permission anyway.
+  const allowed = ["media", "camera", "microphone", "clipboard-sanitized-write"];
+
   session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
     if (requestingOrigin && requestingOrigin !== origin) return false;
-    return ["media", "camera", "microphone"].includes(permission);
+    return allowed.includes(permission);
   });
 
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
@@ -223,7 +228,7 @@ async function createWindow() {
     const mediaTypes = details?.mediaTypes || [];
     const trustedMedia = permission === "camera" || permission === "microphone"
       || (permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => ["audio", "video"].includes(type)));
-    callback(requestingOrigin === origin && trustedMedia);
+    callback(requestingOrigin === origin && (trustedMedia || permission === "clipboard-sanitized-write"));
   });
 
   mainWindow = new BrowserWindow({

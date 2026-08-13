@@ -2065,17 +2065,49 @@ function openSandbox() {
 
 // A response is worth more outside Evolv than inside it. Code blocks already
 // had this; whole messages did not, which left selecting the text by hand.
-async function copyText(text, button) {
+// The old way of copying, which needs no permission and no secure context.
+// navigator.clipboard does not exist at all outside a secure context, and Evolv
+// is a plain-HTTP local server: open it from another machine on the network and
+// the modern API is simply absent.
+function copyBySelection(value) {
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.cssText = "position:fixed;top:-1000px;opacity:0;";
+  document.body.append(field);
+  field.select();
+  let copied = false;
   try {
-    await navigator.clipboard.writeText(String(text || ""));
-    if (button) {
-      const original = button.textContent;
-      button.textContent = "✓";
-      setTimeout(() => { button.textContent = original; }, 1200);
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+  field.remove();
+  return copied;
+}
+
+async function copyText(text, button, { label = "" } = {}) {
+  const value = String(text || "");
+  let copied = false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      copied = true;
     }
   } catch {
-    toast("Clipboard is unavailable.", "error");
+    // Chromium asks permission for this and the desktop app answers narrowly,
+    // so a refusal here is expected rather than exceptional. Fall through.
+    copied = false;
   }
+  if (!copied) copied = copyBySelection(value);
+  if (!copied) return toast("Clipboard is unavailable.", "error");
+  if (button) {
+    const original = button.textContent;
+    button.textContent = button.dataset.copiedLabel || "✓";
+    setTimeout(() => { button.textContent = original; }, 1200);
+  }
+  if (label) toast(label);
+  return true;
 }
 
 // The slash commands existed but could only be reached by typing one from
@@ -3908,13 +3940,8 @@ function bindEvents() {
     const button = event.target.closest(".code-copy");
     if (!button) return;
     const code = button.closest(".code-block")?.querySelector("code");
-    try {
-      await navigator.clipboard.writeText(code?.textContent || "");
-      button.textContent = "Copied";
-      setTimeout(() => { button.textContent = "Copy"; }, 1500);
-    } catch {
-      toast("Clipboard is unavailable.", "error");
-    }
+    button.dataset.copiedLabel = "Copied";
+    await copyText(code?.textContent || "", button);
   });
   elements.model.addEventListener("change", () => {
     app.settings.model = elements.model.value;
@@ -4535,8 +4562,7 @@ function bindEvents() {
         toast("Pack registration repaired.");
         await openMarketplaceDetails(button.dataset.packId);
       } else if (button.classList.contains("marketplace-copy-diagnostics")) {
-        await navigator.clipboard.writeText(button.closest("details").querySelector("pre").textContent);
-        toast("Diagnostics copied.");
+        await copyText(button.closest("details").querySelector("pre").textContent, null, { label: "Diagnostics copied." });
       } else if (button.classList.contains("marketplace-export-diagnostics")) {
         const details = await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}`);
         downloadJsonFile(details.diagnostics, `${button.dataset.packId}-diagnostics.json`);

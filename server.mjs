@@ -282,7 +282,9 @@ function applySecurityHeaders(res) {
   res.setHeader("cross-origin-opener-policy", "same-origin");
   res.setHeader("cross-origin-resource-policy", "same-origin");
   res.setHeader("x-permitted-cross-domain-policies", "none");
-  res.setHeader("permissions-policy", "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), serial=()");
+  // clipboard-write is stated rather than left to its default, so a browser
+  // that tightens that default does not silently break the copy buttons.
+  res.setHeader("permissions-policy", "camera=(self), microphone=(self), clipboard-write=(self), geolocation=(), payment=(), usb=(), serial=()");
 }
 
 function assertTrustedHost(req) {
