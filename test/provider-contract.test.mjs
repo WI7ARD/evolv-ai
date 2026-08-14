@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeConversation } from "../lib/message-hygiene.mjs";
-import { normalizeMessagesOpenAi, toAnthropicMessages, toGeminiContents } from "../lib/providers.mjs";
-import { inspectAnthropicRequest, inspectGeminiRequest, inspectOpenAiRequest, reportRequestProblems } from "../lib/provider-contract.mjs";
+import { normalizeMessagesOpenAi, toAnthropicMessages, toGeminiContents, toOllamaMessages } from "../lib/providers.mjs";
+import {
+  inspectAnthropicRequest, inspectGeminiRequest, inspectOllamaRequest, inspectOpenAiRequest, reportRequestProblems
+} from "../lib/provider-contract.mjs";
 import { imageMediaType } from "../lib/images.mjs";
 
 // Six plumbing bugs reached people before this file existed, and every one was
@@ -27,6 +29,15 @@ function random(seed) {
 
 const TOOLS = ["read_file", "list_dir", "physics_add_body"];
 
+// Real headers, so the type each provider is told matches the bytes it is sent.
+// A screenshot is a PNG, which is the case that was broken.
+const IMAGES = [
+  Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(16)]).toString("base64"),
+  Buffer.concat([Buffer.from("ffd8ffe0", "hex"), Buffer.alloc(16)]).toString("base64"),
+  Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP"), Buffer.alloc(8)]).toString("base64"),
+  Buffer.concat([Buffer.from("474946383961", "hex"), Buffer.alloc(16)]).toString("base64")
+];
+
 // Everything the real system can produce, including the states it produces only
 // after a truncation, an interruption, or a switch of provider mid-conversation.
 function conversation(next) {
@@ -37,7 +48,14 @@ function conversation(next) {
 
   const turns = 1 + Math.floor(next() * 6);
   for (let turn = 0; turn < turns; turn += 1) {
-    if (chance(0.85)) messages.push({ role: "user", content: chance(0.1) ? "" : `ask ${turn}` });
+    if (chance(0.85)) {
+      messages.push({
+        role: "user",
+        content: chance(0.1) ? "" : `ask ${turn}`,
+        // An attached image, in any of the four formats Evolv accepts.
+        ...(chance(0.25) ? { images: [pick(IMAGES)] } : {})
+      });
+    }
 
     if (chance(0.5)) {
       // An assistant turn that calls tools. Ids are present or absent depending
@@ -83,6 +101,7 @@ function refuse(problems, where) {
 const checkOpenAi = (messages, where) => refuse(inspectOpenAiRequest(messages), where);
 const checkAnthropic = (messages, where) => refuse(inspectAnthropicRequest(messages), where);
 const checkGemini = (contents, where) => refuse(inspectGeminiRequest(contents), where);
+const checkOllama = (messages, where) => refuse(inspectOllamaRequest(messages), where);
 
 test("every provider's rules hold for two thousand damaged conversations", () => {
   for (let seed = 1; seed <= 2000; seed += 1) {
@@ -94,6 +113,7 @@ test("every provider's rules hold for two thousand damaged conversations", () =>
     checkOpenAi(normalizeMessagesOpenAi(sanitized), `${where} (OpenAI)`);
     checkAnthropic(toAnthropicMessages(sanitized), `${where} (Anthropic)`);
     checkGemini(toGeminiContents(sanitized), `${where} (Gemini)`);
+    checkOllama(toOllamaMessages(sanitized), `${where} (Ollama)`);
   }
 });
 
@@ -116,6 +136,27 @@ test("the rules above can actually fail", () => {
   // Measured at 197 of 200 when this was written. The threshold is loose
   // because the point is "the damage is real", not a particular ratio.
   assert.ok(rejected > 150, `only ${rejected} of 200 unrepaired conversations were rejected`);
+
+  // Ollama's mapper earns its place the same way: the repaired conversation,
+  // sent as it is stored, is still the wrong shape for Ollama — tool arguments
+  // arrive as a JSON string from any cloud provider, and Ollama reads objects.
+  let ollamaWouldReject = 0;
+  for (let seed = 1; seed <= 200; seed += 1) {
+    if (inspectOllamaRequest(sanitizeConversation(conversation(random(seed)))).length) ollamaWouldReject += 1;
+  }
+  assert.ok(ollamaWouldReject > 50, `only ${ollamaWouldReject} of 200 needed the Ollama mapping`);
+});
+
+test("the images the fuzzer generates actually reach the providers", () => {
+  // An image the generator never attaches is an image rule never checked, and
+  // this file would go on passing while proving nothing about images at all.
+  let blocks = 0;
+  for (let seed = 1; seed <= 200; seed += 1) {
+    const sanitized = sanitizeConversation(conversation(random(seed)));
+    blocks += toAnthropicMessages(sanitized).flatMap((message) => message.content).filter((block) => block.type === "image").length;
+    blocks += toGeminiContents(sanitized).flatMap((content) => content.parts).filter((part) => part.inlineData).length;
+  }
+  assert.ok(blocks > 100, `only ${blocks} images reached a provider across 200 conversations`);
 });
 
 test("malformed tool arguments do not abort the request", () => {
