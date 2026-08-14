@@ -61,6 +61,18 @@ test.before(async () => {
       }] });
     }
     if (req.url === "/openrouter/chat/completions" && req.method === "POST") {
+      // Stands in for a reasoning model: it accepts only the default sampling
+      // parameters and says so in OpenAI's exact wording.
+      const sent = JSON.parse(body || "{}");
+      if (sent.model === "openai/gpt-5.5" && "temperature" in sent) {
+        return json(400, {
+          error: {
+            message: "Unsupported value: 'temperature' does not support 0.9 with this model. Only the default (1) value is supported.",
+            param: "temperature",
+            type: "invalid_request_error"
+          }
+        });
+      }
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning: "Thinking… " } }] })}\n\n`);
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "Routed " } }] })}\n\n`);
@@ -268,6 +280,44 @@ test("a repaired conversation reaches every provider in a shape it accepts", asy
       assert.equal(turns[0].role, "user", `${providerId} needs the conversation to start with the user`);
     }
   });
+});
+
+test("a model that refuses a sampling parameter is asked again without it", async () => {
+  // Reasoning models accept only the default temperature. Evolv keeps no list
+  // of which models those are, because such a list is stale the day a model
+  // ships; it drops whatever the provider names and asks once more.
+  await withService(async (service) => {
+    await service.saveCredentials("openrouter", { apiKey: "sk-or-test-key" });
+    const chunks = [];
+    await service.streamRound("openrouter", {
+      model: "openai/gpt-5.5",
+      messages: [{ role: "user", content: "hi" }],
+      options: { temperature: 0.9 }
+    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk.message));
+
+    // The reply arrives rather than the person seeing a 400 about a number
+    // they never chose.
+    assert.equal(chunks.map((message) => message.content || "").join(""), "Routed reply.");
+
+    const sent = requests.filter((item) => item.url === "/openrouter/chat/completions").slice(-2).map((item) => JSON.parse(item.body));
+    assert.equal(sent[0].temperature, 0.9, "the first attempt asked for what was configured");
+    assert.equal("temperature" in sent[1], false, "the retry dropped exactly the refused parameter");
+    assert.equal(sent[1].model, "openai/gpt-5.5", "and changed nothing else");
+    assert.deepEqual(sent[1].messages, sent[0].messages);
+  });
+});
+
+test("only sampling parameters are ever dropped", async () => {
+  const { refusedParameter } = await import("../lib/providers.mjs");
+  const as400 = (payload) => new Response(JSON.stringify(payload), { status: 400 });
+
+  assert.equal(await refusedParameter(as400({ error: { param: "temperature", message: "Unsupported value" } })), "temperature");
+  assert.equal(await refusedParameter(as400({ error: { message: "Unsupported value: 'top_p' is not supported" } })), "top_p");
+  // A complaint about the conversation itself is a different problem, and
+  // retrying without it would send a request that means something else.
+  assert.equal(await refusedParameter(as400({ error: { param: "messages", message: "Invalid 'messages[6]'" } })), "");
+  assert.equal(await refusedParameter(as400({ error: { param: "model", message: "no longer available" } })), "");
+  assert.equal(await refusedParameter(as400({})), "");
 });
 
 test("Gemini is sent no systemInstruction rather than an empty one", async () => {
