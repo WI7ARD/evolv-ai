@@ -270,6 +270,38 @@ test("a repaired conversation reaches every provider in a shape it accepts", asy
   });
 });
 
+test("Gemini is sent no systemInstruction rather than an empty one", async () => {
+  // Titles and memory extraction are asked without any system message. An
+  // instruction whose only part is an empty string is a 400.
+  await withService(async (service) => {
+    await service.saveCredentials("gemini", { apiKey: "gemini-test-key" });
+    await service.streamRound("gemini", {
+      model: "gemini-2.5-flash",
+      messages: [{ role: "user", content: "name this chat" }],
+      options: { temperature: 0, maxTokens: 64 }
+    }, AbortSignal.timeout(5000), () => {});
+
+    const body = JSON.parse(lastRequest((url) => url.includes("streamGenerateContent")).body);
+    assert.equal("systemInstruction" in body, false);
+  });
+});
+
+test("Anthropic reasoning is decided by generation, not by a list that goes stale", async () => {
+  // The pattern this replaces listed the generations it knew about, so every
+  // new Claude arrived without reasoning support and looked worse than it is.
+  const { conservativeCapabilities } = await import("../lib/providers.mjs");
+  const thinks = (name) => conservativeCapabilities("anthropic", name).includes("thinking");
+
+  // Both orders Anthropic uses, and the generation extended thinking arrived in.
+  assert.equal(thinks("claude-3-5-sonnet"), false);
+  assert.equal(thinks("claude-3-7-sonnet-20250219"), true);
+  for (const name of ["claude-4-sonnet", "claude-opus-4-20250514", "claude-sonnet-4-5",
+    "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]) {
+    assert.equal(thinks(name), true, name);
+  }
+  assert.equal(thinks("claude-2.1"), false);
+});
+
 test("a revoked Gemini key becomes a provider error without impersonating an Evolv login failure", async () => {
   await withService(async (service) => {
     await service.saveCredentials("gemini", { apiKey: "revoked-gemini-key" });

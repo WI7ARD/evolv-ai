@@ -120,14 +120,44 @@ test("an ordinary conversation is passed through unchanged", () => {
   assert.deepEqual(sanitizeConversation(conversation), conversation);
 });
 
-test("Ollama's id-less tool calls are left alone", () => {
-  // Ollama does not use call ids. An absent id must never be read as a
-  // mismatch, or every local tool conversation would be stripped.
-  const conversation = [
+test("a conversation held with Ollama can be continued on a cloud model", () => {
+  // Ollama issues no call ids. OpenAI requires one on both sides and Anthropic
+  // pairs tool_result to tool_use by id, so rotating from a local model to a
+  // cloud one failed on the first reply. The ids are invented and paired here.
+  const [, assistant, result] = sanitizeConversation([
     { role: "user", content: "read it" },
     { role: "assistant", content: "", tool_calls: [{ function: { name: "read_file", arguments: "{}" } }] },
     { role: "tool", tool_name: "read_file", content: "contents" }
-  ];
+  ]);
 
-  assert.deepEqual(sanitizeConversation(conversation), conversation);
+  assert.ok(assistant.tool_calls[0].id, "the call gained an id");
+  assert.equal(result.tool_call_id, assistant.tool_calls[0].id, "and its answer carries the same one");
+});
+
+test("two id-less calls are paired with the right answers, by name", () => {
+  const [, assistant, first, second] = sanitizeConversation([
+    { role: "user", content: "do both" },
+    { role: "assistant", content: "", tool_calls: [
+      { function: { name: "read_file", arguments: "{}" } },
+      { function: { name: "list_dir", arguments: "{}" } }
+    ] },
+    // Deliberately out of order: pairing by position alone would cross them.
+    { role: "tool", tool_name: "list_dir", content: "a listing" },
+    { role: "tool", tool_name: "read_file", content: "file contents" }
+  ]);
+
+  const byId = new Map(assistant.tool_calls.map((call) => [call.id, call.function.name]));
+  assert.equal(byId.get(first.tool_call_id), "list_dir");
+  assert.equal(byId.get(second.tool_call_id), "read_file");
+  assert.notEqual(first.tool_call_id, second.tool_call_id);
+});
+
+test("a tool result nothing ever asked for is dropped even without an id", () => {
+  // After pairing, a result still carrying no id answers no call in the window.
+  const sanitized = sanitizeConversation([
+    { role: "user", content: "hello" },
+    { role: "tool", tool_name: "read_file", content: "output with no call above it" }
+  ]);
+
+  assert.deepEqual(sanitized.map((message) => message.role), ["user"]);
 });
