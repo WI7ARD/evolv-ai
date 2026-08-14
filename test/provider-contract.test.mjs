@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeConversation } from "../lib/message-hygiene.mjs";
 import { normalizeMessagesOpenAi, toAnthropicMessages, toGeminiContents } from "../lib/providers.mjs";
+import { inspectAnthropicRequest, inspectGeminiRequest, inspectOpenAiRequest, reportRequestProblems } from "../lib/provider-contract.mjs";
+import { imageMediaType } from "../lib/images.mjs";
 
 // Six plumbing bugs reached people before this file existed, and every one was
 // the same kind: a request shape one provider accepts and another refuses,
@@ -71,62 +73,16 @@ function conversation(next) {
   return chance(0.4) ? messages.slice(Math.floor(next() * messages.length)) : messages;
 }
 
-// What each provider documents as a rejection. Written as questions about the
-// finished request, because that is the only place the answer is knowable.
-function checkOpenAi(messages, where) {
-  const offered = new Set();
-  for (const message of messages) {
-    if (message.role === "assistant" && "tool_calls" in message) {
-      assert.ok(message.tool_calls.length, `${where}: empty tool_calls array`);
-      for (const call of message.tool_calls) {
-        assert.ok(call.id, `${where}: a tool call with no id`);
-        offered.add(call.id);
-      }
-    }
-    if (message.role === "tool") {
-      assert.ok(message.tool_call_id, `${where}: a tool result with no tool_call_id`);
-      // Preceding, not merely present: OpenAI reads the conversation in order.
-      assert.ok(offered.has(message.tool_call_id), `${where}: a tool result before the call it answers`);
-    }
-  }
-  // Every call must be answered, or the request is incomplete.
-  const answered = new Set(messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id));
-  for (const id of offered) assert.ok(answered.has(id), `${where}: a tool call nobody answered`);
+// The rules themselves live in lib/provider-contract.mjs, because the providers
+// check them too — just before sending. One definition, so the fuzzer and the
+// running app cannot drift into disagreeing about what "valid" means.
+function refuse(problems, where) {
+  assert.deepEqual(problems, [], `${where}: ${problems.join("; ")}`);
 }
 
-function checkAnthropic(messages, where) {
-  if (!messages.length) return;
-  assert.equal(messages[0].role, "user", `${where}: Anthropic requires the first message to be the user's`);
-  const offered = new Set();
-  for (const message of messages) {
-    assert.ok(["user", "assistant"].includes(message.role), `${where}: unknown role ${message.role}`);
-    assert.ok(message.content.length, `${where}: an empty content array`);
-    for (const block of message.content) {
-      if (block.type === "text") assert.ok(block.text, `${where}: an empty text block`);
-      if (block.type === "tool_use") {
-        assert.ok(block.id, `${where}: a tool_use with no id`);
-        offered.add(block.id);
-      }
-      if (block.type === "tool_result") {
-        assert.ok(block.tool_use_id, `${where}: a tool_result with no tool_use_id`);
-        assert.ok(offered.has(block.tool_use_id), `${where}: a tool_result before its tool_use`);
-      }
-    }
-  }
-}
-
-function checkGemini(contents, where) {
-  let sawCall = false;
-  for (const content of contents) {
-    assert.ok(["user", "model"].includes(content.role), `${where}: unknown role ${content.role}`);
-    assert.ok(content.parts.length, `${where}: empty parts`);
-    for (const part of content.parts) {
-      if (part.functionCall) sawCall = true;
-      if (part.functionResponse) assert.ok(sawCall, `${where}: a functionResponse before any functionCall`);
-      if ("text" in part) assert.ok(part.text, `${where}: an empty text part`);
-    }
-  }
-}
+const checkOpenAi = (messages, where) => refuse(inspectOpenAiRequest(messages), where);
+const checkAnthropic = (messages, where) => refuse(inspectAnthropicRequest(messages), where);
+const checkGemini = (contents, where) => refuse(inspectGeminiRequest(contents), where);
 
 test("every provider's rules hold for two thousand damaged conversations", () => {
   for (let seed = 1; seed <= 2000; seed += 1) {
@@ -173,6 +129,48 @@ test("malformed tool arguments do not abort the request", () => {
 
   assert.deepEqual(toAnthropicMessages(messages)[1].content[0].input, {});
   assert.deepEqual(toGeminiContents(messages)[1].parts[0].functionCall.args, {});
+});
+
+test("an attached image is described as what it actually is", () => {
+  // Evolv accepts four formats and used to call all of them JPEG. Both
+  // providers read the bytes and refuse an image whose declared type does not
+  // match, so a screenshot — almost always a PNG — was unanswerable.
+  const png = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(16)]).toString("base64");
+  const jpeg = Buffer.concat([Buffer.from("ffd8ffe0", "hex"), Buffer.alloc(16)]).toString("base64");
+  const gif = Buffer.concat([Buffer.from("474946383961", "hex"), Buffer.alloc(16)]).toString("base64");
+  const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP"), Buffer.alloc(8)]).toString("base64");
+
+  assert.equal(imageMediaType(png), "image/png");
+  assert.equal(imageMediaType(jpeg), "image/jpeg");
+  assert.equal(imageMediaType(gif), "image/gif");
+  assert.equal(imageMediaType(webp), "image/webp");
+  assert.equal(imageMediaType("not an image at all"), "", "and anything else is refused rather than guessed");
+
+  const withImage = [{ role: "user", content: "what is this?", images: [png] }];
+  assert.equal(toAnthropicMessages(withImage)[0].content[1].source.media_type, "image/png");
+  assert.equal(toGeminiContents(withImage)[0].parts[1].inlineData.mimeType, "image/png");
+});
+
+test("a malformed request is named by Evolv before a provider has to refuse it", () => {
+  // The runtime half of this file's rules. A shape nobody imagined still
+  // reaches the provider — refusing to send would be worse than the bugs this
+  // guards against — but Evolv now knows what is wrong with it.
+  const orphaned = toAnthropicMessages([
+    { role: "user", content: "hello" },
+    { role: "tool", tool_call_id: "call_that_never_existed", content: "result" }
+  ]);
+
+  const problems = inspectAnthropicRequest(orphaned);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /tool_result before its tool_use/);
+
+  const warnings = [];
+  const summary = reportRequestProblems("Anthropic", problems, (line) => warnings.push(line));
+  assert.match(warnings[0], /Evolv built a request Anthropic is likely to reject/);
+  assert.match(summary, /tool_result/);
+
+  // And nothing is said when there is nothing wrong.
+  assert.equal(reportRequestProblems("Anthropic", [], () => assert.fail("said something")), "");
 });
 
 test("a conversation nobody damaged is still delivered in full", () => {

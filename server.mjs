@@ -35,6 +35,7 @@ import { conversationToMarkdown, vaultNotePath } from "./lib/conversation-export
 import { assessModelFit, isFavorite, toggleFavorite } from "./lib/model-fit.mjs";
 import { classifyModelFailure, isFailing } from "./lib/model-health.mjs";
 import { sanitizeConversation } from "./lib/message-hygiene.mjs";
+import { imageMediaType } from "./lib/images.mjs";
 import os from "node:os";
 import { generatedRecipeSchema, validateGeneratedRecipe } from "./lib/tool-recipes.mjs";
 import { currentClockContext } from "./lib/time.mjs";
@@ -366,12 +367,10 @@ function isAllowedImage(image) {
   if (typeof image !== "string" || !image.length || image.length > 7_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image)) return false;
   const bytes = Buffer.from(image, "base64");
   if (!bytes.length || bytes.length > 5 * 1024 * 1024) return false;
-  const hex = bytes.subarray(0, 12).toString("hex");
-  return hex.startsWith("ffd8ff")
-    || hex.startsWith("89504e470d0a1a0a")
-    || (bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP")
-    || hex.startsWith("474946383761")
-    || hex.startsWith("474946383961");
+  // The same reading of the magic bytes that tells the providers what this is.
+  // Two copies could disagree, and the way that shows up is an image Evolv
+  // accepted and then described wrongly.
+  return Boolean(imageMediaType(image));
 }
 
 function validateImages(value) {
