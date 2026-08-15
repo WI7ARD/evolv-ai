@@ -1336,15 +1336,29 @@ function renderLocalSetup(status, health) {
   const offered = health.recommendedLabel || label;
   const size = health.recommendedBytes ? ` (about ${formatBytes(health.recommendedBytes)})` : "";
 
+  // Evolv Local is a ladder, and this machine gets every rung it can hold: a
+  // small fast one and a large careful one are useful for different questions,
+  // and fetching them in one run beats running the installer three times.
+  const missing = health.missingModels || [];
+  const bulk = missing.length > 1;
+  const bulkSize = health.missingBytes ? ` (about ${formatBytes(health.missingBytes)} in total)` : "";
+  const builds = `${missing.length} Evolv Local builds`;
+
   const copy = {
     offline: ["Ollama isn't running.", "Start Ollama on this computer, then refresh."],
-    empty: ["Ollama is running, but no AI models are installed.", `Install ${offered}${size} to start chatting — it is the largest build this computer has memory for.`],
-    optional: [`${offered} isn't installed yet.`, `Your existing models still work. ${offered}${size} is the largest build this computer has memory for.`],
+    empty: ["Ollama is running, but no AI models are installed.",
+      bulk ? `Evolv installs ${builds}${bulkSize} — a small fast one for quick questions and larger ones for careful work. You can chat as soon as the first finishes.`
+        : `Install ${offered}${size} to start chatting — it is the largest build this computer has memory for.`],
+    optional: [`Evolv Local isn't installed yet.`,
+      bulk ? `Your existing models still work. Evolv installs ${builds}${bulkSize}, every one this computer has memory for.`
+        : `Your existing models still work. ${offered}${size} is the largest build this computer has memory for.`],
     stale: [`${label} was built from an older version of its instructions.`,
       "Rebuilding takes a few seconds — the model itself is already downloaded, and nothing is re-downloaded."],
     none: health.recommendedUpgrade
-      ? [`${label} is ready, and this computer could run ${offered}.`,
-        `${offered}${size} is the same assistant on a larger base — better at multi-step reasoning and tool use. Installing it leaves ${label} in place.`]
+      ? [`${label} is ready, and this computer could run more.`,
+        bulk
+          ? `${builds}${bulkSize} are still missing — the same assistant on larger bases, better at multi-step reasoning and tool use. Installing them leaves ${label} in place.`
+          : `${offered}${size} is the same assistant on a larger base — better at multi-step reasoning and tool use. Installing it leaves ${label} in place.`]
       : [`${label} is ready.`, "You can start chatting."]
   }[status.setup];
 
@@ -1354,14 +1368,18 @@ function renderLocalSetup(status, health) {
   elements.installButton.classList.toggle("hidden", status.setup === "offline" || (status.setup === "none" && !health.recommendedUpgrade));
   elements.installButton.textContent = status.setup === "stale"
     ? `Rebuild ${label}`
-    : status.setup === "none"
-      ? `Install ${offered}`
-      : health.baseModelInstalled && !health.evolvModelInstalled
-        ? `Finish setting up ${label}`
-        : `Get ${offered}`;
-  // The install streams whichever build was offered, not always the default.
-  elements.installButton.dataset.model = status.setup === "stale"
-    ? (health.evolvModel || "") : (health.recommendedModel || "");
+    : bulk
+      ? `Install ${builds}`
+      : status.setup === "none"
+        ? `Install ${offered}`
+        : health.baseModelInstalled && !health.evolvModelInstalled
+          ? `Finish setting up ${label}`
+          : `Get ${offered}`;
+  // A rebuild is one named build; everything else installs every rung this
+  // machine can hold, in one run.
+  elements.installButton.dataset.models = status.setup === "stale"
+    ? (health.evolvModel || "")
+    : (missing.length ? missing.join(",") : health.recommendedModel || "");
   elements.localSetup.classList.remove("hidden");
 
   if (installing) attachToInstall();
@@ -1408,9 +1426,11 @@ async function attachToInstall() {
       const response = await fetch("/api/ollama/install-evolv", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        // Whichever build the panel offered. An empty value lets the server
+        // Whichever builds the panel offered. An empty value lets the server
         // choose its default, which is what a rejoining client sends.
-        body: JSON.stringify(elements.installButton?.dataset.model ? { model: elements.installButton.dataset.model } : {})
+        body: JSON.stringify(elements.installButton?.dataset.models
+          ? { models: elements.installButton.dataset.models.split(",").filter(Boolean) }
+          : {})
       });
       if (!response.ok || !response.body) throw new Error(`Install failed to start (${response.status}).`);
 

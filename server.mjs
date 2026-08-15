@@ -17,7 +17,7 @@ import { handleHudRoutes } from "./server/hud-routes.mjs";
 import { createUnavailableSecretStore } from "./lib/secrets.mjs";
 import { createOllamaClient } from "./lib/ollama-client.mjs";
 import { createEvolvLocalService } from "./lib/evolv-local.mjs";
-import { DEFAULT_EVOLV_MODEL, evolvModelDefinition, recommendEvolvModel } from "./lib/evolv-models.mjs";
+import { DEFAULT_EVOLV_MODEL, evolvModelDefinition, listEvolvModels, recommendEvolvModel } from "./lib/evolv-models.mjs";
 import { createLogger } from "./lib/logger.mjs";
 import {
   retrieveMemory as retrieveMemoryGraph,
@@ -947,6 +947,12 @@ async function handleHealth(res) {
   const totalMemory = os.totalmem();
   const recommended = evolvModelDefinition(recommendEvolvModel(totalMemory));
   const status = await evolvLocal.status({ preferred: recommended.name });
+  // Every build that fits this machine, and the subset not yet on disk. A model
+  // too large to hold is not offered at all: downloading nine gigabytes to
+  // watch it swap is worse than not having it.
+  const installable = listEvolvModels()
+    .filter((entry) => assessModelFit(entry.approximateBytes, totalMemory).level !== "over");
+  const missing = installable.filter((entry) => !(status.evolvModelsInstalled || []).includes(entry.name));
   json(res, 200, {
     connected: status.ollamaReachable,
     version: status.version,
@@ -957,6 +963,13 @@ async function handleHealth(res) {
     recommendedModel: recommended.name,
     recommendedLabel: recommended.label,
     recommendedBytes: recommended.approximateBytes,
+    // Every build this machine can hold, so Evolv can fetch the whole ladder in
+    // one run and leave the person free to pick a small fast one or a large
+    // careful one per task.
+    installableModels: installable.map((entry) => entry.name),
+    installableBytes: installable.reduce((total, entry) => total + entry.approximateBytes, 0),
+    missingModels: missing.map((entry) => entry.name),
+    missingBytes: missing.reduce((total, entry) => total + entry.approximateBytes, 0),
     // True when the machine could hold a better one than any it already has.
     // Compared against every installed build, not just the active one, or
     // someone who keeps both would be offered the larger one forever.
@@ -969,7 +982,10 @@ async function handleHealth(res) {
 // interface reads it with the reader it already has. A client that arrives
 // while a download is running joins it rather than starting a second one.
 async function handleEvolvInstall(req, res, body) {
-  const run = evolvLocal.install({ model: body.model || DEFAULT_EVOLV_MODEL });
+  const run = evolvLocal.install({
+    model: body.model || DEFAULT_EVOLV_MODEL,
+    models: Array.isArray(body.models) ? body.models.slice(0, 8).map(String) : null
+  });
   res.writeHead(200, {
     "content-type": "application/x-ndjson; charset=utf-8",
     "cache-control": "no-store",

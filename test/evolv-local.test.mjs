@@ -130,6 +130,54 @@ test("whitespace is not a reason to rebuild", async () => {
   assert.equal((await createEvolvLocalService({ client }).status()).evolvModelStale, false);
 });
 
+test("one run installs every build, and skips what is already there", async () => {
+  // Evolv Local is a ladder. Making someone run the installer three times,
+  // watching each finish before starting the next, is a worse way to spend the
+  // same bytes than fetching them in one go.
+  const client = fakeClient({ models: ["evolv:latest"] });
+  const service = createEvolvLocalService({ client });
+
+  const run = service.install({ models: ["evolv:latest", "evolv:pro", "evolv:max"] });
+  await run.done;
+
+  const created = client.calls.filter(([name]) => name === "create").map(([, name]) => name);
+  assert.deepEqual(created, ["evolv:pro", "evolv:max"], "the one already installed is not rebuilt");
+  const pulled = client.calls.filter(([name]) => name === "pull").map(([, name]) => name);
+  assert.deepEqual(pulled, ["qwen2.5:7b", "qwen2.5:14b"], "each missing base is downloaded once");
+
+  const status = await service.status();
+  assert.deepEqual(status.evolvModelsInstalled, ["evolv:latest", "evolv:pro", "evolv:max"]);
+  assert.equal(status.evolvModel, "evolv:max", "the largest is the one Evolv uses");
+});
+
+test("a queued install reports which build it is on", async () => {
+  const client = fakeClient({ models: [] });
+  const service = createEvolvLocalService({ client });
+  const seen = [];
+
+  const run = service.install({ models: ["evolv:latest", "evolv:pro"] });
+  run.subscribe((state) => seen.push({ model: state.model, index: state.queueIndex, phase: state.phase }));
+  await run.done;
+
+  // Without this the progress bar restarts partway through with no explanation.
+  assert.deepEqual([...new Set(seen.map((item) => item.model))], ["evolv:latest", "evolv:pro"]);
+  assert.deepEqual([...new Set(seen.map((item) => item.index))], [0, 1]);
+  assert.equal(seen.at(-1).phase, "ready");
+  assert.equal(service.state().queue.length, 2);
+});
+
+test("asking for a different queue while one is running is refused", async () => {
+  const client = fakeClient({ models: [], onCreate: () => new Promise((resolve) => setTimeout(resolve, 40)) });
+  const service = createEvolvLocalService({ client });
+  const first = service.install({ models: ["evolv:latest", "evolv:pro"] });
+
+  // The same request joins the run in flight; a different one is not silently
+  // swapped for it.
+  assert.equal(service.install({ models: ["evolv:latest", "evolv:pro"] }).model, first.model);
+  assert.throws(() => service.install({ models: ["evolv:max"] }), /already being installed/);
+  await first.done;
+});
+
 test("installing any build counts as installed, not only the default one", async () => {
   // The bug this covers: the setup panel offered evolv:pro on a capable
   // machine, the install put evolv:pro on disk, and status still asked whether
@@ -426,7 +474,11 @@ test("the interface distinguishes all four states and offers the install", async
   // rather than always the default.
   assert.match(app, /health\.recommendedLabel/);
   assert.match(app, /largest build this computer has memory for/);
-  assert.match(app, /installButton\?\.dataset\.model/);
+  // The whole ladder in one run, with the total said before it starts.
+  assert.match(app, /health\.missingModels/);
+  assert.match(app, /in total/);
+  assert.match(app, /installButton\?\.dataset\.models/);
+  assert.match(app, /dataset\.models\.split\(","\)/);
   // An upgrade is only mentioned when there is one, and never removes what is
   // already installed.
   assert.match(app, /health\.recommendedUpgrade/);
