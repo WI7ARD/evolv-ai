@@ -1343,15 +1343,26 @@ function renderLocalSetup(status, health) {
   const bulk = missing.length > 1;
   const bulkSize = health.missingBytes ? ` (about ${formatBytes(health.missingBytes)} in total)` : "";
   const builds = `${missing.length} Evolv Local builds`;
+  // Disk, not memory, is what usually stops this — and it is the one the person
+  // can do something about, so it is said rather than left to a failure twenty
+  // minutes into a download.
+  const free = health.freeDisk ? formatBytes(health.freeDisk) : "";
+  const diskNote = health.diskLimited && missing.length
+    ? ` Only ${missing.length} fit in the ${free} free on this computer; clear space and Evolv will offer the rest.`
+    : "";
+  const nothingFits = health.diskLimited && !missing.length;
 
-  const copy = {
+  const copy = nothingFits ? [
+    "There isn't enough free disk space for Evolv Local.",
+    `The smallest build needs about ${formatBytes(health.smallestBuildBytes || 0)} and this computer has ${free} free. Clear some space and Evolv will offer it again — nothing is downloaded until it fits.`
+  ] : {
     offline: ["Ollama isn't running.", "Start Ollama on this computer, then refresh."],
     empty: ["Ollama is running, but no AI models are installed.",
-      bulk ? `Evolv installs ${builds}${bulkSize} — a small fast one for quick questions and larger ones for careful work. You can chat as soon as the first finishes.`
-        : `Install ${offered}${size} to start chatting — it is the largest build this computer has memory for.`],
+      bulk ? `Evolv installs ${builds}${bulkSize} — a small fast one for quick questions and larger ones for careful work. You can chat as soon as the first finishes.${diskNote}`
+        : `Install ${offered}${size} to start chatting.${diskNote}`],
     optional: [`Evolv Local isn't installed yet.`,
-      bulk ? `Your existing models still work. Evolv installs ${builds}${bulkSize}, every one this computer has memory for.`
-        : `Your existing models still work. ${offered}${size} is the largest build this computer has memory for.`],
+      bulk ? `Your existing models still work. Evolv installs ${builds}${bulkSize}, every one this computer has room for.${diskNote}`
+        : `Your existing models still work. ${offered}${size} is the build this computer has room for.${diskNote}`],
     stale: [`${label} was built from an older version of its instructions.`,
       "Rebuilding takes a few seconds — the model itself is already downloaded, and nothing is re-downloaded."],
     none: health.recommendedUpgrade
@@ -1364,8 +1375,11 @@ function renderLocalSetup(status, health) {
 
   elements.localSetupTitle.textContent = copy[0];
   elements.localSetupDetail.textContent = copy[1];
-  // Nothing to install while Ollama is unreachable — there is nowhere to put it.
-  elements.installButton.classList.toggle("hidden", status.setup === "offline" || (status.setup === "none" && !health.recommendedUpgrade));
+  // Nothing to install while Ollama is unreachable, and nothing to offer when
+  // it would not fit — a button that starts a download doomed to fail is worse
+  // than no button.
+  elements.installButton.classList.toggle("hidden",
+    status.setup === "offline" || nothingFits || (status.setup === "none" && !health.recommendedUpgrade));
   elements.installButton.textContent = status.setup === "stale"
     ? `Rebuild ${label}`
     : bulk

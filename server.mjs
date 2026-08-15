@@ -33,6 +33,7 @@ import { mineToolSequences, validateMacroDefinition } from "./lib/macros.mjs";
 import { extractWikilinks, buildVaultFiles, parseVaultMarkdown } from "./lib/obsidian.mjs";
 import { conversationToMarkdown, vaultNotePath } from "./lib/conversation-export.mjs";
 import { assessModelFit, isFavorite, toggleFavorite } from "./lib/model-fit.mjs";
+import { affordableBuilds, freeDiskBytes, ollamaIsLocal } from "./lib/disk-space.mjs";
 import { classifyModelFailure, isFailing } from "./lib/model-health.mjs";
 import { sanitizeConversation } from "./lib/message-hygiene.mjs";
 import { agentModelOverride, listAgents } from "./lib/agents.mjs";
@@ -952,7 +953,12 @@ async function handleHealth(res) {
   // watch it swap is worse than not having it.
   const installable = listEvolvModels()
     .filter((entry) => assessModelFit(entry.approximateBytes, totalMemory).level !== "over");
-  const missing = installable.filter((entry) => !(status.evolvModelsInstalled || []).includes(entry.name));
+  const wanted = installable.filter((entry) => !(status.evolvModelsInstalled || []).includes(entry.name));
+  // And whether there is anywhere to put them. Only a local Ollama shares this
+  // disk; a remote one is not this machine's problem.
+  const local = ollamaIsLocal(OLLAMA_URL);
+  const freeDisk = local ? freeDiskBytes() : 0;
+  const missing = affordableBuilds(wanted, freeDisk);
   json(res, 200, {
     connected: status.ollamaReachable,
     version: status.version,
@@ -970,6 +976,12 @@ async function handleHealth(res) {
     installableBytes: installable.reduce((total, entry) => total + entry.approximateBytes, 0),
     missingModels: missing.map((entry) => entry.name),
     missingBytes: missing.reduce((total, entry) => total + entry.approximateBytes, 0),
+    freeDisk,
+    // True when the disk, not the memory, is what trimmed the offer — worth
+    // saying, because clearing space changes the answer and buying memory does
+    // not.
+    diskLimited: local && missing.length < wanted.length,
+    smallestBuildBytes: wanted[0]?.approximateBytes || 0,
     // True when the machine could hold a better one than any it already has.
     // Compared against every installed build, not just the active one, or
     // someone who keeps both would be offered the larger one forever.

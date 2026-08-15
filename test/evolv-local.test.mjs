@@ -473,7 +473,13 @@ test("the interface distinguishes all four states and offers the install", async
   // The offer names the build this machine can hold, and installs that one
   // rather than always the default.
   assert.match(app, /health\.recommendedLabel/);
-  assert.match(app, /largest build this computer has memory for/);
+  assert.match(app, /this computer has room for/);
+  // Disk is the limit people actually hit, and the one they can do something
+  // about, so it is named rather than left to a failure mid-download.
+  assert.match(app, /health\.diskLimited/);
+  assert.match(app, /There isn't enough free disk space for Evolv Local/);
+  assert.match(app, /nothing is downloaded until it fits/);
+  assert.match(app, /clear space and Evolv will offer the rest/);
   // The whole ladder in one run, with the total said before it starts.
   assert.match(app, /health\.missingModels/);
   assert.match(app, /in total/);
@@ -485,4 +491,37 @@ test("the interface distinguishes all four states and offers the install", async
   assert.match(app, /leaves \$\{label\} in place/);
   assert.match(app, /older version of its instructions/);
   assert.match(app, /nothing is re-downloaded/);
+});
+
+test("a full disk is measured before anything is downloaded", async () => {
+  const { affordableBuilds, ollamaIsLocal, DISK_MARGIN_BYTES } = await import("../lib/disk-space.mjs");
+  const GB = 1e9;
+  const builds = [
+    { name: "evolv:latest", approximateBytes: 2 * GB },
+    { name: "evolv:pro", approximateBytes: 4.7 * GB },
+    { name: "evolv:max", approximateBytes: 9 * GB }
+  ];
+  const names = (free) => affordableBuilds(builds, free).map((entry) => entry.name);
+
+  // As many as fit, smallest first: with room for one, the right one to take is
+  // the small build that works, not a larger one that leaves nothing behind it.
+  assert.deepEqual(names(5 * GB), ["evolv:latest"]);
+  assert.deepEqual(names(9 * GB), ["evolv:latest", "evolv:pro"]);
+  assert.deepEqual(names(20 * GB), ["evolv:latest", "evolv:pro", "evolv:max"]);
+  // Nothing at all rather than a download that fails near the end.
+  assert.deepEqual(names(3 * GB), []);
+  // A margin is left behind: filling someone's last two gigabytes to install an
+  // optional assistant is not Evolv's trade to make.
+  assert.ok(DISK_MARGIN_BYTES >= 1e9);
+  assert.deepEqual(names(2 * GB + DISK_MARGIN_BYTES), ["evolv:latest"]);
+
+  // Unknown free space returns everything: a guess that withholds a working
+  // install is worse than no check at all.
+  assert.equal(affordableBuilds(builds, 0).length, 3);
+
+  // Only a local Ollama shares this disk.
+  assert.equal(ollamaIsLocal("http://127.0.0.1:11434"), true);
+  assert.equal(ollamaIsLocal("http://localhost:11434"), true);
+  assert.equal(ollamaIsLocal("https://ollama.example.com"), false);
+  assert.equal(ollamaIsLocal("not a url"), false);
 });
