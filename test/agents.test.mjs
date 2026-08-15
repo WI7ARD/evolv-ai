@@ -84,6 +84,23 @@ test("the planner is told who it can hand each step to", () => {
   assert.match(agentRosterPrompt(), /critic \(/);
 });
 
+test("the run view says who did each step, and the shape of the handover", async () => {
+  // Until this, the feature worked and was invisible, which makes it impossible
+  // to judge whether handing steps to specialists actually helps.
+  const workspace = await readFile(new URL("../public/agent-workspace.js", import.meta.url), "utf8");
+
+  assert.match(workspace, /function assignedAgent/);
+  assert.match(workspace, /item\.id === step\.externalId/, "read from the plan, matched on its own step id");
+  assert.match(workspace, /status-pill agent/);
+  // The sequence, with repeats collapsed, and hidden when there is only one
+  // specialist — then it says nothing worth a line.
+  assert.match(workspace, /function handover/);
+  assert.match(workspace, /new Set\(sequence\)\.size > 1/);
+
+  const styles = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\.status-pill\.agent/, "told apart from the step's own state at a glance");
+});
+
 test("the runner executes each step as the specialist the plan assigned", async () => {
   const runner = await readFile(new URL("../lib/goal-runner.mjs", import.meta.url), "utf8");
 

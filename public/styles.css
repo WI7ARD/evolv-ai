@@ -108,6 +108,10 @@ body::before {
 /* Reachable but nothing to run: neither ready nor broken, and the amber is the
    difference between the two greens people would otherwise read as the same. */
 .status-dot.needs-model { background: #d6a84a; box-shadow: 0 0 8px #d6a84a; }
+/* Which specialist a step was handed to, told apart from the step's own state
+   at a glance rather than read. */
+.status-pill.agent { border-color: var(--acid); color: var(--acid); }
+.agent-handover { margin: -4px 0 12px; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
 .model-control { display: flex; align-items: center; gap: 6px; }
 .favorite-button { background: transparent; border: 1px solid var(--line); color: var(--muted); padding: 2px 7px; font-size: 13px; line-height: 1.2; cursor: pointer; }
 .favorite-button:hover { color: var(--text); border-color: var(--muted); }

@@ -10,6 +10,26 @@ function activePlan(run) {
   return run?.plans?.find((plan) => plan.status === "active") || run?.plans?.at(-1) || null;
 }
 
+// A goal is now shared out between specialists, and the plan records which one
+// each step went to. The step rows do not carry it — the whole plan is stored
+// as JSON — so it is matched on the plan's own step id.
+function assignedAgent(plan, step) {
+  return plan?.definition?.steps?.find((item) => item.id === step.externalId)?.agent || "";
+}
+
+function agentLabel(id) {
+  return String(id || "").replace(/(^|[-_])([a-z])/g, (match, separator, letter) => (separator ? " " : "") + letter.toUpperCase());
+}
+
+// The run of specialists, in order, with repeats collapsed: "Researcher →
+// Analyst → Critic" says at a glance what shape the plan is. Not shown when
+// only one is involved, because then it says nothing.
+function handover(plan, run) {
+  const names = (run?.steps || []).map((step) => assignedAgent(plan, step)).filter(Boolean);
+  const sequence = names.filter((name, index) => name !== names[index - 1]);
+  return new Set(sequence).size > 1 ? sequence.map(agentLabel).join(" → ") : "";
+}
+
 function statusLabel(value) {
   return String(value || "unknown").replaceAll("_", " ");
 }
@@ -58,6 +78,8 @@ function renderDetail() {
   const panel = $("#agent-run-detail");
   const run = state.runs.find((item) => item.id === state.selectedId);
   if (!panel || !run) { panel?.classList.add("hidden"); return; }
+  // Which specialist a step was handed to. It lives in the plan rather than on
+  // the step row, so it is matched on the id the plan wrote.
   panel.classList.remove("hidden");
   const plan = activePlan(run);
   const waiting = approvalFrom(run);
@@ -74,8 +96,9 @@ function renderDetail() {
     ${canApprove ? '<div class="agent-actions"><button class="primary-button" data-agent-action="approve-plan" type="button">Approve this plan</button></div>' : ""}
     ${waiting ? `<div class="agent-route-card"><strong>Approval required · ${escapeHtml(waiting.tool)}</strong><br />The action has not executed. Review it before deciding.<div class="agent-actions"><button class="primary-button" data-agent-action="approve-effect" data-tool-run="${escapeHtml(waiting.toolRunId)}" type="button">Approve action</button><button class="secondary-button" data-agent-action="reject-effect" data-tool-run="${escapeHtml(waiting.toolRunId)}" type="button">Reject</button></div></div>` : ""}
     <h3>Plan · revision ${escapeHtml(plan?.revision || 1)}</h3>
+    ${handover(plan, run) ? `<p class="agent-handover">${handover(plan, run)}</p>` : ""}
     <div class="agent-step-list">${(run.steps || []).map((step, index) => `
-      <div class="agent-step ${escapeHtml(step.state)}"><span class="agent-step-index">${index + 1}</span><div><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description)}</p><div class="agent-step-meta"><span class="status-pill">${escapeHtml(step.kind)}</span><span class="status-pill">${escapeHtml(step.approvalPolicy || "safe")}</span><span class="status-pill">${escapeHtml(step.state)}</span>${step.attempts ? `<span class="status-pill">attempt ${step.attempts}</span>` : ""}</div>${step.error?.message ? `<p class="form-error">${escapeHtml(step.error.message)}</p>` : ""}</div>${step.state === "failed" ? `<button class="secondary-button" data-agent-action="retry" data-step-id="${escapeHtml(step.id)}" type="button">Retry</button>` : ""}</div>`).join("")}</div>
+      <div class="agent-step ${escapeHtml(step.state)}"><span class="agent-step-index">${index + 1}</span><div><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description)}</p><div class="agent-step-meta">${assignedAgent(plan, step) ? `<span class="status-pill agent">${escapeHtml(agentLabel(assignedAgent(plan, step)))}</span>` : ""}<span class="status-pill">${escapeHtml(step.kind)}</span><span class="status-pill">${escapeHtml(step.approvalPolicy || "safe")}</span><span class="status-pill">${escapeHtml(step.state)}</span>${step.attempts ? `<span class="status-pill">attempt ${step.attempts}</span>` : ""}</div>${step.error?.message ? `<p class="form-error">${escapeHtml(step.error.message)}</p>` : ""}</div>${step.state === "failed" ? `<button class="secondary-button" data-agent-action="retry" data-step-id="${escapeHtml(step.id)}" type="button">Retry</button>` : ""}</div>`).join("")}</div>
     <div class="agent-actions">
       ${canStart ? '<button class="primary-button" data-agent-action="start" type="button">Start approved plan</button>' : ""}
       ${canResume ? '<button class="primary-button" data-agent-action="resume" type="button">Resume</button>' : ""}
