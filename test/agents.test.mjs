@@ -169,6 +169,79 @@ test("a pinned model that fails costs the step nothing", () => {
   assert.match(runner, /"agent\.model"/);
 });
 
+test("a pack's specialist can be given a step, and keeps its voice", () => {
+  // Until now a pack could ship a specialist that nothing could ever assign:
+  // plans were always validated against the built-in roster, so the name was
+  // corrected away before the plan was stored.
+  const roster = listAgents([{
+    id: "acme.legal:contracts", name: "Contract Reader", description: "Reads contracts.",
+    systemPrompt: "You are the contracts specialist.", temperature: 0.1
+  }]);
+
+  const [step] = validateGoalPlan({
+    summary: "s",
+    steps: [
+      { id: "a", title: "Read the terms", type: "project_read", description: "d", agent: "acme.legal:contracts" },
+      { id: "b", title: "Check", type: "verification", description: "d", dependencies: ["a"] }
+    ]
+  }, { availableTools: [], roster }).steps;
+
+  assert.equal(step.agent, "acme.legal:contracts");
+  assert.equal(resolveAgent(step.agent, { roster }).systemPrompt, "You are the contracts specialist.");
+});
+
+test("a pack specialist is offered to the planner and bounded like any other", () => {
+  const roster = listAgents([{
+    id: "acme.legal:contracts", name: "Contract Reader", description: "Reads contracts.",
+    systemPrompt: "You are the contracts specialist.", tools: "all"
+  }]);
+
+  // Named in the prompt, so the planner can actually choose it.
+  assert.match(plannerSystemPrompt(["read_workspace_text"], roster), /acme\.legal:contracts \(Reads contracts\.\)/);
+
+  // And still capped at reading, so a pack cannot write itself a specialist
+  // that proposes changes.
+  const [step] = validateGoalPlan({
+    summary: "s",
+    steps: [
+      { id: "a", title: "Edit", type: "tool", tool: "propose_workspace_edit", description: "d", agent: "acme.legal:contracts" },
+      { id: "b", title: "Check", type: "verification", description: "d", dependencies: ["a"] }
+    ]
+  }, { availableTools: ["propose_workspace_edit"], roster }).steps;
+  assert.equal(step.agent, "engineer", "a change proposal moves to the one allowed to make it");
+});
+
+test("a plan validated without the pack falls back rather than failing", () => {
+  // The same plan, revised while the pack is disabled or uninstalled. Rejecting
+  // it would strand the run; the step is simply carried out by the default for
+  // its type.
+  const [step] = validateGoalPlan({
+    summary: "s",
+    steps: [
+      { id: "a", title: "Read the terms", type: "project_read", description: "d", agent: "acme.legal:contracts" },
+      { id: "b", title: "Check", type: "verification", description: "d", dependencies: ["a"] }
+    ]
+  }, { availableTools: [] }).steps;
+
+  assert.equal(step.agent, "researcher");
+});
+
+test("only the run's own pack lends its specialists", async () => {
+  // A pack installed for something else has no business putting a voice into
+  // every goal on the machine.
+  const runner = readFileSync(new URL("../lib/goal-runner.mjs", import.meta.url), "utf8");
+
+  assert.match(runner, /#roster\(packId = ""\)/);
+  assert.match(runner, /item\.type === "agent" && item\.packId === packId/);
+  assert.match(runner, /if \(!packId \|\| typeof this\.marketplace\?\.runtime !== "function"\) return listAgents\(\)/);
+  // Every place a plan is written, revised, or executed resolves against the
+  // same roster, or a specialist would survive planning and vanish at run time.
+  assert.match(runner, /plannerSystemPrompt\(tools, roster\)/);
+  assert.match(runner, /roster: this\.#roster\(packId\)/);
+  assert.match(runner, /roster: this\.#roster\(current\.goal\?\.packId\)/);
+  assert.match(runner, /roster: this\.#roster\(run\.goal\?\.packId\)/);
+});
+
 test("the roster is settable in the interface, from the server's own list", async () => {
   // The pins were reachable only by PATCHing settings by hand, which is a
   // feature that exists and cannot be used.

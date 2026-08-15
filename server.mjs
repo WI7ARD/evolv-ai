@@ -2511,8 +2511,15 @@ const server = http.createServer(async (req, res) => {
     // the roster, and duplicating it there would be a second copy to drift.
     if (req.method === "GET" && url.pathname === "/api/agents") {
       const settings = database.getSettings();
+      // With a pack named, its own specialists are listed alongside the
+      // built-ins — the same roster a goal for that pack is planned against.
+      const packId = url.searchParams.get("packId") || "";
+      const packAgents = packId
+        ? marketplace.runtime().filter((item) => item.type === "agent" && item.packId === packId)
+        : [];
       return json(res, 200, {
-        agents: listAgents().map((agent) => ({
+        packId,
+        agents: listAgents(packAgents).map((agent) => ({
           id: agent.id,
           name: agent.name,
           description: agent.description,
