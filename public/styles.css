@@ -117,6 +117,16 @@ body::before {
 .agent-model-pin strong { display: block; font-size: 12px; }
 .agent-model-pin small { color: var(--muted); font-size: 11px; }
 .agent-model-pin .reach { color: var(--muted-2); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+/* The two arms side by side. A table, because the whole point is reading one
+   row across and seeing whether the two numbers differ. */
+.specialist-cohorts { margin: 4px 0 12px; overflow-x: auto; }
+.specialist-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.specialist-table th, .specialist-table td { padding: 5px 8px; text-align: right; border-bottom: 1px solid var(--line); }
+.specialist-table thead th { color: var(--muted-2); font: 8px "DM Mono", monospace; letter-spacing: 0.1em; text-transform: uppercase; }
+.specialist-table tbody th { text-align: left; color: var(--muted); font-weight: 400; }
+.specialist-table tbody tr:last-child th, .specialist-table tbody tr:last-child td { border-bottom: 0; }
+.route-history-item.is-separated { border-left-color: var(--acid); }
+.model-badge.is-positive { border-color: var(--acid); color: var(--acid); }
 .model-control { display: flex; align-items: center; gap: 6px; }
 .favorite-button { background: transparent; border: 1px solid var(--line); color: var(--muted); padding: 2px 7px; font-size: 13px; line-height: 1.2; cursor: pointer; }
 .favorite-button:hover { color: var(--text); border-color: var(--muted); }

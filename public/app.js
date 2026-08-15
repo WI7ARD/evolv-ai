@@ -1650,6 +1650,59 @@ async function refreshIntelligence({ refreshModels = false } = {}) {
   // The roster is the server's to state. Duplicating it here would be a second
   // copy of who the specialists are, free to drift from the one that runs.
   await renderAgentModelPins().catch(() => {});
+  await renderSpecialistComparison().catch(() => {});
+}
+
+const COHORT_ROWS = [
+  ["Runs", (cohort) => cohort.runs],
+  ["Completed", (cohort) => (cohort.completionRate == null ? "—" : `${Math.round(cohort.completionRate * 100)}% of ${cohort.finishedRuns}`)],
+  ["Cited evidence", (cohort) => (cohort.groundingRate == null ? "—" : `${Math.round(cohort.groundingRate * 100)}%`)],
+  ["Tool reliability", (cohort) => (cohort.toolReliability == null ? "—" : `${Math.round(cohort.toolReliability * 100)}%`)],
+  ["Tool calls per run", (cohort) => (cohort.toolCalls == null ? "—" : cohort.toolCalls)],
+  ["Your rating", (cohort) => (cohort.meanRating == null ? "unrated" : `${cohort.meanRating} over ${cohort.ratedRuns}`)],
+  ["Cost units per run", (cohort) => (cohort.meanCostUnits == null ? "—" : cohort.meanCostUnits)],
+  ["Latency", (cohort) => (cohort.meanLatencyMs == null ? "—" : `${Math.round(cohort.meanLatencyMs / 100) / 10}s`)]
+];
+
+const GAP_LABEL = {
+  completionRate: "Completion rate", groundingRate: "Cited evidence",
+  toolReliability: "Tool reliability", rating: "Your rating", costUnits: "Cost per run"
+};
+
+async function renderSpecialistComparison() {
+  const container = $("#specialist-cohorts");
+  if (!container) return;
+  const report = await api("/api/evolution/specialists");
+  $("#specialist-verdict").textContent = report.verdict;
+  const badge = $("#specialist-verdict-badge");
+  if (badge) {
+    badge.textContent = report.conclusive ? "MEASURED DIFFERENCE" : "NO VERDICT";
+    badge.classList.toggle("is-positive", Boolean(report.conclusive));
+  }
+  container.innerHTML = `
+    <table class="specialist-table">
+      <thead><tr><th></th><th>Specialists</th><th>One voice</th></tr></thead>
+      <tbody>${COHORT_ROWS.map(([label, read]) => `
+        <tr><th scope="row">${escapeHtml(label)}</th>
+          <td>${escapeHtml(String(read(report.cohorts.specialists)))}</td>
+          <td>${escapeHtml(String(read(report.cohorts.control)))}</td></tr>`).join("")}
+      </tbody>
+    </table>`;
+  // A gap is only shown once both arms are big enough to have earned one.
+  // Printing z-scores over four runs would invite exactly the conclusion the
+  // verdict above is refusing to draw.
+  const showable = Object.entries(report.comparison).filter(([, gap]) => gap && report.cohorts.specialists.runs >= report.minimumCohort && report.cohorts.control.runs >= report.minimumCohort);
+  $("#specialist-gaps").innerHTML = showable.length ? showable.map(([metric, gap]) => `
+    <div class="route-history-item${gap.separated ? " is-separated" : ""}">
+      <strong>${escapeHtml(GAP_LABEL[metric] || metric)}</strong>
+      <p>${gap.delta > 0 ? "+" : ""}${escapeHtml(String(Math.round(gap.delta * 1000) / 1000))} with specialists · z ${escapeHtml(String(Math.round(gap.z * 100) / 100))} · ${gap.separated ? "separated from its own noise" : "inside its own noise"}</p>
+    </div>`).join("") : "";
+  const method = $("#specialist-method");
+  if (method) {
+    method.textContent = report.unlabelledRuns
+      ? `${report.method} ${report.unlabelledRuns} earlier run${report.unlabelledRuns === 1 ? "" : "s"} predate the control arm and are counted in neither column.`
+      : report.method;
+  }
 }
 
 // What each specialist may reach, said in words rather than a policy name.
@@ -1696,6 +1749,8 @@ function renderIntelligence() {
   elements.intelligenceDot?.classList.toggle("hidden", !(data.stats?.pendingMemories));
   $("#auto-routing-enabled").checked = settings.autoRouting !== false;
   $("#auto-memory-enabled").checked = settings.autoMemory !== false;
+  const specialistSwitch = $("#agent-specialists-enabled");
+  if (specialistSwitch) specialistSwitch.checked = settings.agentSpecialists !== false;
   $("#evaluation-limit").value = String(settings.evaluationLimit || 10);
   $("#monthly-cost-limit").value = String(settings.monthlyCostLimit || 0);
   const cloudProviders = app.providers.filter((provider) => provider.requiresKey && provider.configured);
@@ -4068,6 +4123,22 @@ function bindEvents() {
       await refreshIntelligence();
       toast("Intelligence settings saved.");
     } catch (error) { toast(error.message, "error"); }
+  });
+  // Saved the moment it is flipped rather than under the button below it: that
+  // button says "save specialist models", and a switch that decides whether
+  // specialists run at all is not one of those.
+  $("#agent-specialists-enabled")?.addEventListener("change", async (event) => {
+    const enabled = event.target.checked;
+    try {
+      await api("/api/intelligence/settings", { method: "PATCH", body: JSON.stringify({ agentSpecialists: enabled }) });
+      await refreshIntelligence();
+      toast(enabled
+        ? "Goal steps are shared out between specialists."
+        : "Goals now run as one voice. Runs started from here go into the control column.");
+    } catch (error) {
+      event.target.checked = !enabled;
+      toast(error.message, "error");
+    }
   });
   $("#save-agent-models")?.addEventListener("click", async () => {
     try {

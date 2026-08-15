@@ -122,3 +122,92 @@ test("a critical regression prevents recommendation and activation", async (t) =
   assert.equal(benchmark.summary.criticalRegression, true);
   assert.throws(() => evolution.decide(candidate.id, { decision: "approved", benchmarkRunId: benchmark.id }), /requires a completed benchmark/);
 });
+
+// The specialist comparison. Specialists were built on a claim, and every goal
+// ran with them, so the claim had nowhere to be tested. These cover the two
+// things that make the comparison honest rather than decorative: a run is
+// counted in the arm it actually ran in, and a difference is not called a
+// difference until there are enough runs behind it.
+
+function arm(database, runtime, { specialists, completed = true, rating = null, index = 0 }, evolution) {
+  const conversation = database.createConversation({ title: `Arm ${specialists} ${index}` });
+  const messageId = database.addMessage({
+    conversationId: conversation.id, role: "assistant", content: "Answer.", status: "complete",
+    metadata: { knowledge: completed ? [{ id: `source-${index}`, citation: "[S1]" }] : [] }
+  });
+  const run = runtime.createChatRun({
+    conversationId: conversation.id, objective: "Answer with evidence", providerId: "ollama", modelId: "fixture",
+    request: { specialists }, budgets: { maxSteps: 1, maxToolCalls: 6, maxTokens: 1000, maxCostUnits: 0 }
+  });
+  if (completed) runtime.complete(run.id, { output: { messageId }, tokens: 10 });
+  else runtime.fail(run.id, new Error("step failed"));
+  evolution.evaluateRun(run.id, { messageId });
+  if (rating) evolution.applyFeedback(messageId, rating, "");
+  return run.id;
+}
+
+test("an evaluation records which arm of the specialist comparison its run belonged to", async (t) => {
+  const { root, database, runtime, evolution } = await fixture();
+  t.after(async () => { database.close(); await rm(root, { recursive: true, force: true }); });
+  const withId = arm(database, runtime, { specialists: true, index: 1 }, evolution);
+  const withoutId = arm(database, runtime, { specialists: false, index: 2 }, evolution);
+  const legacy = completedRun(database, runtime, "Predates the control arm");
+  evolution.evaluateRun(legacy.runId, { messageId: legacy.messageId });
+
+  const byRun = new Map(evolution.listEvaluations(50).map((item) => [item.runId, item]));
+  assert.equal(byRun.get(withId).evidence.specialists, true);
+  assert.equal(byRun.get(withoutId).evidence.specialists, false);
+  // Not false. A run from before the control arm existed was not an experiment
+  // and must not be counted as one.
+  assert.equal(byRun.get(legacy.runId).evidence.specialists, null);
+
+  const report = evolution.compareSpecialists();
+  assert.equal(report.cohorts.specialists.runs, 1);
+  assert.equal(report.cohorts.control.runs, 1);
+  assert.equal(report.unlabelledRuns, 1);
+});
+
+test("the specialist comparison refuses a verdict until both arms have enough runs", async (t) => {
+  const { root, database, runtime, evolution } = await fixture();
+  t.after(async () => { database.close(); await rm(root, { recursive: true, force: true }); });
+  assert.match(evolution.compareSpecialists().verdict, /No goal has finished/);
+
+  for (let index = 0; index < 10; index += 1) arm(database, runtime, { specialists: true, index }, evolution);
+  const oneSided = evolution.compareSpecialists();
+  assert.equal(oneSided.conclusive, false);
+  assert.match(oneSided.verdict, /nothing to compare against/);
+
+  // Seven is one short of the floor, and every one of them failed — the widest
+  // completion gap the data could possibly show. It still gets no verdict.
+  for (let index = 0; index < 7; index += 1) arm(database, runtime, { specialists: false, completed: false, index: 100 + index }, evolution);
+  const short = evolution.compareSpecialists();
+  assert.equal(short.cohorts.control.runs, 7);
+  assert.equal(short.conclusive, false);
+  assert.deepEqual(short.separated, []);
+  assert.match(short.verdict, /Too few runs/);
+});
+
+test("a completion gap wide enough to survive its own error is reported with its direction", async (t) => {
+  const { root, database, runtime, evolution } = await fixture();
+  t.after(async () => { database.close(); await rm(root, { recursive: true, force: true }); });
+  for (let index = 0; index < 12; index += 1) arm(database, runtime, { specialists: true, index }, evolution);
+  for (let index = 0; index < 12; index += 1) arm(database, runtime, { specialists: false, completed: false, index: 100 + index }, evolution);
+  const report = evolution.compareSpecialists();
+  assert.equal(report.cohorts.specialists.completionRate, 1);
+  assert.equal(report.cohorts.control.completionRate, 0);
+  assert.equal(report.conclusive, true);
+  assert.ok(report.separated.includes("completionRate"));
+  assert.match(report.verdict, /completionRate higher with specialists/);
+});
+
+test("two arms that behave the same way are reported as the same, not as a win", async (t) => {
+  const { root, database, runtime, evolution } = await fixture();
+  t.after(async () => { database.close(); await rm(root, { recursive: true, force: true }); });
+  for (let index = 0; index < 10; index += 1) arm(database, runtime, { specialists: true, rating: "up", index }, evolution);
+  for (let index = 0; index < 10; index += 1) arm(database, runtime, { specialists: false, rating: "up", index: 100 + index }, evolution);
+  const report = evolution.compareSpecialists();
+  assert.equal(report.conclusive, false);
+  assert.deepEqual(report.separated, []);
+  assert.match(report.verdict, /neither helping nor hurting/);
+  assert.equal(report.comparison.completionRate.delta, 0);
+});

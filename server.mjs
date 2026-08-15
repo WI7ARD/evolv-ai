@@ -2574,6 +2574,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/evolution/evaluations") {
       return json(res, 200, { evaluations: evolutionService.listEvaluations(url.searchParams.get("limit") || 50) });
     }
+    if (req.method === "GET" && url.pathname === "/api/evolution/specialists") {
+      return json(res, 200, evolutionService.compareSpecialists({ limit: url.searchParams.get("limit") || 500 }));
+    }
     if (req.method === "GET" && url.pathname === "/api/evolution/failures") {
       return json(res, 200, { failures: evolutionService.listFailures(url.searchParams.get("limit") || 50) });
     }

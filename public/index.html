@@ -508,6 +508,8 @@
             <article class="mind-card agent-model-card">
               <div class="mind-card-heading"><div><p class="eyebrow">SPECIALISTS</p><h2>Who runs each step</h2></div></div>
               <p class="settings-note">A goal plan is shared out between specialists. Each one can run on its own model — checking criteria against evidence is worth more than searching a folder, and paying for the strong model on every step is how goals become too expensive to use.</p>
+              <label class="tool-switch"><input id="agent-specialists-enabled" type="checkbox" checked /> Share goal steps out between specialists</label>
+              <p class="settings-note">Turn this off and every step runs as one generalist voice, on the goal's own model, with no pinned models and no per-role limits. That is the control arm: goals run both ways are compared below, under <strong>Were specialists worth it</strong>.</p>
               <div id="agent-model-pins" class="agent-model-pins"></div>
               <p class="settings-note">Left on “the goal's own model”, a specialist uses whatever the run was started with. Pinned models come from the provider selected in chat; switch provider to pin one from somewhere else.</p>
               <button id="save-agent-models" class="primary-button" type="button">Save specialist models</button>
@@ -539,6 +541,13 @@
               <div id="failure-pattern-list" class="routing-history"></div>
             </article>
           </div>
+          <article class="mind-card specialist-comparison-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">CONTROL ARM · RECORDED PER RUN</p><h2>Were specialists worth it</h2></div><span id="specialist-verdict-badge" class="model-badge">NO VERDICT</span></div>
+            <p id="specialist-verdict" class="settings-note">Run some goals with specialists on and some with them off. Nothing here is inferred — every figure comes from runs you already finished.</p>
+            <div id="specialist-cohorts" class="specialist-cohorts"></div>
+            <div id="specialist-gaps" class="routing-history"></div>
+            <p id="specialist-method" class="settings-note"></p>
+          </article>
           <article class="mind-card strategy-lab-card">
             <div class="mind-card-heading"><div><p class="eyebrow">BENCHMARK → REVIEW → APPROVE</p><h2>Strategy lab</h2></div><button id="rollback-strategy" class="secondary-button" type="button">Rollback active strategy</button></div>
             <p class="settings-note">A benchmark runs five fixed cases twice (10 model calls). Cloud models may create provider charges. Evolv will never activate a candidate automatically.</p>

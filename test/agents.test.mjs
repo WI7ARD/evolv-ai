@@ -4,9 +4,10 @@ import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import {
   BUILT_IN_AGENTS, agentMayRunStep, agentModelOverride, agentRosterPrompt, agentSystemPrompt,
-  defaultAgentForStep, listAgents, resolveAgent
+  defaultAgentForStep, listAgents, resolveAgent, GENERALIST_AGENT
 } from "../lib/agents.mjs";
 import { plannerSystemPrompt, validateGoalPlan } from "../lib/goal-contracts.mjs";
+import { DEFAULT_INTELLIGENCE_SETTINGS, normalizeIntelligenceSettings } from "../lib/intelligence.mjs";
 
 const plan = (steps, availableTools = []) => validateGoalPlan({ summary: "s", steps }, { availableTools });
 
@@ -231,15 +232,15 @@ test("only the run's own pack lends its specialists", async () => {
   // every goal on the machine.
   const runner = readFileSync(new URL("../lib/goal-runner.mjs", import.meta.url), "utf8");
 
-  assert.match(runner, /#roster\(packId = ""\)/);
+  assert.match(runner, /#roster\(packId = "", specialists = true\)/);
   assert.match(runner, /item\.type === "agent" && item\.packId === packId/);
   assert.match(runner, /if \(!packId \|\| typeof this\.marketplace\?\.runtime !== "function"\) return listAgents\(\)/);
   // Every place a plan is written, revised, or executed resolves against the
   // same roster, or a specialist would survive planning and vanish at run time.
   assert.match(runner, /plannerSystemPrompt\(tools, roster\)/);
-  assert.match(runner, /roster: this\.#roster\(packId\)/);
-  assert.match(runner, /roster: this\.#roster\(current\.goal\?\.packId\)/);
-  assert.match(runner, /roster: this\.#roster\(run\.goal\?\.packId\)/);
+  assert.match(runner, /roster: this\.#roster\(packId, specialists\)/);
+  assert.match(runner, /roster: this\.#roster\(current\.goal\?\.packId, this\.#specialists\(current\)\)/);
+  assert.match(runner, /roster: this\.#roster\(run\.goal\?\.packId, specialists\)/);
 });
 
 test("the roster is settable in the interface, from the server's own list", async () => {
@@ -297,4 +298,87 @@ test("the runner executes each step as the specialist the plan assigned", async 
   assert.match(runner, /"agent\.assigned"/);
   // A verification gate returning JSON stays at zero whatever the critic wants.
   assert.match(runner, /const temperature = verification \? 0 : agent\.temperature/);
+});
+
+// The control arm. Specialists rest on a claim — that a model told which job it
+// is doing does that job better — and until goals have run without them the
+// claim is untested. Turning them off has to reproduce the runner as it was,
+// not invent a third behaviour, or the comparison measures the wrong thing.
+
+test("the generalist reproduces the runner as it was before specialists", () => {
+  const boundary = "You are executing one approved step in Evolv's bounded goal runner.";
+
+  // Byte for byte the old prompt. A trailing blank line would be a difference
+  // between the arms that nobody chose.
+  assert.equal(agentSystemPrompt(GENERALIST_AGENT, boundary), boundary);
+  // And still first when a role does have something to say.
+  assert.ok(agentSystemPrompt(resolveAgent("critic"), boundary).startsWith(`${boundary}\n\n`));
+
+  // Reach is left to the runner's own gate, which is where it lived before.
+  assert.equal(agentMayRunStep(GENERALIST_AGENT, { usesTool: true, causesEffect: true }), true);
+});
+
+test("with specialists off there is one voice, whatever the plan or the pack asks for", () => {
+  const roster = [GENERALIST_AGENT];
+
+  // Every step, every named role, every pack agent: the same one.
+  for (const type of ["project_read", "tool", "analyze", "verification", "report"]) {
+    assert.equal(resolveAgent(undefined, { step: { type }, roster }).id, "generalist");
+  }
+  assert.equal(resolveAgent("critic", { roster }).id, "generalist");
+  assert.equal(resolveAgent("acme.legal:contracts", { roster }).id, "generalist");
+
+  // And the planner is not offered a roster it cannot use.
+  const prompt = plannerSystemPrompt(["list_workspace_files"], roster);
+  assert.match(prompt, /generalist/);
+  assert.doesNotMatch(prompt, /critic/);
+});
+
+test("the arm a run started in is fixed on the run, not re-read from settings", async () => {
+  const runner = await readFile(new URL("../lib/goal-runner.mjs", import.meta.url), "utf8");
+
+  // Decided once, at creation, and written into the run's request. A setting
+  // flipped halfway through a goal must not change what that goal was.
+  assert.match(runner, /const specialists = this\.#specialists\(\);/);
+  assert.match(runner, /fallback: proposed\.route\.fallback, specialists \}/);
+  assert.match(runner, /if \(typeof run\?\.request\?\.specialists === "boolean"\) return run\.request\.specialists;/);
+
+  // A pinned model is part of what specialists buy you. Letting one through in
+  // the control arm would put the two arms on different models, and the
+  // comparison would be measuring that instead.
+  assert.match(runner, /specialists \? agentModelOverride\(this\.database\.getSettings\(\), agent\.id\) : null/);
+});
+
+test("turning specialists off is a setting a run can be recorded against", () => {
+  assert.equal(DEFAULT_INTELLIGENCE_SETTINGS.agentSpecialists, true, "on unless asked otherwise");
+  assert.equal(normalizeIntelligenceSettings({}).agentSpecialists, true);
+  assert.equal(normalizeIntelligenceSettings({ agentSpecialists: false }).agentSpecialists, false);
+  // Anything that is not an explicit false leaves specialists on, so a garbled
+  // settings file cannot silently move every goal into the control arm.
+  assert.equal(normalizeIntelligenceSettings({ agentSpecialists: "no" }).agentSpecialists, true);
+});
+
+test("the comparison is reachable and readable without editing settings by hand", async () => {
+  const [html, app, server] = await Promise.all([
+    readFile(new URL("../public/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
+    readFile(new URL("../server.mjs", import.meta.url), "utf8")
+  ]);
+
+  assert.match(html, /id="agent-specialists-enabled"/);
+  assert.match(html, /id="specialist-cohorts"/);
+  assert.match(server, /url\.pathname === "\/api\/evolution\/specialists"/);
+  assert.match(app, /api\("\/api\/evolution\/specialists"\)/);
+
+  // The switch saves itself. The button beside it says "save specialist
+  // models", and whether specialists run at all is not one of those.
+  assert.match(app, /\$\("#agent-specialists-enabled"\)\?\.addEventListener\("change"/);
+  assert.match(app, /agentSpecialists: enabled/);
+
+  // The verdict is the server's, printed as written. A client that phrased its
+  // own conclusion could reach a different one from the same numbers.
+  assert.match(app, /\$\("#specialist-verdict"\)\.textContent = report\.verdict/);
+  // z-scores are withheld until both arms clear the floor, or the page would
+  // invite exactly the conclusion the verdict is refusing to draw.
+  assert.match(app, /report\.cohorts\.control\.runs >= report\.minimumCohort/);
 });
