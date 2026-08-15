@@ -1330,24 +1330,38 @@ function renderLocalSetup(status, health) {
     if (!installing) return elements.localSetup.classList.add("hidden");
   }
 
+  // What this machine can actually hold. Offering the biggest build to a laptop
+  // that will swap on it is how people decide local models are useless, so the
+  // server picks from the catalogue by memory and the offer follows.
+  const offered = health.recommendedLabel || label;
+  const size = health.recommendedBytes ? ` (about ${formatBytes(health.recommendedBytes)})` : "";
+
   const copy = {
     offline: ["Ollama isn't running.", "Start Ollama on this computer, then refresh."],
-    empty: ["Ollama is running, but no AI models are installed.", `Install ${label} to start chatting.`],
-    optional: [`${label} isn't installed yet.`, "Your existing models still work. Installing adds Evolv's own local assistant."],
+    empty: ["Ollama is running, but no AI models are installed.", `Install ${offered}${size} to start chatting — it is the largest build this computer has memory for.`],
+    optional: [`${offered} isn't installed yet.`, `Your existing models still work. ${offered}${size} is the largest build this computer has memory for.`],
     stale: [`${label} was built from an older version of its instructions.`,
       "Rebuilding takes a few seconds — the model itself is already downloaded, and nothing is re-downloaded."],
-    none: [`${label} is ready.`, "You can start chatting."]
+    none: health.recommendedUpgrade
+      ? [`${label} is ready, and this computer could run ${offered}.`,
+        `${offered}${size} is the same assistant on a larger base — better at multi-step reasoning and tool use. Installing it leaves ${label} in place.`]
+      : [`${label} is ready.`, "You can start chatting."]
   }[status.setup];
 
   elements.localSetupTitle.textContent = copy[0];
   elements.localSetupDetail.textContent = copy[1];
   // Nothing to install while Ollama is unreachable — there is nowhere to put it.
-  elements.installButton.classList.toggle("hidden", status.setup === "offline" || status.setup === "none");
+  elements.installButton.classList.toggle("hidden", status.setup === "offline" || (status.setup === "none" && !health.recommendedUpgrade));
   elements.installButton.textContent = status.setup === "stale"
     ? `Rebuild ${label}`
-    : health.baseModelInstalled && !health.evolvModelInstalled
-      ? `Finish setting up ${label}`
-      : `Get ${label}`;
+    : status.setup === "none"
+      ? `Install ${offered}`
+      : health.baseModelInstalled && !health.evolvModelInstalled
+        ? `Finish setting up ${label}`
+        : `Get ${offered}`;
+  // The install streams whichever build was offered, not always the default.
+  elements.installButton.dataset.model = status.setup === "stale"
+    ? (health.evolvModel || "") : (health.recommendedModel || "");
   elements.localSetup.classList.remove("hidden");
 
   if (installing) attachToInstall();
@@ -1394,7 +1408,9 @@ async function attachToInstall() {
       const response = await fetch("/api/ollama/install-evolv", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({})
+        // Whichever build the panel offered. An empty value lets the server
+        // choose its default, which is what a rejoining client sends.
+        body: JSON.stringify(elements.installButton?.dataset.model ? { model: elements.installButton.dataset.model } : {})
       });
       if (!response.ok || !response.body) throw new Error(`Install failed to start (${response.status}).`);
 

@@ -130,6 +130,34 @@ test("whitespace is not a reason to rebuild", async () => {
   assert.equal((await createEvolvLocalService({ client }).status()).evolvModelStale, false);
 });
 
+test("the build offered is the largest this computer can hold", async () => {
+  const { recommendEvolvModel, evolvModelDefinition, listEvolvModels } = await import("../lib/evolv-models.mjs");
+  const GB = 1e9;
+
+  // A model that technically loads and then swaps is how people conclude local
+  // AI is useless, so a variant is only offered when it fits comfortably.
+  assert.equal(recommendEvolvModel(4 * GB), "evolv:latest");
+  assert.equal(recommendEvolvModel(8 * GB), "evolv:pro");
+  assert.equal(recommendEvolvModel(16 * GB), "evolv:max");
+  assert.equal(recommendEvolvModel(64 * GB), "evolv:max");
+  // Never nothing: a machine too small even for the smallest is a fact the
+  // memory warning states, not a reason to offer no assistant at all.
+  assert.equal(recommendEvolvModel(0), "evolv:latest");
+  assert.equal(recommendEvolvModel(1 * GB), "evolv:latest");
+
+  // Every variant is the same assistant — only the base differs, because that
+  // is what decides how good it feels.
+  const catalogue = listEvolvModels();
+  assert.equal(catalogue.length, 3);
+  assert.equal(new Set(catalogue.map((entry) => entry.system)).size, 1, "one prompt across the ladder");
+  assert.equal(new Set(catalogue.map((entry) => entry.base)).size, 3, "three different bases");
+  for (const entry of catalogue) assert.ok(entry.approximateBytes > 0, `${entry.name} states its size`);
+
+  // The default keeps the base it has always had: re-pointing it would change
+  // what is already installed on someone's laptop without asking.
+  assert.equal(evolvModelDefinition("evolv:latest").base, "llama3.2:3b");
+});
+
 test("a model pulled without a tag still counts as installed", async () => {
   // `ollama pull evolv` and `ollama pull evolv:latest` leave different strings
   // in /api/tags for the same model.
@@ -357,6 +385,15 @@ test("the interface distinguishes all four states and offers the install", async
 
   // Rebuilding after the prompt changes, without re-downloading anything.
   assert.match(app, /Rebuild \$\{label\}/);
+  // The offer names the build this machine can hold, and installs that one
+  // rather than always the default.
+  assert.match(app, /health\.recommendedLabel/);
+  assert.match(app, /largest build this computer has memory for/);
+  assert.match(app, /installButton\?\.dataset\.model/);
+  // An upgrade is only mentioned when there is one, and never removes what is
+  // already installed.
+  assert.match(app, /health\.recommendedUpgrade/);
+  assert.match(app, /leaves \$\{label\} in place/);
   assert.match(app, /older version of its instructions/);
   assert.match(app, /nothing is re-downloaded/);
 });

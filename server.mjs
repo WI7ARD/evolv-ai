@@ -17,7 +17,7 @@ import { handleHudRoutes } from "./server/hud-routes.mjs";
 import { createUnavailableSecretStore } from "./lib/secrets.mjs";
 import { createOllamaClient } from "./lib/ollama-client.mjs";
 import { createEvolvLocalService } from "./lib/evolv-local.mjs";
-import { DEFAULT_EVOLV_MODEL } from "./lib/evolv-models.mjs";
+import { DEFAULT_EVOLV_MODEL, evolvModelDefinition, recommendEvolvModel } from "./lib/evolv-models.mjs";
 import { createLogger } from "./lib/logger.mjs";
 import {
   retrieveMemory as retrieveMemoryGraph,
@@ -941,12 +941,23 @@ async function handleModels(res, providerId = "ollama") {
 // tell a working install from an empty one.
 async function handleHealth(res) {
   const status = await evolvLocal.status();
+  // Which Evolv Local this machine can actually hold. The catalogue knows what
+  // each variant weighs; only the server knows how much memory there is.
+  const totalMemory = os.totalmem();
+  const recommended = evolvModelDefinition(recommendEvolvModel(totalMemory));
   json(res, 200, {
     connected: status.ollamaReachable,
     version: status.version,
     ollamaUrl: OLLAMA_URL,
     error: status.ollamaReachable ? undefined : `Cannot reach Ollama at ${OLLAMA_URL}. Start Ollama, then refresh.`,
-    ...status
+    ...status,
+    totalMemory,
+    recommendedModel: recommended.name,
+    recommendedLabel: recommended.label,
+    recommendedBytes: recommended.approximateBytes,
+    // True when the machine could hold a better one than is installed, which is
+    // the only case worth saying anything about.
+    recommendedUpgrade: status.evolvModelInstalled && recommended.name !== status.evolvModel
   });
 }
 
