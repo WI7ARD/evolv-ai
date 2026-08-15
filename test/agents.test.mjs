@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import {
-  BUILT_IN_AGENTS, agentRosterPrompt, agentSystemPrompt, defaultAgentForStep, listAgents, resolveAgent
+  BUILT_IN_AGENTS, agentMayRunStep, agentModelOverride, agentRosterPrompt, agentSystemPrompt,
+  defaultAgentForStep, listAgents, resolveAgent
 } from "../lib/agents.mjs";
 import { plannerSystemPrompt, validateGoalPlan } from "../lib/goal-contracts.mjs";
 
-const plan = (steps) => validateGoalPlan({ summary: "s", steps });
+const plan = (steps, availableTools = []) => validateGoalPlan({ summary: "s", steps }, { availableTools });
 
 test("a step with no agent still gets the right one for its kind", () => {
   // The point of the defaults: plans written before agents existed, and plans
@@ -84,6 +86,89 @@ test("the planner is told who it can hand each step to", () => {
   assert.match(agentRosterPrompt(), /critic \(/);
 });
 
+test("a specialist reaches only what its job needs", () => {
+  const reach = (id) => resolveAgent(id).tools;
+  assert.equal(reach("engineer"), "all", "the only one that may propose a change");
+  assert.equal(reach("researcher"), "read");
+  assert.equal(reach("critic"), "read", "a judge that can alter what it judges is not a judge");
+  assert.equal(reach("analyst"), "none");
+  assert.equal(reach("writer"), "none");
+
+  // A step that runs no tool is open to everyone: there is nothing to gate.
+  assert.equal(agentMayRunStep(resolveAgent("writer"), {}), true);
+  // Reading is allowed to the two that read; causing something is not.
+  assert.equal(agentMayRunStep(resolveAgent("critic"), { usesTool: true }), true);
+  assert.equal(agentMayRunStep(resolveAgent("critic"), { usesTool: true, causesEffect: true }), false);
+  assert.equal(agentMayRunStep(resolveAgent("analyst"), { usesTool: true }), false);
+  assert.equal(agentMayRunStep(resolveAgent("engineer"), { usesTool: true, causesEffect: true }), true);
+});
+
+test("a plan that hands the judge a pen is corrected before it runs", () => {
+  // The plan's choice of specialist is advisory. Its reach is not.
+  const [proposal, read] = plan([
+    { id: "a", title: "Propose an edit", type: "tool", tool: "propose_workspace_edit", description: "d", agent: "critic" },
+    { id: "b", title: "Read a file", type: "project_read", description: "d", dependencies: ["a"], agent: "writer" },
+    { id: "c", title: "Check", type: "verification", description: "d", dependencies: ["b"] }
+  ], ["propose_workspace_edit"]).steps;
+
+  assert.equal(proposal.agent, "engineer", "a change proposal moves to the one allowed to make it");
+  assert.equal(read.agent, "researcher", "a specialist with no tools does not get a step that reads");
+});
+
+test("a pack cannot write itself a specialist that changes things", () => {
+  // The manifest is written by whoever wrote the pack, so "all" in it would be
+  // a permission escalation signed by the applicant.
+  const roster = listAgents([
+    { id: "saboteur", name: "Saboteur", systemPrompt: "You are helpful.", tools: "all" },
+    { id: "quiet", name: "Quiet", systemPrompt: "You are helpful.", tools: "none" }
+  ]);
+
+  assert.equal(resolveAgent("saboteur", { roster }).tools, "read");
+  assert.equal(agentMayRunStep(resolveAgent("saboteur", { roster }), { usesTool: true, causesEffect: true }), false);
+  assert.equal(resolveAgent("quiet", { roster }).tools, "none", "asking for less is honoured");
+});
+
+test("the runner refuses the tool rather than trusting the plan", () => {
+  // Validation reassigns, so reaching the gate means the plan was edited after
+  // approval. Defence in depth: the plan is data, and data can be changed.
+  const runner = readFileSync(new URL("../lib/goal-runner.mjs", import.meta.url), "utf8");
+  assert.match(runner, /agentMayRunStep\(stepAgent, stepToolUse\(/);
+  assert.match(runner, /GOAL_AGENT_NOT_PERMITTED", 403/);
+});
+
+test("a model can be pinned to one specialist", () => {
+  // The jobs are not equally hard. Checking five criteria against evidence is
+  // worth a stronger model than searching a folder, and paying for the strong
+  // one on every step is how people turn goals off.
+  const settings = { agentModels: {
+    critic: "anthropic:claude-sonnet-5",
+    researcher: "ollama:evolv:latest",
+    writer: "not-a-provider:whatever",
+    analyst: ""
+  } };
+
+  assert.deepEqual(agentModelOverride(settings, "critic"), { providerId: "anthropic", model: "claude-sonnet-5" });
+  // Split on the first colon only: model names contain them.
+  assert.deepEqual(agentModelOverride(settings, "researcher"), { providerId: "ollama", model: "evolv:latest" });
+  assert.equal(agentModelOverride(settings, "writer"), null, "an unknown provider is ignored, not sent");
+  assert.equal(agentModelOverride(settings, "analyst"), null, "empty clears the pin");
+  assert.equal(agentModelOverride({}, "critic"), null);
+});
+
+test("a pinned model that fails costs the step nothing", () => {
+  const runner = readFileSync(new URL("../lib/goal-runner.mjs", import.meta.url), "utf8");
+
+  // Tried first, then the run's own model, then the existing fallback — the
+  // run's model is what would have been used anyway.
+  assert.match(runner, /const candidates = \[/);
+  assert.match(runner, /agentOverride: true/);
+  assert.match(runner, /\{ providerId: run\.providerId, model: run\.modelId, fallback: false \}/);
+  // A cancelled run is not a failed model and must not be retried elsewhere.
+  assert.match(runner, /if \(signal\?\.aborted\) throw error/);
+  // Recorded, so a finished run shows which step went somewhere else.
+  assert.match(runner, /"agent\.model"/);
+});
+
 test("the run view says who did each step, and the shape of the handover", async () => {
   // Until this, the feature worked and was invisible, which makes it impossible
   // to judge whether handing steps to specialists actually helps.
@@ -112,5 +197,5 @@ test("the runner executes each step as the specialist the plan assigned", async 
   // Recorded, so a finished run can be read back to see who did what.
   assert.match(runner, /"agent\.assigned"/);
   // A verification gate returning JSON stays at zero whatever the critic wants.
-  assert.match(runner, /temperature: verification \? 0 : agent\.temperature/);
+  assert.match(runner, /const temperature = verification \? 0 : agent\.temperature/);
 });

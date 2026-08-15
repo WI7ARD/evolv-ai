@@ -302,6 +302,29 @@ test("supports persisted conversation lifecycle", async () => {
   assert.equal((await client.fetch(`/api/conversations/${created.id}?permanent=true`, { method: "DELETE" })).status, 200);
 });
 
+test("a model pinned to a specialist is validated before it is stored", async () => {
+  const patch = (agentModels) => client.fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agentModels })
+  });
+
+  assert.equal((await patch({ critic: "anthropic:claude-sonnet-5", researcher: "ollama:evolv:latest" })).status, 200);
+  assert.deepEqual((await (await client.fetch("/api/settings")).json()).agentModels,
+    { critic: "anthropic:claude-sonnet-5", researcher: "ollama:evolv:latest" });
+
+  // It is read straight into a request, so an unrecognised provider or a name
+  // with no provider at all is refused rather than stored and discovered later.
+  assert.equal((await patch({ critic: "claude-sonnet-5" })).status, 400);
+  assert.equal((await patch({ critic: "not-a-provider:model" })).status, 400);
+  assert.equal((await patch({ "../etc": "ollama:x" })).status, 400);
+  assert.equal((await patch({ critic: "x".repeat(300) })).status, 400);
+  assert.equal((await patch("not an object")).status, 400);
+
+  // Empty clears the pin, which is how a specialist goes back to the run's model.
+  assert.equal((await patch({ critic: "" })).status, 200);
+});
+
 test("favouriting a model persists it and survives a bad request", async () => {
   const favorited = await client.fetch("/api/models/favorite", {
     method: "POST",

@@ -35,6 +35,7 @@ import { conversationToMarkdown, vaultNotePath } from "./lib/conversation-export
 import { assessModelFit, isFavorite, toggleFavorite } from "./lib/model-fit.mjs";
 import { classifyModelFailure, isFailing } from "./lib/model-health.mjs";
 import { sanitizeConversation } from "./lib/message-hygiene.mjs";
+import { agentModelOverride } from "./lib/agents.mjs";
 import { imageMediaType } from "./lib/images.mjs";
 import os from "node:os";
 import { generatedRecipeSchema, validateGeneratedRecipe } from "./lib/tool-recipes.mjs";
@@ -391,7 +392,7 @@ function isPlainRecord(value) {
 
 function validateSettingsPatch(value) {
   if (!isPlainRecord(value)) throw Object.assign(new Error("Settings must be a JSON object."), { status: 400 });
-  const allowed = new Set(["provider", "model", "think", "temperature", "numCtx", "maxTokens", "mode", "toolsEnabled", "intelligence"]);
+  const allowed = new Set(["provider", "model", "think", "temperature", "numCtx", "maxTokens", "mode", "toolsEnabled", "intelligence", "agentModels"]);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw Object.assign(new Error(`Unknown setting: ${key}`), { status: 400 });
   }
@@ -400,6 +401,20 @@ function validateSettingsPatch(value) {
   }
   if (value.provider != null && !["ollama", "openai", "anthropic", "gemini", "openrouter", "custom"].includes(value.provider)) {
     throw Object.assign(new Error("Invalid AI provider setting."), { status: 400 });
+  }
+  // A model pinned to one specialist, written "provider:model". Bounded here
+  // because it is read straight into a request: an unrecognised provider or an
+  // oversized name would be a stored setting nothing else checks.
+  if (value.agentModels != null) {
+    if (!isPlainRecord(value.agentModels)) throw Object.assign(new Error("Agent models must be a JSON object."), { status: 400 });
+    for (const [agentId, pinned] of Object.entries(value.agentModels)) {
+      if (!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(agentId)) throw Object.assign(new Error(`Invalid agent name: ${agentId}`), { status: 400 });
+      if (typeof pinned !== "string" || pinned.length > 200) throw Object.assign(new Error("An agent model must be a short string."), { status: 400 });
+      // Empty clears the pin; anything else has to name a provider Evolv has.
+      if (pinned && !agentModelOverride({ agentModels: { [agentId]: pinned } }, agentId)) {
+        throw Object.assign(new Error(`Write an agent model as provider:model, for example anthropic:claude-sonnet-5.`), { status: 400 });
+      }
+    }
   }
   if (value.think != null && ![true, false, "true", "false", "low", "medium", "high"].includes(value.think)) {
     throw Object.assign(new Error("Invalid reasoning setting."), { status: 400 });
