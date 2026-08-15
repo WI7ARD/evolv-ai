@@ -169,6 +169,32 @@ test("a pinned model that fails costs the step nothing", () => {
   assert.match(runner, /"agent\.model"/);
 });
 
+test("the roster is settable in the interface, from the server's own list", async () => {
+  // The pins were reachable only by PATCHing settings by hand, which is a
+  // feature that exists and cannot be used.
+  const [html, app, server] = await Promise.all([
+    readFile(new URL("../public/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../public/app.js", import.meta.url), "utf8"),
+    readFile(new URL("../server.mjs", import.meta.url), "utf8")
+  ]);
+
+  assert.match(html, /id="agent-model-pins"/);
+  assert.match(html, /id="save-agent-models"/);
+
+  // Read from the server rather than listed again in the client, or there
+  // would be two copies of who the specialists are.
+  assert.match(server, /url\.pathname === "\/api\/agents"/);
+  assert.match(app, /api\("\/api\/agents"\)/);
+  assert.doesNotMatch(app, /BUILT_IN_AGENTS/, "the client never carries its own roster");
+
+  // A pin set against another provider must survive the chat provider changing.
+  assert.match(app, /if \(agent\.model && !options\.includes\(agent\.model\)\) options\.unshift\(agent\.model\)/);
+  // Clearing a pin has to be a change, not an omission.
+  assert.match(app, /\$\$\("\[data-agent-model\]"\)/);
+  // What each specialist may reach, in words rather than a policy name.
+  assert.match(app, /reasons over what other steps found/);
+});
+
 test("the run view says who did each step, and the shape of the handover", async () => {
   // Until this, the feature worked and was invisible, which makes it impossible
   // to judge whether handing steps to specialists actually helps.

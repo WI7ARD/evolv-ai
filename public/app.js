@@ -1613,6 +1613,42 @@ async function refreshIntelligence({ refreshModels = false } = {}) {
   [app.intelligence, app.evolution] = await Promise.all([api("/api/intelligence"), api("/api/evolution")]);
   if (refreshModels || !app.intelligenceModels.length) await loadIntelligenceModels();
   renderIntelligence();
+  // The roster is the server's to state. Duplicating it here would be a second
+  // copy of who the specialists are, free to drift from the one that runs.
+  await renderAgentModelPins().catch(() => {});
+}
+
+// What each specialist may reach, said in words rather than a policy name.
+const REACH_LABEL = {
+  all: "reads, and may propose changes",
+  read: "reads only",
+  none: "no tools — reasons over what other steps found"
+};
+
+async function renderAgentModelPins() {
+  const container = $("#agent-model-pins");
+  if (!container) return;
+  const { agents } = await api("/api/agents");
+  const provider = app.settings.provider || "ollama";
+  container.innerHTML = agents.map((agent) => {
+    // The models Evolv currently has loaded, plus whatever is already pinned —
+    // a pin from another provider must not vanish because the chat provider
+    // changed since it was set.
+    const options = app.models.map((model) => `${provider}:${model.name}`);
+    if (agent.model && !options.includes(agent.model)) options.unshift(agent.model);
+    return `
+      <div class="agent-model-pin">
+        <label for="agent-model-${escapeHtml(agent.id)}">
+          <strong>${escapeHtml(agent.name)}</strong>
+          <small>${escapeHtml(agent.description)}</small>
+          <span class="reach">${escapeHtml(REACH_LABEL[agent.tools] || agent.tools || "")}</span>
+        </label>
+        <select id="agent-model-${escapeHtml(agent.id)}" data-agent-model="${escapeHtml(agent.id)}">
+          <option value="">The goal's own model</option>
+          ${options.map((value) => `<option value="${escapeHtml(value)}"${value === agent.model ? " selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+        </select>
+      </div>`;
+  }).join("");
 }
 
 function renderIntelligence() {
@@ -3997,6 +4033,17 @@ function bindEvents() {
       });
       await refreshIntelligence();
       toast("Intelligence settings saved.");
+    } catch (error) { toast(error.message, "error"); }
+  });
+  $("#save-agent-models")?.addEventListener("click", async () => {
+    try {
+      // Every specialist is sent, including the ones set back to empty, so
+      // clearing a pin is a change rather than an omission.
+      const agentModels = Object.fromEntries($$("[data-agent-model]").map((select) => [select.dataset.agentModel, select.value]));
+      await api("/api/settings", { method: "PATCH", body: JSON.stringify({ agentModels }) });
+      await renderAgentModelPins();
+      const pinned = Object.values(agentModels).filter(Boolean).length;
+      toast(pinned ? `Saved. ${pinned} specialist${pinned === 1 ? "" : "s"} pinned to a model.` : "Saved. Every specialist uses the goal's own model.");
     } catch (error) { toast(error.message, "error"); }
   });
   $("#intelligence-models")?.addEventListener("click", async (event) => {

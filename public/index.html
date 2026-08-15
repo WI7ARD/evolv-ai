@@ -505,6 +505,13 @@
               <label><span class="field-label">MONTHLY CLOUD COST-UNIT SAFEGUARD (0 = UNLIMITED)</span><input id="monthly-cost-limit" type="number" min="0" max="100000" step="1" value="0" /></label>
               <button id="save-intelligence-settings" class="primary-button" type="button">Save intelligence settings</button>
             </article>
+            <article class="mind-card agent-model-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">SPECIALISTS</p><h2>Who runs each step</h2></div></div>
+              <p class="settings-note">A goal plan is shared out between specialists. Each one can run on its own model — checking criteria against evidence is worth more than searching a folder, and paying for the strong model on every step is how goals become too expensive to use.</p>
+              <div id="agent-model-pins" class="agent-model-pins"></div>
+              <p class="settings-note">Left on “the goal's own model”, a specialist uses whatever the run was started with. Pinned models come from the provider selected in chat; switch provider to pin one from somewhere else.</p>
+              <button id="save-agent-models" class="primary-button" type="button">Save specialist models</button>
+            </article>
             <article class="mind-card intelligence-model-card">
               <div class="mind-card-heading"><div><p class="eyebrow">MODEL PROFILES</p><h2>Auto preferences</h2></div></div>
               <p class="settings-note">Rate models from 1–5. Cost may be 0 for local models. Disabling Auto never removes manual selection.</p>

@@ -302,6 +302,28 @@ test("supports persisted conversation lifecycle", async () => {
   assert.equal((await client.fetch(`/api/conversations/${created.id}?permanent=true`, { method: "DELETE" })).status, 200);
 });
 
+test("the roster the interface renders is the roster that runs", async () => {
+  const { agents } = await (await client.fetch("/api/agents")).json();
+
+  assert.deepEqual(agents.map((agent) => agent.id), ["researcher", "engineer", "analyst", "critic", "writer"]);
+  // What each may reach travels with it, so the interface states the boundary
+  // rather than describing one it has invented.
+  assert.equal(agents.find((agent) => agent.id === "critic").tools, "read");
+  assert.equal(agents.find((agent) => agent.id === "engineer").tools, "all");
+  assert.equal(agents.find((agent) => agent.id === "writer").tools, "none");
+  for (const agent of agents) assert.ok(agent.name && agent.description, `${agent.id} is described`);
+
+  // A pin set through settings comes back on the specialist it belongs to.
+  await client.fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agentModels: { critic: "ollama:evolv:max" } })
+  });
+  const pinned = await (await client.fetch("/api/agents")).json();
+  assert.equal(pinned.agents.find((agent) => agent.id === "critic").model, "ollama:evolv:max");
+  assert.equal(pinned.agents.find((agent) => agent.id === "writer").model, "");
+});
+
 test("a model pinned to a specialist is validated before it is stored", async () => {
   const patch = (agentModels) => client.fetch("/api/settings", {
     method: "PATCH",

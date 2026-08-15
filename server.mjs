@@ -35,7 +35,7 @@ import { conversationToMarkdown, vaultNotePath } from "./lib/conversation-export
 import { assessModelFit, isFavorite, toggleFavorite } from "./lib/model-fit.mjs";
 import { classifyModelFailure, isFailing } from "./lib/model-health.mjs";
 import { sanitizeConversation } from "./lib/message-hygiene.mjs";
-import { agentModelOverride } from "./lib/agents.mjs";
+import { agentModelOverride, listAgents } from "./lib/agents.mjs";
 import { imageMediaType } from "./lib/images.mjs";
 import os from "node:os";
 import { generatedRecipeSchema, validateGeneratedRecipe } from "./lib/tool-recipes.mjs";
@@ -2473,6 +2473,21 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/ollama/install-evolv/cancel") {
       return json(res, 200, { cancelled: evolvLocal.cancel(), install: evolvLocal.state() });
+    }
+    // The specialists a goal plan is shared out between, with what each may
+    // reach and any model pinned to it. The interface has no other way to know
+    // the roster, and duplicating it there would be a second copy to drift.
+    if (req.method === "GET" && url.pathname === "/api/agents") {
+      const settings = database.getSettings();
+      return json(res, 200, {
+        agents: listAgents().map((agent) => ({
+          id: agent.id,
+          name: agent.name,
+          description: agent.description,
+          tools: agent.tools,
+          model: String(settings.agentModels?.[agent.id] || "")
+        }))
+      });
     }
     if (req.method === "GET" && url.pathname === "/api/models") {
       return await handleModels(res, url.searchParams.get("provider") || "ollama");
