@@ -130,6 +130,43 @@ test("whitespace is not a reason to rebuild", async () => {
   assert.equal((await createEvolvLocalService({ client }).status()).evolvModelStale, false);
 });
 
+test("installing any build counts as installed, not only the default one", async () => {
+  // The bug this covers: the setup panel offered evolv:pro on a capable
+  // machine, the install put evolv:pro on disk, and status still asked whether
+  // evolv:latest was there. Evolv reported itself uninstalled while holding a
+  // model the person had just watched download, and evolv:latest was nowhere to
+  // be found because it had never existed.
+  const client = fakeClient({ models: [BASE, "evolv:pro"] });
+  const status = await createEvolvLocalService({ client }).status();
+
+  assert.equal(status.evolvModelInstalled, true);
+  assert.equal(status.evolvModel, "evolv:pro", "the installed build is the one reported");
+  assert.equal(status.evolvModelLabel, "Evolv Local Pro");
+  assert.deepEqual(status.evolvModelsInstalled, ["evolv:pro"]);
+});
+
+test("with two builds installed the larger one is the one Evolv uses", async () => {
+  const client = fakeClient({ models: [BASE, "evolv:latest", "evolv:max"] });
+  const status = await createEvolvLocalService({ client }).status();
+
+  assert.equal(status.evolvModel, "evolv:max", "the best answer this machine has");
+  assert.deepEqual(status.evolvModelsInstalled, ["evolv:latest", "evolv:max"]);
+});
+
+test("with nothing installed, the offered build is the one described", async () => {
+  // So "finish setting up" refers to the base of the build actually on offer
+  // rather than the base of a build nobody chose.
+  const status = await createEvolvLocalService({ client: fakeClient({ models: [] }) })
+    .status({ preferred: "evolv:max" });
+
+  assert.equal(status.evolvModelInstalled, false);
+  assert.equal(status.evolvModel, "evolv:max");
+  assert.equal(status.baseModel, "qwen2.5:14b");
+  // An unknown name is ignored rather than throwing on a health check.
+  assert.equal((await createEvolvLocalService({ client: fakeClient({ models: [] }) })
+    .status({ preferred: "evolv:nonsense" })).evolvModel, "evolv:latest");
+});
+
 test("the build offered is the largest this computer can hold", async () => {
   const { recommendEvolvModel, evolvModelDefinition, listEvolvModels } = await import("../lib/evolv-models.mjs");
   const GB = 1e9;

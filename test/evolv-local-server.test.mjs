@@ -58,7 +58,12 @@ test("health reports a running Ollama with nothing installed as not ready", asyn
   assert.equal(health.modelCount, 0);
   assert.deepEqual(health.models, []);
   assert.equal(health.evolvModelInstalled, false);
-  assert.equal(health.evolvModel, "evolv:latest");
+  // With nothing installed, the build described is the one being offered, which
+  // depends on how much memory this machine has. Naming evolv:latest here would
+  // be asserting that the offer never adapts.
+  assert.equal(health.evolvModel, health.recommendedModel);
+  assert.ok(["evolv:latest", "evolv:pro", "evolv:max"].includes(health.evolvModel));
+  assert.deepEqual(health.evolvModelsInstalled, []);
 });
 
 test("the status endpoint answers the same question on its own", async () => {

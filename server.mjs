@@ -940,11 +940,13 @@ async function handleModels(res, providerId = "ollama") {
 // for anything already reading it; the model fields are what let the interface
 // tell a working install from an empty one.
 async function handleHealth(res) {
-  const status = await evolvLocal.status();
   // Which Evolv Local this machine can actually hold. The catalogue knows what
-  // each variant weighs; only the server knows how much memory there is.
+  // each variant weighs; only the server knows how much memory there is. It is
+  // passed in so that, with nothing installed yet, the base-model fields
+  // describe the build actually being offered.
   const totalMemory = os.totalmem();
   const recommended = evolvModelDefinition(recommendEvolvModel(totalMemory));
+  const status = await evolvLocal.status({ preferred: recommended.name });
   json(res, 200, {
     connected: status.ollamaReachable,
     version: status.version,
@@ -955,9 +957,11 @@ async function handleHealth(res) {
     recommendedModel: recommended.name,
     recommendedLabel: recommended.label,
     recommendedBytes: recommended.approximateBytes,
-    // True when the machine could hold a better one than is installed, which is
-    // the only case worth saying anything about.
-    recommendedUpgrade: status.evolvModelInstalled && recommended.name !== status.evolvModel
+    // True when the machine could hold a better one than any it already has.
+    // Compared against every installed build, not just the active one, or
+    // someone who keeps both would be offered the larger one forever.
+    recommendedUpgrade: status.evolvModelInstalled
+      && !(status.evolvModelsInstalled || []).includes(recommended.name)
   });
 }
 
