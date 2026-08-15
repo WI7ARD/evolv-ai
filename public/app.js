@@ -1,4 +1,3 @@
-import { initAgentWorkspace, refreshAgentWorkspace } from "./agent-workspace.js";
 import { initSandboxWorkspace, refreshSandboxes } from "./sandbox.js";
 import { initPhysics, refreshPhysics, suspendPhysics } from "./physics.js";
 import { initLab, refreshLab, suspendLab } from "./lab.js";
@@ -164,16 +163,8 @@ const app = {
   intelligenceModels: [],
   obsidian: null,
   toolRecipes: [],
-  marketplace: null,
   projects: [],
   activeProjectId: localStorage.getItem("evolv:active-project") || "",
-  marketplaceTab: "discover",
-  marketplaceSelectedId: "",
-  pendingMarketplaceInstall: null,
-  marketplaceInstallInFlight: false,
-  marketplaceConfigSaveInFlight: false,
-  pendingPackCommand: null,
-  activePack: null,
   account: null,
   legacyConversations: loadJson("evolv:conversations", []),
   legacyCurrent: loadJson("evolv:current", []),
@@ -442,8 +433,6 @@ async function openConversation(id) {
     localStorage.setItem("evolv:active-project", app.activeProjectId);
     renderProjects();
   }
-  app.activePack = lastUser?.packSession || null;
-  renderActivePack();
   saveLocal();
   renderMessages();
   renderConversationList();
@@ -1136,7 +1125,6 @@ function formatBytes(bytes) {
 
 async function init() {
   if (!await initializeAuth()) return;
-  initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
   initSandboxWorkspace({ api, toast, project: activeProject });
   initPhysics({ api, toast });
   initLab({ api, toast, project: activeProject });
@@ -1163,14 +1151,7 @@ async function init() {
     elements.prompt.focus();
   });
   startSessionWatch();
-  resetMarketplaceDialogs();
   bindEvents();
-  const recentMarketplaceSearches = document.createElement("datalist");
-  recentMarketplaceSearches.id = "marketplace-recent-searches";
-  recentMarketplaceSearches.innerHTML = loadJson("evolv:marketplace-searches", [])
-    .slice(0, 8).map((item) => `<option value="${escapeHtml(item)}"></option>`).join("");
-  document.body.append(recentMarketplaceSearches);
-  $("#marketplace-search")?.setAttribute("list", recentMarketplaceSearches.id);
   populateVoices();
   try {
     await migrateBrowserData();
@@ -1199,7 +1180,7 @@ async function init() {
   renderMessages();
   await Promise.allSettled([
     refreshHealth(), refreshModels(), refreshState(), refreshTools(), refreshMemory(),
-    refreshMacros(), refreshIntelligence(), refreshObsidian(), refreshToolRecipes(), refreshMarketplace()
+    refreshMacros(), refreshIntelligence(), refreshObsidian(), refreshToolRecipes()
   ]);
   try {
     await refreshConversations({ openCurrent: true });
@@ -2021,6 +2002,7 @@ function messageNode(message, index) {
     ${!isAssistant && message.images?.length ? `<div class="message-images">${message.images.map((image, imageIndex) =>
       `<img src="data:image/jpeg;base64,${image}" alt="Attached image ${imageIndex + 1}" loading="lazy" />`
     ).join("")}</div>` : ""}
+    ${isAssistant && message.goal ? renderGoalProgress(message.goal) : ""}
     <div class="message-content">${renderMarkdown(message.content)}${message.streaming ? '<span class="typing-cursor"></span>' : ""}</div>
     ${isAssistant && message.memory?.some((item) => item.path) ? `<div class="memory-citations">${message.memory.filter((item) => item.path).map((item) => `
       <div class="memory-citation">
@@ -2190,10 +2172,10 @@ async function addAttachments(files) {
   renderAttachments();
 }
 
-// Composer commands are handled locally and never reach a model. `/agent` is
-// the only entry point to the goal runner now that it has no sidebar tab.
+// Composer commands are handled locally and never reach a model. There is no
+// command for the goal runner: a goal is an ordinary message, and chat decides
+// for itself when a question needs several verified steps rather than one turn.
 const COMPOSER_COMMANDS = [
-  { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal },
   { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox },
   { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") },
   { name: "/lab", description: "Open the lab display", run: () => switchView("lab") },
@@ -2316,17 +2298,6 @@ function matchComposerCommand(text) {
   return command ? { command, argument: (match[2] || "").trim() } : null;
 }
 
-function openAgentGoal(objective = "") {
-  switchView("agent");
-  const form = $("#agent-goal-form");
-  const field = form?.elements?.objective;
-  if (!field) return;
-  if (objective) field.value = objective;
-  // Send the person to the first thing they still have to supply.
-  const next = objective ? (form.elements.successCriteria?.value.trim() ? form : form.elements.successCriteria) : field;
-  (next === form ? form.elements.objective : next).focus();
-  if (objective) toast("Goal drafted. Add success criteria, then propose a plan.");
-}
 
 async function sendMessage(text) {
   if (!text.trim() || app.generating) return;
@@ -2371,15 +2342,12 @@ async function sendMessage(text) {
     saveLocal();
   }
   const images = app.attachments.slice(0, 3);
-  const packCommandId = app.pendingPackCommand?.id || "";
-  const packId = app.activePack?.id || "";
   app.attachments = [];
-  clearPackCommand();
   renderAttachments();
   addMessage({ role: "user", content: text.trim(), ...(images.length ? { images } : {}) });
   elements.prompt.value = "";
   resizePrompt();
-  await streamAssistantResponse({ text: text.trim(), ...(images.length ? { images } : {}), ...(packCommandId ? { packCommandId } : packId ? { packId } : {}) });
+  await streamAssistantResponse({ text: text.trim(), ...(images.length ? { images } : {}) });
 }
 
 async function regenerateResponse() {
@@ -2397,6 +2365,77 @@ async function regenerateResponse() {
 
 // Shared streaming path for new messages and regenerations. `request` carries
 // either { text, images? } or { regenerate: true }.
+// Progress on a run, folded into the assistant message it belongs to.
+//
+// The events are the goal runner's own, prefixed so they cannot collide with
+// the chat stream's. Only the ones a person would want to watch are kept: which
+// step is happening, who is doing it, and whether the verification gate passed.
+const GOAL_STEP_MARK = { pending: "·", running: "▸", done: "✓", unmet: "!", failed: "×", waiting: "⏸" };
+const GOAL_AGENT_NAME = {
+  researcher: "Researcher", engineer: "Engineer", analyst: "Analyst",
+  critic: "Critic", writer: "Writer", generalist: "Evolv"
+};
+
+// What the run is doing, under the reply it is producing.
+//
+// Deliberately a short list and not a dashboard: this appears in the middle of
+// a conversation, and the person is waiting for an answer, not supervising a
+// process. The steps say what is happening; the answer says what was found.
+function renderGoalProgress(goal) {
+  const done = goal.steps.filter((step) => step.state === "done").length;
+  const heading = goal.needsApproval
+    ? "This needs your approval before it runs"
+    : done === goal.steps.length && goal.steps.length
+      ? "Worked through this in a few steps"
+      : "Working through this in a few steps";
+  return `
+    <details class="goal-progress" ${goal.needsApproval ? "open" : ""}>
+      <summary>
+        <strong>${escapeHtml(heading)}</strong>
+        <span>${done}/${goal.steps.length}${goal.verified === false ? " · not verified" : ""}</span>
+      </summary>
+      <ol class="goal-steps">
+        ${goal.steps.map((step) => `
+          <li class="goal-step is-${escapeHtml(step.state)}">
+            <span class="goal-step-mark" aria-hidden="true">${GOAL_STEP_MARK[step.state] || "·"}</span>
+            <span class="goal-step-title">${escapeHtml(step.title)}</span>
+            ${step.agent ? `<span class="goal-step-agent">${escapeHtml(GOAL_AGENT_NAME[step.agent] || step.agent)}</span>` : ""}
+          </li>`).join("")}
+      </ol>
+      ${goal.successCriteria?.length ? `<div class="goal-criteria">
+        <span class="field-label">CHECKED AGAINST</span>
+        <ul>${goal.successCriteria.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </div>` : ""}
+      ${goal.reasons?.length ? `<p class="goal-why">Answered this way because it ${escapeHtml(goal.reasons.join(", and "))}.</p>` : ""}
+    </details>`;
+}
+
+function applyGoalEvent(assistant, event) {
+  if (!assistant.goal) return;
+  const type = event.type.slice("goal_".length);
+  const stepId = event.step?.externalId || event.stepId || "";
+  const find = () => assistant.goal.steps.find((step) => step.id === stepId || step.runtimeId === stepId);
+  if (type === "step" && event.action === "started") {
+    // Runtime step ids differ from the plan's own, so the first sighting of a
+    // step is what ties the two together.
+    const planned = assistant.goal.steps.find((step) => step.id === event.step?.externalId)
+      || assistant.goal.steps.find((step) => step.state === "pending");
+    if (planned) Object.assign(planned, { state: "running", runtimeId: event.step?.id || "" });
+  } else if (type === "step" && event.action === "completed") {
+    const step = find(); if (step) step.state = "done";
+  } else if (type === "verification") {
+    const step = find(); if (step) step.state = event.output?.verified ? "done" : "unmet";
+    assistant.goal.verified = Boolean(event.output?.verified);
+  } else if (type === "step" && event.action === "failed") {
+    const step = find(); if (step) step.state = "failed";
+  } else if (type === "approval") {
+    const step = find(); if (step) step.state = "waiting";
+    assistant.goal.awaitingTool = { runId: event.toolRunId, tool: event.tool };
+  } else if (type === "routing" && event.provider) {
+    assistant.goal.model = `${event.provider}/${event.model}`;
+  }
+}
+
 async function streamAssistantResponse(request) {
   const assistant = {
     role: "assistant",
@@ -2491,6 +2530,18 @@ async function streamAssistantResponse(request) {
           runId: event.runId || null,
           pendingApproval: event.status === "approval_required"
         });
+      } else if (event.type === "goal") {
+        // Evolv decided this message was work rather than a question. It says
+        // so, and says why, because nobody asked it to.
+        assistant.goal = {
+          objective: event.objective,
+          successCriteria: event.successCriteria || [],
+          reasons: event.reasons || [],
+          needsApproval: Boolean(event.needsApproval),
+          steps: (event.steps || []).map((step) => ({ ...step, state: "pending" }))
+        };
+      } else if (event.type.startsWith("goal_")) {
+        applyGoalEvent(assistant, event);
       } else if (event.type === "error" && event.code !== "INTERRUPTED") {
         if (event.code === "PROVIDER_AUTH_FAILED") {
           assistant.notices.push("The provider rejected its saved API key. Replace it in Settings; your Evolv account is still signed in.");
@@ -2508,7 +2559,7 @@ async function streamAssistantResponse(request) {
         assistant.id = event.messageId || assistant.id;
         assistant.status = event.status;
       }
-      if (["run", "routing", "tool_request", "tool_result", "metadata", "error"].includes(event.type)) renderMessages();
+      if (["run", "routing", "tool_request", "tool_result", "metadata", "error", "goal"].includes(event.type) || event.type.startsWith("goal_")) renderMessages();
       else updateStreamingMessage(assistant);
     });
     if (app.settings.autoSpeak) {
@@ -2595,539 +2646,6 @@ function resizePrompt() {
   elements.prompt.style.height = `${Math.min(elements.prompt.scrollHeight, 180)}px`;
 }
 
-function marketplaceQuery() {
-  const params = new URLSearchParams({
-    query: $("#marketplace-search")?.value.trim() || "",
-    category: $("#marketplace-category")?.value || "",
-    filter: app.marketplaceTab === "installed" ? "installed" : ($("#marketplace-filter")?.value || ""),
-    sort: $("#marketplace-sort")?.value || "featured",
-    os: $("#marketplace-os")?.value || "",
-    model: $("#marketplace-model-filter")?.value.trim() || ""
-  });
-  return params.toString();
-}
-
-function marketplaceArtwork(pack) {
-  const candidate = (pack.screenshots || []).find((item) =>
-    /^\/assets\/marketplace\/[a-z0-9-]+\.(?:jpg|png)$/.test(String(item || "")));
-  return candidate || "";
-}
-
-async function refreshMarketplace({ preserveDetails = true } = {}) {
-  if (!$("#marketplace-view")) return;
-  $("#marketplace-status").textContent = "Refreshing local catalog…";
-  try {
-    app.marketplace = await api(`/api/marketplace?${marketplaceQuery()}`);
-    if (app.marketplace.developerMode) {
-      try { app.marketplacePublishers = (await api("/api/marketplace/publishers")).publishers || []; } catch { app.marketplacePublishers = []; }
-    }
-    $("#marketplace-developer-mode").checked = Boolean(app.marketplace.developerMode);
-    $("#marketplace-developer-mode-settings").checked = Boolean(app.marketplace.developerMode);
-    $("#marketplace-developer-panel").classList.toggle("hidden", !app.marketplace.developerMode);
-    const remote = app.marketplace.remoteCatalog || {};
-    if (document.activeElement !== $("#marketplace-catalog-url")) $("#marketplace-catalog-url").value = remote.url || "";
-    $("#marketplace-catalog-status").textContent = remote.configured
-      ? `${remote.cached ? "Verified cache ready" : "Configured, not cached"}${remote.fetchedAt ? ` · synced ${new Date(remote.fetchedAt).toLocaleString()}` : ""}${remote.lastError ? ` · ${remote.lastError}` : ""}`
-      : "No remote catalog configured. Only trusted Ed25519 publisher keys are accepted.";
-    const reviewBackend = app.marketplace.reviewBackend || {};
-    if (document.activeElement !== $("#marketplace-review-url")) $("#marketplace-review-url").value = reviewBackend.url || "";
-    $("#marketplace-review-key").innerHTML = `<option value="">Choose a trusted publisher key</option>${(app.marketplacePublishers || [])
-      .filter((publisher) => publisher.trusted)
-      .map((publisher) => `<option value="${escapeHtml(publisher.keyId)}" ${publisher.keyId === reviewBackend.publisherKeyId ? "selected" : ""}>${escapeHtml(publisher.name)} · ${escapeHtml(publisher.keyId.slice(-12))}</option>`).join("")}`;
-    $("#marketplace-review-status").textContent = reviewBackend.configured
-      ? `Signed responses pinned to ${reviewBackend.publisherKeyId}.`
-      : "No review service configured. Reviews remain in the local outbox.";
-    const updates = (app.marketplace.installed || []).filter((item) => item.updateAvailable).length;
-    $("#marketplace-dot").classList.toggle("hidden", updates === 0);
-    renderMarketplace();
-    if (preserveDetails && app.marketplaceSelectedId) await openMarketplaceDetails(app.marketplaceSelectedId, { quiet: true });
-  } catch (error) {
-    $("#marketplace-status").textContent = `Marketplace unavailable: ${error.message}`;
-    $("#marketplace-grid").innerHTML = "";
-    throw error;
-  }
-}
-
-function renderMarketplaceCard(pack) {
-  const state = pack.updateAvailable ? "Update available" : pack.installed ? (pack.enabled ? "Installed" : "Disabled") : pack.price ? `$${pack.price.toFixed(2)}` : "Free";
-  const artwork = marketplaceArtwork(pack);
-  return `
-    <article class="marketplace-card ${pack.id === app.marketplaceSelectedId ? "selected" : ""}" tabindex="0" role="button" data-pack-id="${escapeHtml(pack.id)}" aria-label="Open ${escapeHtml(pack.name)}" aria-current="${pack.id === app.marketplaceSelectedId ? "true" : "false"}">
-      ${artwork ? `<img class="marketplace-card-art" src="${escapeHtml(artwork)}" alt="" loading="lazy" decoding="async" />` : ""}
-      <div class="marketplace-card-head">
-        <div class="marketplace-icon"><span>${escapeHtml(pack.icon)}</span></div>
-        <div><h3>${escapeHtml(pack.name)}</h3><div class="marketplace-card-meta"><span>${escapeHtml(pack.author.name)}</span><span>v${escapeHtml(pack.version)}</span></div></div>
-        ${pack.verified ? '<span class="marketplace-badge good">Verified</span>' : ""}
-      </div>
-      <p>${escapeHtml(pack.description)}</p>
-      <div class="marketplace-badges">
-        <span class="marketplace-badge">${escapeHtml(pack.category.replaceAll("-", " "))}</span>
-        <span class="marketplace-badge ${pack.updateAvailable ? "warn" : pack.installed ? "good" : ""}">${escapeHtml(state)}</span>
-        ${pack.localOnly ? '<span class="marketplace-badge">Local-only</span>' : '<span class="marketplace-badge warn">Cloud optional</span>'}
-      </div>
-      <div class="marketplace-card-meta"><span>★ ${pack.rating.toFixed(1)}</span><span>${pack.reviewCount} catalog reviews</span><span>${pack.commands.length} commands</span></div>
-    </article>`;
-}
-
-function renderMarketplace() {
-  if (!app.marketplace) return;
-  $$(".marketplace-tab").forEach((button) => {
-    const active = button.dataset.marketplaceTab === app.marketplaceTab;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-    button.tabIndex = active ? 0 : -1;
-  });
-  const commandsMode = app.marketplaceTab === "commands";
-  const packs = app.marketplace.packs || [];
-  $("#marketplace-featured").classList.toggle("hidden", true);
-  $("#marketplace-grid").innerHTML = commandsMode
-    ? renderMarketplaceCommands(app.marketplace.runtime || [])
-    : packs.map(renderMarketplaceCard).join("");
-  $("#marketplace-empty").classList.toggle("hidden", commandsMode ? (app.marketplace.runtime || []).some((item) => item.type === "command") : packs.length > 0);
-  $("#marketplace-status").textContent = commandsMode
-    ? `${(app.marketplace.runtime || []).filter((item) => item.type === "command").length} enabled pack commands · local registry`
-    : `${packs.length} bundled pack${packs.length === 1 ? "" : "s"} · ${app.marketplace.installed.length} installed · available offline`;
-}
-
-function renderMarketplaceCommands(runtime) {
-  const commands = runtime.filter((item) => item.type === "command");
-  const packs = [...new Map(commands.map((command) => [command.packId, command])).values()];
-  return packs.map((command) => `
-    <article class="marketplace-command-card">
-      <div class="marketplace-card-meta"><span>${escapeHtml(command.packName)}</span><span>Free-form specialist</span></div>
-      <h3>Chat with ${escapeHtml(command.packName)}</h3>
-      <p>Describe what you need in your own words. The pack will infer and formulate the task instead of requiring a preset command.</p>
-      <button class="primary-button marketplace-chat-pack" type="button" data-pack-id="${escapeHtml(command.packId)}" data-pack-name="${escapeHtml(command.packName)}">Enter chat</button>
-    </article>`).join("");
-}
-
-function permissionMarkup(permission, { selectable = false, granted = [] } = {}) {
-  const checked = permission.required || granted.includes(permission.id);
-  return `<label class="marketplace-permission">
-    ${selectable ? `<input type="checkbox" value="${escapeHtml(permission.id)}" ${checked ? "checked" : ""} ${permission.required ? "disabled" : ""} />` : "<span></span>"}
-    <span><strong>${escapeHtml(permission.name || permission.id)} ${permission.required ? "· required" : "· optional"}</strong>
-      <small>${escapeHtml(permission.description || "")}</small><small>Why: ${escapeHtml(permission.reason || "")}</small>
-      ${permission.supported === false ? '<small>This permission is modeled but not implemented in the v0.1 runtime.</small>' : ""}
-    </span>
-    <span class="marketplace-risk">${escapeHtml(permission.risk || "")}</span>
-  </label>`;
-}
-
-async function openMarketplaceDetails(id, { quiet = false } = {}) {
-  try {
-    const pack = await api(`/api/marketplace/packs/${encodeURIComponent(id)}`);
-    const artwork = marketplaceArtwork(pack);
-    app.marketplaceSelectedId = id;
-    const installed = pack.installedRecord;
-    let reviewState = { backend: app.marketplace?.reviewBackend || {}, trustedReviews: [], outbox: [], fetchedAt: null };
-    if (installed) {
-      try { reviewState = await api(`/api/marketplace/packs/${encodeURIComponent(id)}/reviews`); } catch {}
-    }
-    const devWatch = (app.marketplace?.developerWatches || []).find((item) => item.id === pack.id);
-    const primary = !installed
-      ? `<button class="primary-button marketplace-install" type="button" data-pack-id="${escapeHtml(pack.id)}">Install</button>`
-      : pack.updateAvailable
-        ? `<button class="primary-button marketplace-update" type="button" data-pack-id="${escapeHtml(pack.id)}" data-version="${escapeHtml(pack.availableVersion || "")}">Review ${escapeHtml(pack.availableVersion || "update")}</button>`
-        : `<button class="secondary-button marketplace-toggle" type="button" data-pack-id="${escapeHtml(pack.id)}" data-enabled="${String(!installed.enabled)}">${installed.enabled ? "Disable" : "Enable"}</button>`;
-    const chatAction = installed?.enabled
-      ? `<button class="primary-button marketplace-chat-pack" type="button" data-pack-id="${escapeHtml(pack.id)}" data-pack-name="${escapeHtml(pack.name)}" data-pack-artwork="${escapeHtml(artwork)}">Chat with this pack</button>`
-      : "";
-    $("#marketplace-details").innerHTML = `
-      <div class="marketplace-detail-head">
-        <div class="marketplace-icon"><span>${escapeHtml(pack.icon)}</span></div>
-        <div><p class="eyebrow">${pack.verified ? "VERIFIED CREATOR" : "LOCAL DEVELOPER"}</p><h2>${escapeHtml(pack.name)}</h2>
-          <div class="marketplace-card-meta"><span>${escapeHtml(pack.author.name)}</span><span>v${escapeHtml(pack.version)}</span><span>${escapeHtml(pack.license)}</span></div>
-        </div>
-      </div>
-      <p>${escapeHtml(pack.fullDescription)}</p>
-      ${artwork
-        ? `<figure class="marketplace-preview"><img src="${escapeHtml(artwork)}" alt="${escapeHtml(`${pack.name} cover artwork`)}" decoding="async" /></figure>`
-        : `<div class="marketplace-preview marketplace-preview-empty" aria-label="No pack artwork available"><span>${escapeHtml(pack.name)}<br><small>No artwork included</small></span></div>`}
-      <div class="marketplace-actions">${chatAction}${primary}
-        ${installed ? `<button class="secondary-button marketplace-configure" type="button" data-pack-id="${escapeHtml(pack.id)}">Configure</button>
-          <button class="secondary-button marketplace-export" type="button" data-pack-id="${escapeHtml(pack.id)}">Export</button>` : ""}
-      </div>
-      ${installed ? `<label class="marketplace-channel">Update channel
-        <select class="marketplace-channel-select" data-pack-id="${escapeHtml(pack.id)}" aria-label="Update channel for ${escapeHtml(pack.name)}">
-          ${["stable", "beta", "nightly"].map((channel) => `<option value="${channel}" ${installed.releaseChannel === channel ? "selected" : ""}>${channel[0].toUpperCase()}${channel.slice(1)}</option>`).join("")}
-        </select>
-        <small>${pack.updateAvailable ? `${escapeHtml(pack.availableVersion)} is available.` : "This channel is up to date."}</small>
-      </label>` : ""}
-      ${installed && app.marketplace?.developerMode ? `<div class="marketplace-actions">
-        ${devWatch
-          ? `<button class="secondary-button marketplace-dev-watch-stop" type="button" data-pack-id="${escapeHtml(pack.id)}">Stop live reload</button>
-             <span class="settings-note">${escapeHtml(devWatch.status)} · ${escapeHtml(devWatch.sourceName)}${devWatch.error ? ` · ${escapeHtml(devWatch.error)}` : ""}</span>`
-          : `<button class="secondary-button marketplace-dev-watch-start" type="button" data-pack-id="${escapeHtml(pack.id)}">Watch source folder</button>`}
-      </div>` : ""}
-      <div class="marketplace-badges">
-        <span class="marketplace-badge ${pack.verified ? "good" : pack.publisherVerification?.valid ? "warn" : ""}">${pack.verified ? "Verified publisher" : pack.publisherVerification?.valid ? "Signed · publisher not trusted" : "Unsigned"}</span>
-        <span class="marketplace-badge">${escapeHtml(pack.platforms.join(" · "))}</span>
-        <span class="marketplace-badge">${Math.ceil(pack.installedSize / 1024)} KB</span>
-      </div>
-      <section class="marketplace-detail-section"><h3>Features</h3><ul>${pack.features.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>
-      <section class="marketplace-detail-section"><h3>Commands</h3>${pack.commands.map((command) => `
-        <div class="marketplace-command-card"><strong>${escapeHtml(command.name)}</strong><p>${escapeHtml(command.description)}</p></div>`).join("")}</section>
-      <section class="marketplace-detail-section"><h3>Example tasks</h3><ul>${pack.examples.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>
-      <section class="marketplace-detail-section"><h3>Permissions</h3>${pack.permissions.map((permission) => `
-        ${permissionMarkup(permission)}
-        ${installed?.grantedPermissions?.includes(permission.id) ? `<button class="secondary-button marketplace-revoke" type="button" data-pack-id="${escapeHtml(pack.id)}" data-permission="${escapeHtml(permission.id)}">Revoke ${escapeHtml(permission.required ? "required permission · disables pack" : "optional permission")}</button>` : ""}
-      `).join("")}</section>
-      ${(pack.dependencies?.length || pack.conflicts?.length) ? `<section class="marketplace-detail-section"><h3>Pack relationships</h3>
-        ${(pack.dependencies || []).map((item) => `<p><strong>Requires</strong> ${escapeHtml(item.id)} ${escapeHtml(item.range)}${item.optional ? " · optional" : ""}</p>`).join("")}
-        ${(pack.conflicts || []).map((item) => `<p><strong>Conflicts</strong> ${escapeHtml(item.id)} ${escapeHtml(item.range)} · ${escapeHtml(item.reason)}</p>`).join("")}
-      </section>` : ""}
-      <section class="marketplace-detail-section"><h3>Compatibility</h3><p>Requires Evolv ${escapeHtml(pack.minEvolvVersion)}+ · Local: ${escapeHtml(pack.models.local.join(", "))} · Cloud: ${escapeHtml(pack.models.cloud.join(", "))}</p></section>
-      <details class="marketplace-detail-section"><summary>Documentation</summary><div>${renderMarkdown(pack.documentation)}</div></details>
-      <details class="marketplace-detail-section"><summary>Changelog</summary><ul>${pack.changelog.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></details>
-      ${installed ? `<section class="marketplace-detail-section marketplace-reviews"><h3>Reviews</h3>
-        <p class="settings-note">${reviewState.backend?.configured
-          ? `Only reviews carrying the configured backend's valid signature are shown as published.${reviewState.fetchedAt ? ` Last checked ${escapeHtml(new Date(reviewState.fetchedAt).toLocaleString())}.` : ""}`
-          : "No trusted review service is configured. Submissions are stored locally and are not presented as published."}</p>
-        ${reviewState.backend?.configured ? `<button class="secondary-button marketplace-review-sync" type="button" data-pack-id="${escapeHtml(pack.id)}">Refresh signed reviews</button>` : ""}
-        <div class="marketplace-review-list">${(reviewState.trustedReviews || []).map((review) => `<article class="marketplace-command-card">
-          <div class="marketplace-card-meta"><span>${"★".repeat(review.rating)}</span><span>${escapeHtml(review.author)}</span><span>${escapeHtml(review.createdAt)}</span></div>
-          <strong>${escapeHtml(review.title)}</strong><p>${escapeHtml(review.body)}</p>
-        </article>`).join("") || '<p class="settings-note">No verified published reviews are cached.</p>'}</div>
-        ${(reviewState.outbox || []).length ? `<details><summary>Local review outbox · ${reviewState.outbox.length}</summary>${reviewState.outbox.map((review) => `<p><strong>${escapeHtml(review.title)}</strong> · ${escapeHtml(review.status)}${review.lastError ? ` · ${escapeHtml(review.lastError)}` : ""}</p>`).join("")}</details>` : ""}
-        <form class="marketplace-review-form" data-pack-id="${escapeHtml(pack.id)}">
-          <label>Rating <select name="rating" required><option value="5">5 · Excellent</option><option value="4">4 · Good</option><option value="3">3 · Okay</option><option value="2">2 · Needs work</option><option value="1">1 · Poor</option></select></label>
-          <label>Title <input name="title" maxlength="160" required /></label>
-          <label>Details <textarea name="body" minlength="10" maxlength="4000" rows="3" required></textarea></label>
-          <button class="secondary-button" type="submit">Save review${reviewState.backend?.configured ? " & send" : " to local outbox"}</button>
-        </form>
-      </section>` : ""}
-      <details class="marketplace-detail-section"><summary>Raw manifest</summary><pre class="marketplace-diagnostics">${escapeHtml(JSON.stringify({
-        schemaVersion: pack.schemaVersion, id: pack.id, name: pack.name, version: pack.version, author: pack.author,
-        category: pack.category, license: pack.license, minEvolvVersion: pack.minEvolvVersion, platforms: pack.platforms,
-        models: pack.models, permissions: pack.permissions.map(({ id, required, reason }) => ({ id, required, reason })),
-        configSchema: pack.configSchema, agents: pack.agents, commands: pack.commands, workflows: pack.workflows
-      }, null, 2))}</pre></details>
-      ${installed ? `<details class="marketplace-detail-section"><summary>Diagnostics</summary><pre class="marketplace-diagnostics">${escapeHtml(JSON.stringify(pack.diagnostics, null, 2))}</pre>
-        <div class="marketplace-actions"><button class="secondary-button marketplace-copy-diagnostics" type="button">Copy diagnostics</button>
-        <button class="secondary-button marketplace-export-diagnostics" type="button" data-pack-id="${escapeHtml(pack.id)}">Export diagnostics</button>
-        <button class="secondary-button marketplace-repair" type="button" data-pack-id="${escapeHtml(pack.id)}">Reload & repair</button>
-        ${pack.diagnostics?.canOpenDirectory ? `<button class="secondary-button marketplace-open-directory" type="button" data-pack-id="${escapeHtml(pack.id)}">Open pack directory</button>` : ""}</div></details>
-        <div class="marketplace-actions"><button class="secondary-button marketplace-uninstall" type="button" data-pack-id="${escapeHtml(pack.id)}">Uninstall</button>
-        <button class="secondary-button" type="button" disabled title="Available with a future remote catalog">Report · remote catalog only</button></div>` : ""}
-    `;
-    // Pack details are replaced every time a card is selected. Bind the main
-    // install/update action to the new button itself so it does not depend on
-    // delegated-dialog behavior in Electron's packaged renderer.
-    $("#marketplace-details").querySelector(".marketplace-install, .marketplace-update")?.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const button = event.currentTarget;
-      if (button.disabled || app.marketplaceInstallInFlight) return;
-      button.disabled = true;
-      button.setAttribute("aria-busy", "true");
-      try {
-        await beginMarketplaceInstall({ id: button.dataset.packId, ...(button.dataset.version ? { version: button.dataset.version } : {}) });
-      } catch (error) {
-        toast(error.message, "error");
-      } finally {
-        button.disabled = false;
-        button.removeAttribute("aria-busy");
-      }
-    });
-    renderMarketplace();
-  } catch (error) {
-    if (!quiet) toast(error.message, "error");
-  }
-}
-
-async function beginMarketplaceInstall(input) {
-  if (app.marketplaceInstallInFlight) return;
-  const preview = await api("/api/marketplace/install/preview", { method: "POST", body: JSON.stringify(input) });
-  app.pendingMarketplaceInstall = { ...input, preview };
-  const error = $("#marketplace-permission-error");
-  error.textContent = "";
-  error.classList.add("hidden");
-  $("#marketplace-permission-title").textContent = `${preview.action === "update" ? "Update" : "Install"} ${preview.manifest.name}`;
-  $("#marketplace-permission-summary").textContent = preview.previousVersion
-    ? `Update ${preview.previousVersion} → ${preview.manifest.version}. Review every permission before continuing.`
-    : `Install ${preview.manifest.version} from the ${input.package ? "local file" : "bundled offline"} catalog.`;
-  const previouslyGranted = preview.grantedPermissions || [];
-  const relationships = preview.relationships || { dependencies: [], conflicts: [] };
-  const relationshipReview = $("#marketplace-relationship-review");
-  const relationshipRows = [
-    ...relationships.dependencies.map((item) => `<div class="marketplace-permission"><span aria-hidden="true">${item.installed && item.enabled && item.satisfies ? "✓" : item.optional ? "○" : "!"}</span><span><strong>${item.optional ? "Optional" : "Requires"} ${escapeHtml(item.id)} ${escapeHtml(item.range)}</strong><small>${item.installed ? `Installed ${escapeHtml(item.version)} · ${item.enabled ? "enabled" : "disabled"} · ${item.satisfies ? "compatible" : "incompatible"}` : "Not installed"}</small></span></div>`),
-    ...relationships.conflicts.map((item) => `<div class="marketplace-permission"><span aria-hidden="true">${item.installed && item.enabled && item.satisfies ? "!" : "✓"}</span><span><strong>Conflicts with ${escapeHtml(item.id)} ${escapeHtml(item.range)}</strong><small>${escapeHtml(item.reason)} · ${item.installed ? `${item.enabled ? "enabled" : "disabled"} ${escapeHtml(item.version)}` : "not installed"}</small></span></div>`)
-  ];
-  relationshipReview.classList.toggle("hidden", relationshipRows.length === 0);
-  relationshipReview.innerHTML = relationshipRows.join("");
-  const publisherReview = $("#marketplace-publisher-review");
-  const verification = preview.verification || {};
-  if (verification.state === "signed") {
-    publisherReview.classList.remove("hidden");
-    publisherReview.innerHTML = `<label class="marketplace-permission">
-      <input id="marketplace-trust-publisher" type="checkbox" />
-      <span><strong>Trust ${escapeHtml(verification.publisher?.name || "this publisher")}</strong>
-      <small>Valid Ed25519 signature · fingerprint ${escapeHtml(verification.keyId || "")}. Trusting this identity marks this and future correctly signed packs as verified.</small></span>
-      <span class="marketplace-risk">publisher trust</span>
-    </label>`;
-  } else {
-    publisherReview.classList.add("hidden");
-    publisherReview.replaceChildren();
-  }
-  $("#marketplace-permission-list").innerHTML = preview.permissions.map((permission) =>
-    permissionMarkup(permission, { selectable: true, granted: previouslyGranted })).join("");
-  $("#marketplace-permission-confirm").textContent = preview.action === "update" ? "Approve & update" : "Approve & install";
-  // Populate the approval card before placing it in Chromium's modal layer.
-  // Opening an empty dialog first can lose the first click in a busy packaged
-  // renderer, which made Install appear to do nothing.
-  showMarketplaceDialog("permissions");
-}
-
-async function confirmMarketplaceInstall(event) {
-  event.preventDefault();
-  const pending = app.pendingMarketplaceInstall;
-  if (!pending || app.marketplaceInstallInFlight) return;
-  const approvedPermissions = [...$("#marketplace-permission-list").querySelectorAll('input[type="checkbox"]')]
-    .filter((input) => input.checked || input.disabled).map((input) => input.value);
-  const trustPublisher = Boolean($("#marketplace-trust-publisher")?.checked);
-  const button = $("#marketplace-permission-confirm");
-  app.marketplaceInstallInFlight = true;
-  button.disabled = true;
-  button.setAttribute("aria-busy", "true");
-  button.textContent = pending.preview.action === "update" ? "Updating…" : "Installing…";
-  try {
-    const request = {
-      ...(pending.id ? { id: pending.id } : {}),
-      ...(pending.version ? { version: pending.version } : {}),
-      ...(pending.package ? { package: pending.package } : {}),
-      approvedPermissions,
-      trustPublisher
-    };
-    const installed = await api("/api/marketplace/install", {
-      method: "POST",
-      body: JSON.stringify(request)
-    });
-    const verified = await api(`/api/marketplace/packs/${encodeURIComponent(installed.id)}`);
-    if (!verified.installedRecord || verified.installedRecord.version !== installed.version || !verified.installedRecord.enabled) {
-      throw new Error("The pack was written but could not be verified as enabled. Open diagnostics and try Repair.");
-    }
-    closeMarketplaceDialog("permissions");
-    app.pendingMarketplaceInstall = null;
-    app.marketplaceSelectedId = installed.id;
-    toast(`${installed.manifest.name} ${installed.version} installed and enabled.`);
-    await refreshMarketplace();
-    // A throttled renderer can deliver the dialog's first animation frame
-    // after the install request finishes. Close once more after rendering so
-    // that delayed focus work cannot leave the approval panel onscreen.
-    closeMarketplaceDialog("permissions");
-  } catch (error) {
-    const output = $("#marketplace-permission-error");
-    output.textContent = error.message;
-    output.classList.remove("hidden");
-    toast(error.message, "error");
-  } finally {
-    app.marketplaceInstallInFlight = false;
-    button.disabled = false;
-    button.removeAttribute("aria-busy");
-    button.textContent = "Approve & install";
-  }
-}
-
-function configurationField(key, definition, value) {
-  const id = `marketplace-config-${key}`;
-  const title = escapeHtml(definition.title || key);
-  const description = escapeHtml(definition.description || "");
-  if (definition.type === "boolean") return `<label><span class="field-label">${title}</span><input id="${id}" name="${escapeHtml(key)}" type="checkbox" data-type="boolean" ${value ? "checked" : ""} /><small>${description}</small></label>`;
-  if (definition.enum) return `<label><span class="field-label">${title}</span><select id="${id}" name="${escapeHtml(key)}" data-type="string">${definition.enum.map((item) => `<option ${item === value ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}</select><small>${description}</small></label>`;
-  if (definition.type === "array") return `<label><span class="field-label">${title}</span><textarea id="${id}" name="${escapeHtml(key)}" data-type="array" rows="3">${escapeHtml((value || []).join("\n"))}</textarea><small>${description} One item per line.</small></label>`;
-  if (definition.format === "model") {
-    const options = (app.models || []).map((model) => `<option value="${escapeHtml(model.name)}">${escapeHtml(model.providerName || model.provider || "")}</option>`).join("");
-    return `<label><span class="field-label">${title}</span><input id="${id}" name="${escapeHtml(key)}" data-type="string" type="search" list="${id}-models" autocomplete="off" value="${escapeHtml(value ?? "")}" /><datalist id="${id}-models">${options}</datalist><small>${description} Search models currently available from the selected provider.</small></label>`;
-  }
-  if (["file", "folder"].includes(definition.format)) {
-    return `<label><span class="field-label">${title}</span><span class="marketplace-picker-row">
-      <input id="${id}" name="${escapeHtml(key)}" data-type="string" data-format="${escapeHtml(definition.format)}" type="text" readonly value="${escapeHtml(value ?? "")}" />
-      <button class="secondary-button marketplace-config-picker" type="button" data-key="${escapeHtml(key)}">Choose ${escapeHtml(definition.format)}</button>
-    </span><small>${description} The desktop dialog is required; the pack cannot choose a path itself.</small></label>`;
-  }
-  return `<label><span class="field-label">${title}</span><input id="${id}" name="${escapeHtml(key)}" data-type="${escapeHtml(definition.type)}" type="${definition.format === "secret" ? "password" : definition.type === "number" ? "number" : "text"}" value="${escapeHtml(value ?? "")}" /><small>${description}</small></label>`;
-}
-
-function marketplaceDialogByName(name) {
-  const suffix = name === "permissions" ? "permission" : name;
-  return $(`#marketplace-${suffix}-dialog`);
-}
-
-function marketplaceDialogs() {
-  return ["permissions", "config", "starter"].map(marketplaceDialogByName).filter(Boolean);
-}
-
-function syncMarketplaceDialogBackdrop() {
-  const open = marketplaceDialogs().some((dialog) => dialog.open || dialog.hasAttribute("open"));
-  $("#marketplace-dialog-backdrop")?.classList.toggle("hidden", !open);
-  document.documentElement.classList.toggle("marketplace-dialog-open", open);
-}
-
-function resetMarketplaceDialogs() {
-  for (const dialog of marketplaceDialogs()) {
-    try { if (dialog.open) dialog.close(); } catch {}
-    dialog.removeAttribute("open");
-    dialog.classList.remove("marketplace-dialog-visible");
-    dialog.dataset.displayState = "closed";
-  }
-  app.marketplaceDialogReturnFocus = null;
-  syncMarketplaceDialogBackdrop();
-}
-
-function showMarketplaceDialog(name) {
-  const dialog = marketplaceDialogByName(name);
-  if (!dialog) return;
-  for (const other of marketplaceDialogs()) {
-    if (other === dialog) continue;
-    try { if (other.open) other.close(); } catch {}
-    other.removeAttribute("open");
-    other.classList.remove("marketplace-dialog-visible");
-  }
-  dialog.dataset.displayState = "opening";
-  app.marketplaceDialogReturnFocus = document.activeElement;
-  dialog.classList.add("marketplace-dialog-visible");
-  dialog.setAttribute("aria-modal", "true");
-  try {
-    if (!dialog.open) dialog.show();
-  } catch {
-    dialog.setAttribute("open", "");
-  }
-  dialog.dataset.displayState = dialog.open ? "visible" : "visible-fallback";
-  syncMarketplaceDialogBackdrop();
-  requestAnimationFrame(() => {
-    if (!dialog.open) return;
-    dialog.dataset.displayState = "visible";
-    const preferred = dialog.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
-    preferred?.focus();
-  });
-}
-
-function closeMarketplaceDialog(name) {
-  const dialog = marketplaceDialogByName(name);
-  if (!dialog) return;
-  dialog.classList.remove("marketplace-dialog-visible");
-  dialog.removeAttribute("aria-modal");
-  dialog.dataset.displayState = "closing";
-  try { if (dialog.open) dialog.close(); } catch {}
-  // Also clear the non-modal fallback used by older embedded Chromium builds.
-  dialog.removeAttribute("open");
-  dialog.dataset.displayState = "closed";
-  syncMarketplaceDialogBackdrop();
-  const target = app.marketplaceDialogReturnFocus;
-  app.marketplaceDialogReturnFocus = null;
-  if (target?.isConnected) target.focus();
-}
-
-async function openMarketplaceConfig(id) {
-  const pack = await api(`/api/marketplace/packs/${encodeURIComponent(id)}`);
-  if (!pack.installedRecord) return;
-  const dialog = $("#marketplace-config-dialog");
-  dialog.dataset.packId = id;
-  dialog.dataset.dirty = "false";
-  $("#marketplace-config-title").textContent = `Configure ${pack.name}`;
-  $("#marketplace-config-fields").innerHTML = Object.entries(pack.configSchema.properties || {})
-    .map(([key, definition]) => configurationField(key, definition, pack.installedRecord.config[key] ?? definition.default)).join("")
-    || '<p class="settings-note">This pack has no configurable fields.</p>';
-  $("#marketplace-config-error").classList.add("hidden");
-  showMarketplaceDialog("config");
-}
-
-function collectMarketplaceConfig() {
-  return Object.fromEntries([...$("#marketplace-config-fields").querySelectorAll("[name]")].map((input) => {
-    const type = input.dataset.type;
-    const value = type === "boolean" ? input.checked : type === "number" ? Number(input.value)
-      : type === "array" ? input.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : input.value;
-    return [input.name, value];
-  }));
-}
-
-function downloadJsonFile(payload, filename) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function activatePackCommand(button) {
-  app.pendingPackCommand = {
-    id: button.dataset.commandId,
-    name: button.dataset.commandName,
-    packName: button.dataset.packName
-  };
-  let badge = $("#pack-command-active");
-  if (!badge) {
-    badge = document.createElement("div");
-    badge.id = "pack-command-active";
-    badge.className = "pack-command-active";
-    elements.prompt.parentElement.insertBefore(badge, elements.prompt);
-  }
-  badge.textContent = `${app.pendingPackCommand.packName} · ${app.pendingPackCommand.name} — type the task, then send`;
-  switchView("chat");
-  elements.prompt.placeholder = `Input for ${app.pendingPackCommand.name}…`;
-  elements.prompt.focus();
-}
-
-async function activatePackChat(button) {
-  const id = String(button.dataset.packId || "");
-  const name = String(button.dataset.packName || "Specialist pack");
-  const artwork = /^\/assets\/marketplace\/[a-z0-9-]+\.(?:jpg|png)$/.test(button.dataset.packArtwork || "")
-    ? button.dataset.packArtwork : (id === "evolv.autonomous-engineer" ? "/assets/marketplace/autonomous-engineer.png" : "");
-  app.pendingPackCommand = null;
-  app.activePack = { id, name, artwork, mode: "free-form" };
-  renderActivePack();
-  await startNewChat({ preservePack: true, title: `${name} chat` });
-  elements.prompt.placeholder = `Tell ${name} what you need…`;
-  elements.prompt.focus();
-  toast(`${name} is active. Describe the goal naturally; it will formulate the task.`);
-}
-
-function renderActivePack() {
-  $("#pack-command-active")?.remove();
-  if (!app.activePack) {
-    elements.prompt.placeholder = "Message Evolv…";
-    return;
-  }
-  const badge = document.createElement("div");
-  badge.id = "pack-command-active";
-  badge.className = "pack-command-active pack-chat-active";
-  const artwork = app.activePack.artwork || (app.activePack.id === "evolv.autonomous-engineer" ? "/assets/marketplace/autonomous-engineer.png" : "");
-  if (artwork) {
-    const image = document.createElement("img");
-    image.src = artwork;
-    image.alt = "";
-    badge.append(image);
-  }
-  const copy = document.createElement("span");
-  const title = document.createElement("strong");
-  title.textContent = app.activePack.name;
-  const note = document.createElement("small");
-  note.textContent = "Free-form pack chat · task inferred from your message";
-  copy.append(title, note);
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "pack-chat-exit";
-  close.textContent = "Exit pack";
-  close.addEventListener("click", clearActivePack);
-  badge.append(copy, close);
-  elements.prompt.parentElement.insertBefore(badge, elements.prompt);
-  elements.prompt.placeholder = `Tell ${app.activePack.name} what you need…`;
-}
-
-function clearActivePack() {
-  app.activePack = null;
-  $("#pack-command-active")?.remove();
-  elements.prompt.placeholder = "Message Evolv…";
-}
-
-function clearPackCommand() {
-  app.pendingPackCommand = null;
-  if (!app.activePack) {
-    $("#pack-command-active")?.remove();
-    elements.prompt.placeholder = "Message Evolv…";
-  }
-}
 
 function activeProject() {
   return app.projects.find((project) => project.id === app.activeProjectId) || app.projects[0] || null;
@@ -3210,9 +2728,7 @@ function switchView(view) {
   if (view === "tools") {
     Promise.all([refreshTools(), refreshToolRecipes(), refreshObsidian()]).catch((error) => toast(error.message, "error"));
   }
-  if (view === "marketplace") refreshMarketplace().catch((error) => toast(error.message, "error"));
   if (view === "projects") refreshProjects().catch((error) => toast(error.message, "error"));
-  if (view === "agent") refreshAgentWorkspace().catch((error) => toast(error.message, "error"));
   if (view === "sandbox") refreshSandboxes().catch((error) => toast(error.message, "error"));
   if (view === "physics") refreshPhysics().catch((error) => toast(error.message, "error"));
   // The simulation clock must not keep running for a view nobody is looking at.
@@ -4634,349 +4150,6 @@ function bindEvents() {
       sendMessage("Create one surprising, original idea by connecting two unrelated domains. Make it useful, explain the connection briefly, and clearly label any speculation.");
     });
   });
-  let marketplaceSearchTimer;
-  const refreshMarketplaceFromControls = () => {
-    clearTimeout(marketplaceSearchTimer);
-    marketplaceSearchTimer = setTimeout(() => refreshMarketplace({ preserveDetails: false }).catch((error) => toast(error.message, "error")), 180);
-  };
-  $("#marketplace-search")?.addEventListener("input", refreshMarketplaceFromControls);
-  $("#marketplace-search")?.addEventListener("change", () => {
-    const query = $("#marketplace-search").value.trim();
-    if (query) {
-      const recent = [query, ...loadJson("evolv:marketplace-searches", []).filter((item) => item !== query)].slice(0, 8);
-      localStorage.setItem("evolv:marketplace-searches", JSON.stringify(recent));
-    }
-    refreshMarketplaceFromControls();
-  });
-  for (const selector of ["#marketplace-category", "#marketplace-filter", "#marketplace-sort", "#marketplace-os"]) {
-    $(selector)?.addEventListener("change", refreshMarketplaceFromControls);
-  }
-  $("#marketplace-model-filter")?.addEventListener("input", refreshMarketplaceFromControls);
-  $("#marketplace-clear")?.addEventListener("click", () => {
-    $("#marketplace-search").value = "";
-    $("#marketplace-category").value = "";
-    $("#marketplace-filter").value = "";
-    $("#marketplace-sort").value = "featured";
-    $("#marketplace-os").value = "";
-    $("#marketplace-model-filter").value = "";
-    refreshMarketplace({ preserveDetails: false }).catch((error) => toast(error.message, "error"));
-  });
-  $$(".marketplace-tab").forEach((button) => button.addEventListener("click", () => {
-    app.marketplaceTab = button.dataset.marketplaceTab;
-    refreshMarketplace({ preserveDetails: false }).catch((error) => toast(error.message, "error"));
-  }));
-  $(".marketplace-tabs")?.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const tabs = $$(".marketplace-tab");
-    const current = Math.max(0, tabs.indexOf(document.activeElement));
-    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
-      : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-    event.preventDefault();
-    tabs[next].focus();
-    tabs[next].click();
-  });
-  $("#marketplace-grid")?.addEventListener("click", (event) => {
-    const packChat = event.target.closest(".marketplace-chat-pack");
-    if (packChat) return activatePackChat(packChat).catch((error) => toast(error.message, "error"));
-    const command = event.target.closest(".marketplace-run-command");
-    if (command) return activatePackCommand(command);
-    const card = event.target.closest("[data-pack-id]");
-    if (card) openMarketplaceDetails(card.dataset.packId);
-  });
-  $("#marketplace-grid")?.addEventListener("keydown", (event) => {
-    if (!["Enter", " "].includes(event.key)) return;
-    const card = event.target.closest(".marketplace-card");
-    if (card) { event.preventDefault(); openMarketplaceDetails(card.dataset.packId); }
-  });
-  $("#marketplace-details")?.addEventListener("click", async (event) => {
-    const button = event.target.closest("button");
-    if (!button) return;
-    try {
-      if (button.classList.contains("marketplace-chat-pack")) {
-        await activatePackChat(button);
-      } else if (button.classList.contains("marketplace-install") || button.classList.contains("marketplace-update")) {
-        await beginMarketplaceInstall({ id: button.dataset.packId, ...(button.dataset.version ? { version: button.dataset.version } : {}) });
-      } else if (button.classList.contains("marketplace-toggle")) {
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}`, {
-          method: "PATCH", body: JSON.stringify({ enabled: button.dataset.enabled === "true" })
-        });
-        await refreshMarketplace();
-      } else if (button.classList.contains("marketplace-configure")) {
-        await openMarketplaceConfig(button.dataset.packId);
-      } else if (button.classList.contains("marketplace-dev-watch-start")) {
-        const result = await api(`/api/marketplace/dev-watch/${encodeURIComponent(button.dataset.packId)}`, { method: "PUT", body: "{}" });
-        if (!result.canceled) toast(`Validated live reload started for ${result.sourceName}.`);
-        await refreshMarketplace();
-      } else if (button.classList.contains("marketplace-dev-watch-stop")) {
-        await api(`/api/marketplace/dev-watch/${encodeURIComponent(button.dataset.packId)}`, { method: "DELETE", body: "{}" });
-        toast("Pack live reload stopped.");
-        await refreshMarketplace();
-      } else if (button.classList.contains("marketplace-review-sync")) {
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/reviews/sync`, { method: "POST", body: "{}" });
-        toast("Signed reviews refreshed.");
-        await openMarketplaceDetails(button.dataset.packId);
-      } else if (button.classList.contains("marketplace-export")) {
-        const payload = await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/export`);
-        downloadJsonFile(payload, `${button.dataset.packId}-${payload.manifest.version}.evolvpack`);
-        toast("Pack exported.");
-      } else if (button.classList.contains("marketplace-uninstall")) {
-        if (!window.confirm("Uninstall this pack? Its commands will be removed. Your project files are never deleted.")) return;
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}`, { method: "DELETE", body: "{}" });
-        app.marketplaceSelectedId = "";
-        $("#marketplace-details").innerHTML = '<div class="empty-panel"><div class="empty-glyph">▦</div><h2>Pack uninstalled</h2><p>Its commands and agent are no longer registered.</p></div>';
-        await refreshMarketplace({ preserveDetails: false });
-      } else if (button.classList.contains("marketplace-repair")) {
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/repair`, { method: "POST", body: "{}" });
-        toast("Pack registration repaired.");
-        await openMarketplaceDetails(button.dataset.packId);
-      } else if (button.classList.contains("marketplace-copy-diagnostics")) {
-        await copyText(button.closest("details").querySelector("pre").textContent, null, { label: "Diagnostics copied." });
-      } else if (button.classList.contains("marketplace-export-diagnostics")) {
-        const details = await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}`);
-        downloadJsonFile(details.diagnostics, `${button.dataset.packId}-diagnostics.json`);
-        toast("Diagnostics exported.");
-      } else if (button.classList.contains("marketplace-open-directory")) {
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/open`, { method: "POST", body: "{}" });
-      } else if (button.classList.contains("marketplace-run-command")) {
-        activatePackCommand(button);
-      } else if (button.classList.contains("marketplace-revoke")) {
-        if (!window.confirm(`Revoke ${button.dataset.permission}? Required permission revocation disables the pack.`)) return;
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/permission`, {
-          method: "DELETE", body: JSON.stringify({ permission: button.dataset.permission })
-        });
-        await refreshMarketplace();
-      }
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-details")?.addEventListener("change", async (event) => {
-    const select = event.target.closest(".marketplace-channel-select");
-    if (!select) return;
-    try {
-      await api(`/api/marketplace/packs/${encodeURIComponent(select.dataset.packId)}/channel`, {
-        method: "PATCH", body: JSON.stringify({ channel: select.value })
-      });
-      toast(`Update channel changed to ${select.value}.`);
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); await openMarketplaceDetails(select.dataset.packId); }
-  });
-  $("#marketplace-details")?.addEventListener("submit", async (event) => {
-    const form = event.target.closest(".marketplace-review-form");
-    if (!form) return;
-    event.preventDefault();
-    const payload = Object.fromEntries(new FormData(form));
-    try {
-      const result = await api(`/api/marketplace/packs/${encodeURIComponent(form.dataset.packId)}/reviews`, {
-        method: "POST", body: JSON.stringify(payload)
-      });
-      toast(result.status === "sent" ? "Review accepted by the signed backend." : "Review saved in the local outbox; it has not been published.");
-      await openMarketplaceDetails(form.dataset.packId);
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-permission-form")?.addEventListener("submit", confirmMarketplaceInstall);
-  // Keep an explicit click path as well as form submission. This avoids a
-  // Chromium dialog edge case where clicking the default submitter after a
-  // scroll does not dispatch the form's submit event.
-  $("#marketplace-permission-confirm")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    confirmMarketplaceInstall(event).catch((error) => toast(error.message, "error"));
-  });
-  $("#marketplace-permission-select-optional")?.addEventListener("click", () => {
-    $$("#marketplace-permission-list input[type=\"checkbox\"]:not(:disabled)").forEach((input) => { input.checked = true; });
-  });
-  $("#marketplace-permission-clear-optional")?.addEventListener("click", () => {
-    $$("#marketplace-permission-list input[type=\"checkbox\"]:not(:disabled)").forEach((input) => { input.checked = false; });
-  });
-  $$("[data-marketplace-close]").forEach((button) => button.addEventListener("click", () => {
-    const target = button.dataset.marketplaceClose;
-    if (target === "config" && $("#marketplace-config-dialog").dataset.dirty === "true"
-      && !window.confirm("Discard unsaved pack configuration changes?")) return;
-    closeMarketplaceDialog(target);
-    if (target === "permissions") app.pendingMarketplaceInstall = null;
-  }));
-  $("#marketplace-config-fields")?.addEventListener("input", () => {
-    $("#marketplace-config-dialog").dataset.dirty = "true";
-  });
-  $("#marketplace-config-fields")?.addEventListener("click", async (event) => {
-    const button = event.target.closest(".marketplace-config-picker");
-    if (!button) return;
-    const dialog = $("#marketplace-config-dialog");
-    try {
-      const result = await api(`/api/marketplace/packs/${encodeURIComponent(dialog.dataset.packId)}/picker`, {
-        method: "POST", body: JSON.stringify({ key: button.dataset.key })
-      });
-      if (!result.canceled && result.path) {
-        const input = $(`#marketplace-config-${CSS.escape(button.dataset.key)}`);
-        input.value = result.path;
-        dialog.dataset.dirty = "true";
-      }
-    } catch (error) { toast(error.message, "error"); }
-  });
-  for (const name of ["permissions", "config", "starter"]) {
-    const dialog = marketplaceDialogByName(name);
-    dialog?.addEventListener("cancel", (event) => {
-      event.preventDefault();
-      if (name === "config" && dialog.dataset.dirty === "true"
-        && !window.confirm("Discard unsaved pack configuration changes?")) return;
-      closeMarketplaceDialog(name);
-      if (name === "permissions") app.pendingMarketplaceInstall = null;
-    });
-    dialog?.addEventListener("click", (event) => {
-      if (event.target !== dialog) return;
-      closeMarketplaceDialog(name);
-      if (name === "permissions") app.pendingMarketplaceInstall = null;
-    });
-    dialog?.addEventListener("close", () => {
-      const target = app.marketplaceDialogReturnFocus;
-      app.marketplaceDialogReturnFocus = null;
-      if (target?.isConnected) target.focus();
-    });
-  }
-  const saveMarketplaceConfig = async (event) => {
-    event?.preventDefault();
-    if (app.marketplaceConfigSaveInFlight) return;
-    const id = $("#marketplace-config-dialog").dataset.packId;
-    const button = $("#marketplace-config-confirm");
-    const errorOutput = $("#marketplace-config-error");
-    app.marketplaceConfigSaveInFlight = true;
-    button.disabled = true;
-    button.setAttribute("aria-busy", "true");
-    button.textContent = "Savingâ€¦";
-    errorOutput.classList.add("hidden");
-    try {
-      await api(`/api/marketplace/packs/${encodeURIComponent(id)}/config`, {
-        method: "PUT", body: JSON.stringify({ config: collectMarketplaceConfig() })
-      });
-      closeMarketplaceDialog("config");
-      $("#marketplace-config-dialog").dataset.dirty = "false";
-      toast("Pack configuration saved.");
-      await refreshMarketplace();
-    } catch (error) {
-      errorOutput.textContent = error.message;
-      errorOutput.classList.remove("hidden");
-    } finally {
-      app.marketplaceConfigSaveInFlight = false;
-      button.disabled = false;
-      button.removeAttribute("aria-busy");
-      button.textContent = "Save configuration";
-    }
-  };
-  $("#marketplace-config-form")?.addEventListener("submit", saveMarketplaceConfig);
-  $("#marketplace-config-confirm")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    saveMarketplaceConfig(event).catch((error) => toast(error.message, "error"));
-  });
-  $("#marketplace-dialog-backdrop")?.addEventListener("click", () => {
-    const dialog = marketplaceDialogs().find((item) => item.open || item.hasAttribute("open"));
-    if (!dialog) return;
-    const name = dialog.id.includes("permission") ? "permissions" : dialog.id.includes("config") ? "config" : "starter";
-    if (name === "config" && dialog.dataset.dirty === "true"
-      && !window.confirm("Discard unsaved pack configuration changes?")) return;
-    closeMarketplaceDialog(name);
-    if (name === "permissions") app.pendingMarketplaceInstall = null;
-  });
-  $("#marketplace-config-reset")?.addEventListener("click", async () => {
-    const id = $("#marketplace-config-dialog").dataset.packId;
-    try {
-      await api(`/api/marketplace/packs/${encodeURIComponent(id)}/config`, { method: "DELETE", body: "{}" });
-      closeMarketplaceDialog("config");
-      $("#marketplace-config-dialog").dataset.dirty = "false";
-      toast("Pack configuration reset.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  const setMarketplaceDeveloperMode = async (event) => {
-    try {
-      const result = await api("/api/marketplace/settings", { method: "PATCH", body: JSON.stringify({ developerMode: event.target.checked }) });
-      $("#marketplace-developer-mode").checked = result.developerMode;
-      $("#marketplace-developer-mode-settings").checked = result.developerMode;
-      $("#marketplace-developer-panel").classList.toggle("hidden", !result.developerMode);
-      toast(`Marketplace Developer Mode ${result.developerMode ? "enabled" : "disabled"}.`);
-    } catch (error) { event.target.checked = !event.target.checked; toast(error.message, "error"); }
-  };
-  $("#marketplace-developer-mode")?.addEventListener("change", setMarketplaceDeveloperMode);
-  $("#marketplace-developer-mode-settings")?.addEventListener("change", setMarketplaceDeveloperMode);
-  $("#marketplace-import")?.addEventListener("click", () => $("#marketplace-file").click());
-  $("#marketplace-file")?.addEventListener("change", async (event) => {
-    const file = event.target.files[0];
-    event.target.value = "";
-    if (!file) return;
-    const output = $("#marketplace-validation-output");
-    output.classList.remove("hidden");
-    try {
-      if (file.size > 5 * 1024 * 1024) throw new Error("The .evolvpack file is too large.");
-      const localPackage = JSON.parse(await file.text());
-      const preview = await api("/api/marketplace/validate", { method: "POST", body: JSON.stringify({ package: localPackage }) });
-      output.textContent = JSON.stringify({ valid: true, id: preview.manifest.id, version: preview.manifest.version, permissions: preview.permissions }, null, 2);
-      await beginMarketplaceInstall({ package: localPackage });
-    } catch (error) {
-      output.textContent = `Validation failed\n${error.message}`;
-      toast(error.message, "error");
-    }
-  });
-  $("#marketplace-create")?.addEventListener("click", () => showMarketplaceDialog("starter"));
-  $("#marketplace-catalog-connect")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/catalog", {
-        method: "PUT", body: JSON.stringify({ url: $("#marketplace-catalog-url").value.trim() })
-      });
-      await api("/api/marketplace/catalog/sync", { method: "POST", body: "{}" });
-      toast("Signed remote catalog verified and cached.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); await refreshMarketplace(); }
-  });
-  $("#marketplace-catalog-sync")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/catalog/sync", { method: "POST", body: "{}" });
-      toast("Remote catalog synchronized.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); await refreshMarketplace(); }
-  });
-  $("#marketplace-catalog-disconnect")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/catalog", { method: "DELETE", body: "{}" });
-      toast("Remote catalog disconnected. Installed packs were kept.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-review-connect")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/reviews/backend", {
-        method: "PUT",
-        body: JSON.stringify({
-          url: $("#marketplace-review-url").value.trim(),
-          publisherKeyId: $("#marketplace-review-key").value
-        })
-      });
-      toast("Trusted review service saved.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-review-flush")?.addEventListener("click", async () => {
-    try {
-      const result = await api("/api/marketplace/reviews/outbox/flush", { method: "POST", body: "{}" });
-      toast(`Processed ${result.processed} pending review${result.processed === 1 ? "" : "s"}.`);
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-review-disconnect")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/reviews/backend", { method: "DELETE", body: "{}" });
-      toast("Review service disconnected. Local outbox entries were kept.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-starter-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const payload = { ...Object.fromEntries(formData), permissions: formData.getAll("permissions") };
-    try {
-      const starter = await api("/api/marketplace/starter", { method: "POST", body: JSON.stringify(payload) });
-      downloadJsonFile(starter, `${starter.manifest.id}-${starter.manifest.version}.evolvpack`);
-      closeMarketplaceDialog("starter");
-      event.currentTarget.reset();
-      toast("Starter .evolvpack generated.");
-    } catch (error) { toast(error.message, "error"); }
-  });
   elements.installButton?.addEventListener("click", () => {
     elements.installError.classList.add("hidden");
     attachToInstall();
@@ -4995,12 +4168,6 @@ function bindEvents() {
     elements.localSetup.classList.add("hidden");
   });
   window.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-      event.preventDefault();
-      switchView("marketplace");
-      $("#marketplace-search")?.focus();
-      return;
-    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
       event.preventDefault();
       startNewChat().catch((error) => toast(error.message, "error"));

@@ -1047,3 +1047,22 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .world-canvas { display: block; width: 100%; height: 300px; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; margin: 14px 0 10px; }
 .world-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
 .world-skills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+
+/* A run happening inside a conversation. Folded shut by default: the person
+   asked a question and is waiting for an answer, not supervising a process. */
+.goal-progress { margin: 0 0 10px; border-left: 2px solid var(--line); padding: 0 0 0 10px; }
+.goal-progress > summary { display: flex; justify-content: space-between; gap: 10px; cursor: pointer; list-style: none; align-items: baseline; }
+.goal-progress > summary::-webkit-details-marker { display: none; }
+.goal-progress > summary strong { font-size: 11px; font-weight: 500; }
+.goal-progress > summary span { color: var(--muted-2); font: 8px "DM Mono", monospace; letter-spacing: 0.08em; }
+.goal-steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.goal-step { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: baseline; font-size: 11px; color: var(--muted); }
+.goal-step-mark { color: var(--muted-2); font: 10px "DM Mono", monospace; }
+.goal-step.is-running { color: var(--text); }
+.goal-step.is-running .goal-step-mark { color: var(--acid); }
+.goal-step.is-done .goal-step-mark { color: var(--acid); }
+.goal-step.is-unmet .goal-step-mark, .goal-step.is-failed .goal-step-mark { color: #d6a84a; }
+.goal-step-agent { color: var(--muted-2); font: 8px "DM Mono", monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+.goal-criteria { margin-top: 10px; }
+.goal-criteria ul { margin: 4px 0 0; padding-left: 16px; color: var(--muted); font-size: 11px; display: grid; gap: 2px; }
+.goal-why { margin: 8px 0 0; color: var(--muted-2); font-size: 10px; line-height: 1.5; }

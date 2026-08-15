@@ -37,14 +37,13 @@ requireText("public/styles.css", [
   /\.conversation-list\s*\{[\s\S]*overflow:\s*visible/
 ]);
 requireText("public/app.js", [
-  /marketplaceInstallInFlight/,
-  /verified\.installedRecord/,
+  /renderGoalProgress/,
   /\/api\/projects\/demo/
 ]);
 requireText("server.mjs", [/\/api\/projects\/demo/, /projectService\.createDemo/]);
-requireText("docs/USER-GUIDE.md", [/Marketplace/, /Recovery/, /Linux Mint/]);
+requireText("docs/USER-GUIDE.md", [/Recovery/, /Linux Mint/]);
 requireText("docs/RECOVERY.md", [/backup/i, /recovery code/i, /integrity/i]);
-requireText("docs/RELEASE-NOTES-0.5.0-PERSONAL.md", [/0\.5\.0/, /pack install/i, /sidebar/i]);
+requireText("docs/RELEASE-NOTES-0.5.0-PERSONAL.md", [/0\.5\.0/, /sidebar/i]);
 requireText("docs/STAGE-7-RELIABILITY-RELEASE.md", [/Windows package/, /Linux/, /not verified/i]);
 requireText(".itch.toml", [/path\s*=\s*"Evolv\.exe"/, /platform\s*=\s*"windows"/]);
 requireText(".itch-linux.toml", [/path\s*=\s*"Evolv"/, /platform\s*=\s*"linux"/]);

@@ -6,7 +6,6 @@
     <meta name="description" content="Evolv — a local Ollama chat that improves through your feedback." />
     <title>Evolv · Local AI</title>
     <link rel="stylesheet" href="/styles.css?v=0.6.3" />
-    <link rel="modulepreload" href="/agent-workspace.js?v=0.6.3" />
     <link rel="modulepreload" href="/sandbox.js?v=0.6.3" />
     <link rel="modulepreload" href="/world.js?v=0.6.3" />
     <link rel="modulepreload" href="/physics.js?v=0.6.3" />
@@ -54,10 +53,6 @@
           </button>
           <button class="nav-item" data-view="tools">
             <span class="nav-icon">⌘</span> Tools
-          </button>
-          <button class="nav-item" data-view="marketplace">
-            <span class="nav-icon">▦</span> Marketplace
-            <span id="marketplace-dot" class="notification-dot hidden"></span>
           </button>
         </nav>
 
@@ -203,7 +198,7 @@
                   <button id="voice-toggle" class="tool-button" type="button" aria-label="Toggle spoken replies" title="Spoken replies">◖</button>
                   <button id="gesture-button" class="tool-button" type="button" aria-label="Open hand gestures" title="Hand gestures">✋</button>
                 </div>
-                <span id="composer-hint">Enter to send · Shift+Enter for a new line · /agent · /sandbox · /physics · /lab · /demo</span>
+                <span id="composer-hint">Enter to send · Shift+Enter for a new line · /sandbox · /physics · /lab · /demo</span>
                 <span id="voice-listen-status" class="voice-listen-status hidden" aria-live="polite">Hold the microphone button to talk</span>
                 <button id="stop-button" class="stop-button hidden" type="button">Stop</button>
                 <button id="send-button" class="send-button" type="submit" aria-label="Send">↑</button>
@@ -381,38 +376,6 @@
           </article>
         </section>
 
-        <section id="agent-view" class="view panel-view agent-view">
-          <div class="panel-header">
-            <div><p class="eyebrow">VERIFIED GOAL RUNNER</p><h1>Agent</h1><p>Started with <code>/agent</code> in chat. Approve the plan once. Evolv runs safe local reads, pauses before every outside request or change, and finishes only after verification.</p></div>
-            <div class="panel-header-actions">
-              <button id="agent-back-to-chat" class="secondary-button" type="button">Back to chat</button>
-              <button id="agent-refresh" class="secondary-button" type="button">Refresh runs</button>
-            </div>
-          </div>
-          <div class="agent-layout">
-            <article class="mind-card agent-create-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">NEW GOAL</p><h2>Define the outcome</h2></div><span class="status-pill">Human controlled</span></div>
-              <form id="agent-goal-form" class="stack-form">
-                <label><span class="field-label">GOAL</span><textarea name="objective" rows="4" maxlength="20000" required placeholder="What should Evolv accomplish?"></textarea></label>
-                <label><span class="field-label">SUCCESS CRITERIA · ONE PER LINE</span><textarea name="successCriteria" rows="4" required placeholder="Tests pass&#10;Requested behavior is verified&#10;No unrelated files change"></textarea></label>
-                <div class="agent-form-grid">
-                  <label><span class="field-label">PROJECT</span><select id="agent-project" name="projectId" required></select></label>
-                  <label><span class="field-label">PACK</span><select id="agent-pack" name="packId"><option value="">No pack</option></select></label>
-                  <label><span class="field-label">PROVIDER</span><select id="agent-provider" name="provider"></select></label>
-                  <label><span class="field-label">MODEL</span><select id="agent-model" name="model"></select></label>
-                  <label><span class="field-label">BUDGET</span><select id="agent-budget" name="budget"><option value="balanced">Balanced · 12 steps · 20 min</option><option value="focused">Focused · 8 steps · 10 min</option><option value="small">Small · 5 steps · 5 min</option></select></label>
-                </div>
-                <p class="settings-note">Planning may use the selected model. Cloud providers can create charges. Vault and project excerpts remain withheld unless that provider is separately allowed.</p>
-                <button id="agent-plan-button" class="primary-button" type="submit">Propose plan</button>
-              </form>
-            </article>
-            <article class="mind-card agent-runs-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">DURABLE RUNS</p><h2>Goals</h2></div><span id="agent-run-count" class="status-pill">0</span></div>
-              <div id="agent-run-list" class="agent-run-list"><p class="settings-note">No goal runs yet.</p></div>
-            </article>
-          </div>
-          <article id="agent-run-detail" class="mind-card agent-detail hidden" aria-live="polite"></article>
-        </section>
 
         <section id="projects-view" class="view panel-view">
           <div class="panel-header">
@@ -758,99 +721,6 @@
           </div>
         </section>
 
-        <section id="marketplace-view" class="view panel-view marketplace-view">
-          <div class="panel-header marketplace-header">
-            <div>
-              <p class="eyebrow">LOCAL · DECLARATIVE · REVIEWED</p>
-              <h1>Evolv Marketplace</h1>
-              <p>Install specialist agents, commands, workflows, knowledge, and settings without running third-party code.</p>
-            </div>
-            <div class="marketplace-header-actions">
-              <span class="status-pill ready">OFFLINE CATALOG</span>
-              <label class="tool-master-toggle"><input id="marketplace-developer-mode" type="checkbox" /><span>Developer Mode</span></label>
-            </div>
-          </div>
-          <div class="marketplace-toolbar" role="search">
-            <input id="marketplace-search" type="search" maxlength="200" placeholder="Search packs, tags, authors, commands…" aria-label="Search Marketplace" />
-            <select id="marketplace-category" aria-label="Marketplace category">
-              <option value="">All categories</option>
-              <option value="development">Development</option><option value="engineering">Engineering</option>
-              <option value="embedded-systems">Embedded Systems</option><option value="linux">Linux</option>
-              <option value="productivity">Productivity</option><option value="business">Business</option>
-              <option value="design">Design</option><option value="gaming">Gaming</option>
-              <option value="automotive">Automotive</option><option value="education">Education</option>
-            </select>
-            <select id="marketplace-filter" aria-label="Marketplace filter">
-              <option value="">All packs</option><option value="installed">Installed</option><option value="free">Free</option>
-              <option value="paid">Paid</option><option value="verified">Verified</option><option value="local">Local-only</option>
-              <option value="cloud">Requires cloud API</option>
-            </select>
-            <select id="marketplace-sort" aria-label="Marketplace sort">
-              <option value="featured">Featured</option><option value="popular">Most popular</option>
-              <option value="updated">Recently updated</option><option value="newest">Newest</option>
-              <option value="rated">Highest rated</option><option value="alphabetical">Alphabetical</option>
-            </select>
-            <select id="marketplace-os" aria-label="Supported operating system">
-              <option value="">Any operating system</option><option value="windows">Windows</option><option value="linux">Linux</option><option value="macos">macOS</option>
-            </select>
-            <input id="marketplace-model-filter" maxlength="100" placeholder="Model compatibility…" aria-label="Model compatibility" />
-            <button id="marketplace-clear" class="secondary-button" type="button">Clear</button>
-          </div>
-          <div class="marketplace-tabs" role="tablist" aria-label="Marketplace sections">
-            <button class="marketplace-tab active" data-marketplace-tab="discover" role="tab" aria-selected="true">Discover</button>
-            <button class="marketplace-tab" data-marketplace-tab="installed" role="tab" aria-selected="false">Installed</button>
-            <button class="marketplace-tab" data-marketplace-tab="commands" role="tab" aria-selected="false">Pack commands</button>
-          </div>
-          <div id="marketplace-status" class="marketplace-status" role="status">Loading bundled catalog…</div>
-          <div class="marketplace-layout">
-            <div>
-              <div id="marketplace-featured" class="marketplace-featured"></div>
-              <div id="marketplace-grid" class="marketplace-grid" aria-live="polite"></div>
-              <div id="marketplace-empty" class="empty-panel hidden">
-                <div class="empty-glyph">◇</div><h2>No packs match</h2>
-                <p>Clear the search or change a filter. The bundled catalog remains available offline.</p>
-              </div>
-              <article id="marketplace-developer-panel" class="marketplace-developer hidden">
-                <div class="tool-card-head"><div><p class="eyebrow">PACK WORKSHOP</p><h2>Developer tools</h2></div><span class="model-badge">NO CODE EXECUTION</span></div>
-                <p>Create, validate, install, and export declarative <code>.evolvpack</code> files.</p>
-                <div class="data-actions">
-                  <button id="marketplace-import" class="secondary-button" type="button">Validate or install local pack</button>
-                  <button id="marketplace-create" class="primary-button" type="button">Create new pack</button>
-                  <input id="marketplace-file" class="hidden" type="file" accept=".evolvpack,application/json" />
-                </div>
-                <div class="marketplace-catalog-controls">
-                  <label>Signed remote catalog
-                    <input id="marketplace-catalog-url" type="url" maxlength="2000" placeholder="https://publisher.example/catalog.json" />
-                  </label>
-                  <div class="data-actions">
-                    <button id="marketplace-catalog-connect" class="secondary-button" type="button">Save &amp; sync</button>
-                    <button id="marketplace-catalog-sync" class="secondary-button" type="button">Sync now</button>
-                    <button id="marketplace-catalog-disconnect" class="secondary-button" type="button">Disconnect</button>
-                  </div>
-                  <p id="marketplace-catalog-status" class="settings-note">No remote catalog configured. Only trusted Ed25519 publisher keys are accepted.</p>
-                </div>
-                <div class="marketplace-catalog-controls">
-                  <label>Trusted review service
-                    <input id="marketplace-review-url" type="url" maxlength="2000" placeholder="https://reviews.example/api/" />
-                  </label>
-                  <label>Response signing identity
-                    <select id="marketplace-review-key"><option value="">Choose a trusted publisher key</option></select>
-                  </label>
-                  <div class="data-actions">
-                    <button id="marketplace-review-connect" class="secondary-button" type="button">Save review service</button>
-                    <button id="marketplace-review-flush" class="secondary-button" type="button">Retry pending reviews</button>
-                    <button id="marketplace-review-disconnect" class="secondary-button" type="button">Disconnect</button>
-                  </div>
-                  <p id="marketplace-review-status" class="settings-note">No review service configured. Reviews remain in the local outbox.</p>
-                </div>
-                <pre id="marketplace-validation-output" class="marketplace-diagnostics hidden"></pre>
-              </article>
-            </div>
-            <aside id="marketplace-details" class="marketplace-details" aria-label="Pack details" aria-live="polite">
-              <div class="empty-panel"><div class="empty-glyph">▦</div><h2>Select a pack</h2><p>Review its commands, compatibility, permissions, documentation, and install state.</p></div>
-            </aside>
-          </div>
-        </section>
 
         <section id="tools-view" class="view panel-view">
           <div class="panel-header">
@@ -979,13 +849,6 @@
         <p class="settings-note">Cloud prompts are sent to the provider you select and may create charges on your account. API keys are write-only and protected by your operating system's secure key store in the desktop app.</p>
         <div id="provider-settings-list" class="provider-settings-list"></div>
         <div class="settings-divider"></div>
-        <span class="field-label">MARKETPLACE</span>
-        <label class="tool-master-toggle">
-          <input id="marketplace-developer-mode-settings" type="checkbox" />
-          <span>Developer Mode · local pack tools</span>
-        </label>
-        <p class="settings-note">Developer Mode can validate local .evolvpack files and generate starter packs. It never enables arbitrary code execution.</p>
-        <div class="settings-divider"></div>
         <span class="field-label">SOFTWARE UPDATES</span>
         <section class="desktop-update-card" aria-live="polite">
           <div><strong id="desktop-update-title">Evolv update status</strong><span id="desktop-update-version"></span></div>
@@ -1046,80 +909,6 @@
         </label>
         <p id="password-error" class="settings-error hidden" role="alert"></p>
         <button class="primary-button full-width" type="submit">Change password and sign out</button>
-      </form>
-    </dialog>
-
-    <div id="marketplace-dialog-backdrop" class="marketplace-dialog-backdrop hidden" aria-hidden="true"></div>
-
-    <dialog id="marketplace-permission-dialog" class="mode-dialog" aria-labelledby="marketplace-permission-title">
-      <form id="marketplace-permission-form" class="settings-card">
-        <div class="dialog-heading">
-          <div><p class="eyebrow">EXPLICIT APPROVAL</p><h2 id="marketplace-permission-title">Review permissions</h2></div>
-          <button class="dialog-close" type="button" data-marketplace-close="permissions" aria-label="Close">×</button>
-        </div>
-        <p id="marketplace-permission-summary" class="settings-note"></p>
-        <div id="marketplace-relationship-review" class="marketplace-permissions hidden"></div>
-        <div id="marketplace-publisher-review" class="marketplace-permissions hidden"></div>
-        <div class="marketplace-permission-toolbar" aria-label="Optional permission controls">
-          <button id="marketplace-permission-select-optional" class="secondary-button" type="button">Select optional</button>
-          <button id="marketplace-permission-clear-optional" class="secondary-button" type="button">Clear optional</button>
-        </div>
-        <div id="marketplace-permission-list" class="marketplace-permissions"></div>
-        <p class="settings-note">Unsupported permissions are recorded for transparency but cannot expand Evolv's runtime. Updates never receive new permissions silently.</p>
-        <p id="marketplace-permission-error" class="settings-error hidden" role="alert"></p>
-        <div class="proposal-actions">
-          <button class="secondary-button" type="button" data-marketplace-close="permissions">Cancel</button>
-          <button id="marketplace-permission-confirm" class="primary-button" type="submit">Approve &amp; install</button>
-        </div>
-      </form>
-    </dialog>
-
-    <dialog id="marketplace-config-dialog" class="mode-dialog" aria-labelledby="marketplace-config-title">
-      <form id="marketplace-config-form" class="settings-card">
-        <div class="dialog-heading">
-          <div><p class="eyebrow">PACK SETTINGS</p><h2 id="marketplace-config-title">Configure pack</h2></div>
-          <button class="dialog-close" type="button" data-marketplace-close="config" aria-label="Close">×</button>
-        </div>
-        <div id="marketplace-config-fields" class="stack-form"></div>
-        <p id="marketplace-config-error" class="settings-error hidden" role="alert"></p>
-        <div class="proposal-actions">
-          <button id="marketplace-config-reset" class="secondary-button" type="button">Reset defaults</button>
-          <button class="secondary-button" type="button" data-marketplace-close="config">Cancel</button>
-          <button id="marketplace-config-confirm" class="primary-button" type="submit">Save configuration</button>
-        </div>
-      </form>
-    </dialog>
-
-    <dialog id="marketplace-starter-dialog" class="mode-dialog" aria-labelledby="marketplace-starter-title">
-      <form id="marketplace-starter-form" class="settings-card">
-        <div class="dialog-heading">
-          <div><p class="eyebrow">LOCAL PACK</p><h2 id="marketplace-starter-title">Create new pack</h2></div>
-          <button class="dialog-close" type="button" data-marketplace-close="starter" aria-label="Close">×</button>
-        </div>
-        <label><span class="field-label">NAME</span><input name="name" maxlength="120" required placeholder="My Specialist Pack" /></label>
-        <label><span class="field-label">ID</span><input name="id" maxlength="100" pattern="evolv\.[a-z0-9.-]+" required placeholder="evolv.my-specialist" /></label>
-        <label><span class="field-label">DESCRIPTION</span><textarea name="description" maxlength="1000" rows="3" required></textarea></label>
-        <div class="marketplace-form-grid">
-          <label><span class="field-label">CATEGORY</span><select name="category"><option value="productivity">Productivity</option><option value="development">Development</option><option value="engineering">Engineering</option><option value="education">Education</option></select></label>
-          <label><span class="field-label">AUTHOR</span><input name="author" maxlength="120" value="Local developer" /></label>
-        </div>
-        <div class="marketplace-form-grid">
-          <label><span class="field-label">INITIAL AGENT NAME</span><input name="agentName" maxlength="120" required placeholder="Release Specialist" /></label>
-          <label><span class="field-label">INITIAL COMMAND NAME</span><input name="commandName" maxlength="120" required placeholder="Prepare release" /></label>
-        </div>
-        <label><span class="field-label">AGENT INSTRUCTION</span><textarea name="agentPrompt" maxlength="5000" rows="3" required placeholder="You are a careful specialist…"></textarea></label>
-        <label><span class="field-label">COMMAND PROMPT</span><textarea name="commandPrompt" maxlength="5000" rows="3" required placeholder="Complete this task: {{input}}"></textarea></label>
-        <fieldset class="marketplace-permissions">
-          <legend class="field-label">OPTIONAL PERMISSIONS</legend>
-          <label><input name="permissions" type="checkbox" value="filesystem.read.project" /> Read active project</label>
-          <label><input name="permissions" type="checkbox" value="models.send-files" /> Send selected files to model</label>
-          <label><input name="permissions" type="checkbox" value="network.api-provider" /> Use configured AI provider</label>
-          <label><input name="permissions" type="checkbox" value="evolv.notifications" /> Show notifications</label>
-        </fieldset>
-        <div class="proposal-actions">
-          <button class="secondary-button" type="button" data-marketplace-close="starter">Cancel</button>
-          <button class="primary-button" type="submit">Generate .evolvpack</button>
-        </div>
       </form>
     </dialog>
 
