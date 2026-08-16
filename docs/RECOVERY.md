@@ -23,17 +23,13 @@ Do not overwrite a live database while Evolv is running. For manual recovery:
 3. Work from a copy of the newest backup, never the only backup.
 4. Verify it with SQLite `PRAGMA integrity_check;` and require the result `ok`.
 5. Preserve the damaged database with a timestamp before replacing anything.
-6. Start Evolv and verify the account, conversations, projects, packs, and settings.
+6. Start Evolv and verify the account, conversations, projects and settings.
 
 Authentication lives in `accounts.db`, separate from profile conversation databases. Portable import cannot replace credentials or API keys.
 
-## Pack recovery
-
-An installation is staged and moved atomically. Failed updates restore the previous pack directory. If a pack is present but its registration is unhealthy, open its Marketplace diagnostics and select **Reload & repair**. Uninstall removes the pack registration and installed pack files but never project files.
-
 ## Behavioral rollback
 
-Mind prompt versions and approved strategy versions are immutable history. Use **Versions** or **Rollback active strategy** to reactivate the previous approved version. Memories and generated tools never become active without approval.
+Every approved change to how Evolv behaves is kept as immutable history. Under **Settings → Learning** you can restore an earlier version, or roll back the active one. Nothing Evolv remembers and no tool it generates becomes active without your approval.
 
 ## Release verification
 

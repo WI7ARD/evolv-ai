@@ -2,6 +2,12 @@
 
 How to extend the simulation world with new object types, skills, and zones.
 
+> **Out of date as of 0.6.5.** This document describes shipping an extension
+> inside a `.evolvpack`, and the pack system was removed in 0.6.5 along with the
+> Marketplace. The declarative contract below still describes the shape the
+> world engine expects, but there is currently no way to install one. Treat this
+> as a design record until an install path exists again.
+
 The contract is **declarative**, matching the Marketplace pack format. An
 extension is data: it names object types, the skills that may act on them, and
 where they appear. It carries no code and executes nothing. This is not a

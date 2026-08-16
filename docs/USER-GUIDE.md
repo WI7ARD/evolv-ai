@@ -1,52 +1,140 @@
-# Evolv Personal 0.6.4 User Guide
+# Evolv 0.6.5 User Guide
 
-## Start and sign in
+Evolv is a chat app that runs on your own computer. Conversations, files and
+everything it remembers stay in a local database. Nothing is sent anywhere
+unless you connect a cloud provider and allow it.
 
-Open `Evolv.exe`. Create a local account on first launch, use a password of at least 12 characters, and save the one-time recovery code somewhere outside Evolv. Each local account has separate conversations, projects, memory, packs, provider settings, and backups.
+## Getting started
 
-## Chat and projects
+Open `Evolv.exe` (or the AppImage on Linux). On first launch you create a local
+account with a password of at least 12 characters, and Evolv shows you a
+one-time recovery code. Save that code somewhere outside Evolv — it is the only
+way back in if you forget the password, and Evolv only keeps a hash of it.
 
-Select a provider and model, or choose **Auto · Balanced**. Auto shows the selected provider, model, reasons, and any fallback. Cloud providers are excluded until enabled in Intelligence settings.
+Each account has its own conversations, projects, memory, settings and backups.
 
-The star beside the model list adds the selected model to **Favourites**, which are grouped at the top of the list. Favourites are per provider, so starring a model from one provider does not star the same name from another.
+You also need at least one model. If Ollama is running but empty, Evolv offers
+to install **Evolv Local** for you and picks the size that fits your computer's
+memory and free disk space. See [EVOLV-LOCAL.md](EVOLV-LOCAL.md).
 
-Evolv also remembers what happened last time each model was asked to answer. A model that fails twice running for its own reason — not installed, out of memory, no tool support, out of context — is labelled with that reason in the list, and **Auto** routes around it in favour of one that works. A single failure is treated as a bad moment rather than a broken model, and any successful reply clears the record. Failures that are not the model's fault, such as Ollama being shut down or a rejected API key, are never counted against it, because they would otherwise mark every model at once.
+## Chatting
 
-Models are labelled with what they can do (🔧 tools, 👁 images, 🧠 reasoning) and, for local models, whether they fit in this computer's memory. **⚠ too big for this computer** means the model needs more memory than the machine has; it may fail to load or fall back to swapping. **⚠ tight fit** means it will load but leave little room, which shows up as slowness in long conversations. Neither is a block — a machine with a large GPU may cope — but the warning is shown when the model is selected rather than after a reply has already failed.
+Type and press Enter. Shift+Enter starts a new line.
 
-Use **Projects** to keep work scoped. **Load verified demo** creates a real local demo with tasks and indexed evidence; it is safe to remove like any other project. Connect a folder only when you want Evolv's bounded read tools to inspect it.
+Pick a provider and model at the top, or leave it on **Auto** and Evolv chooses.
+Auto always tells you what it picked and why. Cloud providers are never
+considered until you allow them under **Settings → Answers**.
 
-## Marketplace packs
+The star beside the model list adds a model to your favourites, which group at
+the top. Favourites are per provider, so starring `llama3` under Ollama does not
+star a similarly named model somewhere else.
 
-1. Open **Marketplace** and choose a pack.
-2. Select **Install**.
-3. Review required and optional permissions. Required permissions cannot be unchecked; optional permissions remain your choice.
-4. Select **Approve & install** once. Evolv blocks duplicate submissions and verifies the installed version is enabled before reporting success.
-5. Select **Enter chat** on an installed pack and describe what you want. The pack infers a bounded task from the conversation.
+Models are labelled with what they can do — 🔧 tools, 👁 images, 🧠 reasoning —
+and local models are labelled with whether they fit in this computer's memory.
+**⚠ too big for this computer** means it needs more memory than you have and may
+fail to load. **⚠ tight fit** means it will load but leave little room, which
+shows up as slowness in long conversations. Neither is a block; both are shown
+when you select the model rather than after a reply has already failed.
 
-If installation fails, the approval panel keeps the exact safe error visible. Close it with **Cancel**, the × button, Escape, or by selecting the backdrop. No pack can silently expand its permissions.
+Evolv also remembers how each model behaved last time. A model that fails twice
+in a row for its own reason — not installed, out of memory, no tool support, out
+of context — is labelled with that reason, and Auto routes around it. One
+failure is treated as a bad moment, and any successful reply clears the record.
+Failures that are not the model's fault, like Ollama being shut down or a
+rejected API key, are never counted against it.
 
-## Conversation sidebar
+### When a question is really a job
 
-The full left sidebar now scrolls. Conversations are not capped to a small fixed box; use the sidebar scrollbar or mouse wheel to reach every chat and the connection/privacy status below them.
+Some questions take more than one answer. If you ask Evolv to check something
+across a whole project, or to establish a fact rather than recall one, it works
+through it in several steps instead of replying off the top of its head: it
+looks things up, reasons over what it found, and checks the result against what
+you asked for before answering.
 
-## Voice
+You do not turn this on and there is no form to fill in. It happens in the
+conversation, and the steps appear under the reply as they finish. If the answer
+does not meet one of its own checks, it says so rather than burying it.
 
-Hold the microphone button while speaking and release it to transcribe and send. Whisper.cpp runs locally. Settings show the chosen model, confidence, review state, and diagnostic errors. Piper voices require the runtime, an `.onnx` model, and its matching `.onnx.json` file.
+Evolv is deliberately reluctant about this — an ordinary question gets an
+ordinary answer, because a two-minute plan-and-verify cycle is not what you
+wanted when you asked what a mutex is. It also needs something to work over, so
+it only happens when a project folder or an Obsidian vault is connected.
 
-## Backups and Recovery
+Anything that would **change** a file always stops and asks first.
 
-Open Settings and select **Create backup** before a major change. Evolv also creates daily backups and keeps the ten newest. Portable exports omit passwords, recovery hashes, API keys, private vault paths, and filesystem grants.
+You can switch it off entirely under **Settings → Answers**.
 
-See [RECOVERY.md](RECOVERY.md) for account recovery, interrupted work, database checks, and rollback steps.
+### Commands
 
-## Windows package
+Type `/` in the message box to see them. They are handled inside Evolv and never
+sent to a model:
 
-Extract the entire ZIP before launching `Evolv.exe`; do not run it from inside the ZIP. An unsigned personal build may show Windows SmartScreen. Keep `%APPDATA%\Evolv` when replacing the program folder—this is where personal data lives.
+- `/sandbox` — review changes tried in a private copy of your project
+- `/physics` — a small world with gravity that Evolv can build in
+- `/lab` — time, weather and open work at a glance
+- `/demo` — watch Evolv run a real experiment on itself
 
-## Linux Mint
+## Projects
 
-The Linux source and build path are included, but the final Linux binary must be produced on Linux Mint so the native SQLite module and executable permissions are genuine. On Linux Mint run:
+A project keeps a folder, its sources, its tasks and its conversations together.
+Evolv can only reach the folder you explicitly connect to a project, and it
+still needs your approval before changing anything inside it.
+
+**Load verified demo** creates a real local project with tasks and indexed
+evidence, so you can see how it works before pointing Evolv at your own files.
+Remove it like any other project.
+
+## Settings
+
+Everything else lives in one place, in four sections.
+
+**Answers** — which model replies, whether Evolv picks for you, which cloud
+providers are allowed to see your notes and your files (both off to start with),
+a monthly cloud spending limit, and whether Evolv breaks bigger questions into
+steps.
+
+**Memory** — everything Evolv has read or noticed, and everything it wants to
+remember. Nothing enters its memory until you approve it, and you can edit any
+proposal before you do. Connect an Obsidian vault here if you keep one.
+
+**Tools** — what Evolv can do besides answer: read files, search your notes,
+look things up. Every use is recorded, and you can see exactly what it ran and
+when. You can also describe something you do often and have Evolv bundle
+existing tools into one shortcut. It cannot write code, run commands, install
+anything, or grant itself new permissions.
+
+**Learning** — why each model was picked, how your rated answers actually went,
+problems that keep coming back, and a way to test a change to Evolv's behaviour
+against its current behaviour before keeping it. Every number here comes from
+work Evolv already did; no second model is asked to judge the first.
+
+## Backups and recovery
+
+Open Settings and create a backup before any major change. Evolv also backs up
+daily and keeps the ten most recent. Portable exports leave out passwords,
+recovery hashes, API keys, vault paths and folder grants.
+
+See [RECOVERY.md](RECOVERY.md) for account recovery, interrupted work, database
+checks and rollback.
+
+## Installing on Windows
+
+Extract the whole ZIP before launching `Evolv.exe` — do not run it from inside
+the ZIP. Personal builds are unsigned, so Windows SmartScreen will warn you;
+choose **More info → Run anyway**. When replacing the program folder, keep
+`%APPDATA%\Evolv`, which is where your data lives.
+
+## Installing on Linux
+
+The AppImage is self-contained. Make it executable and run it:
+
+```bash
+chmod +x Evolv-0.6.5-x86_64.AppImage
+./Evolv-0.6.5-x86_64.AppImage
+```
+
+To build it yourself, do so on Linux so the native SQLite module and the
+executable bit are genuine:
 
 ```bash
 npm install
@@ -54,19 +142,3 @@ npm test
 npm run dist:linux
 npm run linux:validate
 ```
-
-Use the generated `Evolv-linux-x64-0.6.3.tar.gz`. Do not relabel a Windows build as Linux.
-
-## Run a verified goal
-
-1. Type `/agent` in the chat box. Adding the goal on the same line — `/agent
-   audit the release checklist` — drafts it for you. The command is handled
-   locally and is never sent to a model.
-2. Enter the goal and one measurable success criterion per line.
-3. Choose the project, optional installed pack, provider/model, and a budget no larger than the balanced preset.
-4. Select **Propose plan**. Read every step. You may edit the structured plan before approval.
-5. Select **Approve this plan**, then **Start approved plan**.
-6. Safe local reads proceed automatically. Network research, file changes, engineering checks, and Obsidian user-note changes stop for a separate approval.
-7. A run is complete only when the final verification step records evidence for the original criteria. A model answer without evidence is shown as partial or failed.
-
-When a dedicated Obsidian vault is connected, plan approval creates a deterministic journal under `Projects/<project>/Runs/`. Evolv may append run facts to that journal only; changes to your normal notes still require a visible diff.
