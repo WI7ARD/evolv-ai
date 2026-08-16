@@ -1624,7 +1624,7 @@ async function loadIntelligenceModels() {
 }
 
 async function refreshIntelligence({ refreshModels = false } = {}) {
-  if (!$("#intelligence-view")) return;
+  if (!$("#settings-view")) return;
   [app.intelligence, app.evolution] = await Promise.all([api("/api/intelligence"), api("/api/evolution")]);
   if (refreshModels || !app.intelligenceModels.length) await loadIntelligenceModels();
   renderIntelligence();
@@ -2719,15 +2719,38 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+// Everything that is not chat or a project now lives in one Settings view,
+// divided into sections. Five top-level destinations called "Personal
+// intelligence", "Evolution lab", "Mind history", "Mind studio" and "Tool
+// control" asked a newcomer to learn five words before they could change
+// anything; the things themselves were fine, the shelving was not.
+const SETTINGS_SECTIONS = ["answers", "memory", "tools", "learning"];
+
+function switchSettingsSection(section) {
+  const wanted = SETTINGS_SECTIONS.includes(section) ? section : SETTINGS_SECTIONS[0];
+  $$(".settings-tab").forEach((tab) => {
+    const on = tab.dataset.section === wanted;
+    tab.classList.toggle("active", on);
+    tab.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  $$(".settings-section").forEach((pane) => pane.classList.toggle("hidden", pane.dataset.section !== wanted));
+  localStorage.setItem("evolv:settings-section", wanted);
+  // Each section loads only what it shows. Opening Settings used to fetch
+  // everything five views between them needed.
+  const load = {
+    answers: () => refreshIntelligence(),
+    memory: () => refreshObsidian(),
+    tools: () => Promise.all([refreshTools(), refreshToolRecipes(), refreshObsidian()]),
+    learning: () => refreshIntelligence()
+  }[wanted];
+  load?.().catch((error) => toast(error.message, "error"));
+}
+
 function switchView(view) {
   $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   $$(".view").forEach((item) => item.classList.remove("active"));
   $(`#${view}-view`).classList.add("active");
-  if (view === "intelligence") refreshIntelligence().catch((error) => toast(error.message, "error"));
-  if (view === "mind") refreshObsidian().catch((error) => toast(error.message, "error"));
-  if (view === "tools") {
-    Promise.all([refreshTools(), refreshToolRecipes(), refreshObsidian()]).catch((error) => toast(error.message, "error"));
-  }
+  if (view === "settings") switchSettingsSection(localStorage.getItem("evolv:settings-section") || SETTINGS_SECTIONS[0]);
   if (view === "projects") refreshProjects().catch((error) => toast(error.message, "error"));
   if (view === "sandbox") refreshSandboxes().catch((error) => toast(error.message, "error"));
   if (view === "physics") refreshPhysics().catch((error) => toast(error.message, "error"));
@@ -3621,7 +3644,6 @@ function bindEvents() {
     if (button.classList.contains("provider-test")) providerAction(button, "test");
     if (button.classList.contains("provider-delete")) providerAction(button, "delete");
   });
-  $("#intelligence-refresh")?.addEventListener("click", () => refreshIntelligence({ refreshModels: true }).catch((error) => toast(error.message, "error")));
   $("#save-intelligence-settings")?.addEventListener("click", async () => {
     try {
       await api("/api/intelligence/settings", {
@@ -4182,7 +4204,24 @@ function bindEvents() {
     }
   });
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
-  $$(".starter").forEach((button) => button.addEventListener("click", () => sendMessage(button.textContent)));
+  $$(".settings-tab").forEach((button) => button.addEventListener("click", () => switchSettingsSection(button.dataset.section)));
+  $(".settings-tabs")?.addEventListener("keydown", (event) => {
+    const index = SETTINGS_SECTIONS.indexOf(document.activeElement?.dataset?.section);
+    if (index < 0 || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const next = SETTINGS_SECTIONS[(index + (event.key === "ArrowRight" ? 1 : SETTINGS_SECTIONS.length - 1)) % SETTINGS_SECTIONS.length];
+    switchSettingsSection(next);
+    $(`.settings-tab[data-section="${next}"]`)?.focus();
+  });
+  $("#settings-refresh")?.addEventListener("click", () => {
+    // Re-reads models too, which the old per-view Refresh did only in
+    // Intelligence and nowhere else.
+    refreshIntelligence({ refreshModels: true }).catch((error) => toast(error.message, "error"));
+    switchSettingsSection(localStorage.getItem("evolv:settings-section") || SETTINGS_SECTIONS[0]);
+  });
+  // Every starter sends its own text, except the spark, which is an action and
+  // has its own handler below.
+  $$(".starter:not(.starter-spark)").forEach((button) => button.addEventListener("click", () => sendMessage(button.textContent)));
   elements.propose.addEventListener("click", proposeUpgrade);
   $("#evaluate-proposal")?.addEventListener("click", evaluateProposal);
   $("#reject-proposal").addEventListener("click", async () => {
@@ -4201,7 +4240,8 @@ function bindEvents() {
         body: JSON.stringify({ proposalId: app.state.pendingProposal.id })
       });
       await refreshState();
-      switchView("versions");
+      switchView("settings");
+      switchSettingsSection("learning");
       toast("Upgrade approved and activated.");
     } catch (error) {
       toast(error.message, "error");

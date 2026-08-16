@@ -37,22 +37,10 @@
           <button class="nav-item" data-view="projects">
             <span class="nav-icon">▣</span> Projects
           </button>
-          <button class="nav-item" data-view="evolution">
-            <span class="nav-icon">↗</span> Evolution
+          <button class="nav-item" data-view="settings">
+            <span class="nav-icon">⚙</span> Settings
             <span id="proposal-dot" class="notification-dot hidden"></span>
-          </button>
-          <button class="nav-item" data-view="intelligence">
-            <span class="nav-icon">AI</span> Intelligence
             <span id="intelligence-dot" class="notification-dot hidden"></span>
-          </button>
-          <button class="nav-item" data-view="versions">
-            <span class="nav-icon">⌁</span> Versions
-          </button>
-          <button class="nav-item" data-view="mind">
-            <span class="nav-icon">◇</span> Mind
-          </button>
-          <button class="nav-item" data-view="tools">
-            <span class="nav-icon">⌘</span> Tools
           </button>
         </nav>
 
@@ -145,6 +133,7 @@
                 <button class="starter">Help me plan a focused work week</button>
                 <button class="starter">Explain a hard idea with an analogy</button>
                 <button class="starter">Review a decision I'm considering</button>
+                <button id="spark-button" class="starter starter-spark" type="button">Surprise me</button>
               </div>
             </div>
           </div>
@@ -432,21 +421,22 @@
           </article>
         </section>
 
-        <section id="intelligence-view" class="view panel-view">
+        <section id="settings-view" class="view panel-view">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">ROUTE · REMEMBER · EVALUATE</p>
-              <h1>Personal intelligence</h1>
-              <p>See why Auto chose a model, review every proposed memory, and test behavioral upgrades before activation.</p>
+              <h1>Settings</h1>
+              <p>Everything you can change about how Evolv works. Nothing here is applied until you save it.</p>
             </div>
-            <button id="intelligence-refresh" class="secondary-button" type="button">Refresh</button>
+            <button id="settings-refresh" class="secondary-button" type="button">Refresh</button>
           </div>
-          <div class="stats-grid intelligence-stats">
-            <article class="stat-card"><span>ROUTED</span><strong id="route-count">0</strong><small>Auto decisions</small></article>
-            <article class="stat-card"><span>ROUTE RATING</span><strong id="route-success">0%</strong><small>helpful rated routes</small></article>
-            <article class="stat-card"><span>MEMORY INBOX</span><strong id="memory-proposal-count">0</strong><small>waiting for review</small></article>
-            <article class="stat-card"><span>EVAL CASES</span><strong id="evaluation-case-count">0</strong><small>from your feedback</small></article>
-          </div>
+          <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
+            <button class="settings-tab active" type="button" data-section="answers" role="tab" aria-selected="true">Answers</button>
+            <button class="settings-tab" type="button" data-section="memory" role="tab" aria-selected="false">Memory</button>
+            <button class="settings-tab" type="button" data-section="tools" role="tab" aria-selected="false">Tools</button>
+            <button class="settings-tab" type="button" data-section="learning" role="tab" aria-selected="false">Learning</button>
+          </nav>
+          <div class="settings-section" data-section="answers">
+            <p class="settings-section-lede">How Evolv replies — which model, how many steps, who does what.</p>
           <div class="intelligence-grid">
             <article class="mind-card intelligence-settings-card">
               <div class="mind-card-heading"><div><p class="eyebrow">CONTROL</p><h2>Balanced Auto</h2></div><span class="model-badge">REVIEW-ONLY LEARNING</span></div>
@@ -483,115 +473,14 @@
               <div id="intelligence-models" class="intelligence-models"></div>
             </article>
           </div>
+          </div>
+          <div class="settings-section hidden" data-section="memory">
+            <p class="settings-section-lede">What Evolv is allowed to remember, and everything it already knows.</p>
           <article class="mind-card memory-inbox-card">
             <div class="mind-card-heading"><div><p class="eyebrow">APPROVAL REQUIRED</p><h2>Memory Inbox</h2></div><button id="approve-selected-memories" class="primary-button" type="button">Approve selected</button></div>
             <p class="settings-note">Edit any proposal before approving it. Rejected proposals never enter Evolv's active context.</p>
             <div id="memory-proposal-list" class="memory-proposal-list"></div>
           </article>
-          <div class="intelligence-grid">
-            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">TRANSPARENT ROUTING</p><h2>Recent decisions</h2></div></div><div id="routing-history" class="routing-history"></div></article>
-            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">EVIDENCE</p><h2>Learning runs</h2></div></div><div id="evaluation-history" class="evaluation-history"></div></article>
-          </div>
-          <div class="intelligence-grid">
-            <article class="mind-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">LOCAL · NO JUDGE CALL</p><h2>Run evidence</h2></div><span id="evolution-run-count" class="model-badge">0 RUNS</span></div>
-              <p class="settings-note">Completion, tools, citations, latency, tokens, and cost come from recorded run facts. Quality and factuality stay unscored until you rate the answer.</p>
-              <div id="run-evidence-history" class="routing-history"></div>
-            </article>
-            <article class="mind-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">EXPLICIT FEEDBACK ONLY</p><h2>Recurring failures</h2></div><span id="recurring-failure-count" class="model-badge">0 RECURRING</span></div>
-              <p class="settings-note">Patterns appear only after your negative ratings. Selecting them does not change Evolv; it only links evidence to a reviewable candidate.</p>
-              <div id="failure-pattern-list" class="routing-history"></div>
-            </article>
-          </div>
-          <article class="mind-card specialist-comparison-card">
-            <div class="mind-card-heading"><div><p class="eyebrow">CONTROL ARM · RECORDED PER RUN</p><h2>Were specialists worth it</h2></div><span id="specialist-verdict-badge" class="model-badge">NO VERDICT</span></div>
-            <p id="specialist-verdict" class="settings-note">Run some goals with specialists on and some with them off. Nothing here is inferred — every figure comes from runs you already finished.</p>
-            <div id="specialist-cohorts" class="specialist-cohorts"></div>
-            <div id="specialist-gaps" class="routing-history"></div>
-            <p id="specialist-method" class="settings-note"></p>
-          </article>
-          <article class="mind-card strategy-lab-card">
-            <div class="mind-card-heading"><div><p class="eyebrow">BENCHMARK → REVIEW → APPROVE</p><h2>Strategy lab</h2></div><button id="rollback-strategy" class="secondary-button" type="button">Rollback active strategy</button></div>
-            <p class="settings-note">A benchmark runs five fixed cases twice (10 model calls). Cloud models may create provider charges. Evolv will never activate a candidate automatically.</p>
-            <form id="strategy-candidate-form" class="stack-form">
-              <label><span class="field-label">CANDIDATE NAME</span><input name="name" maxlength="100" required placeholder="Evidence and verification discipline" /></label>
-              <label><span class="field-label">GUIDANCE TO TEST</span><textarea name="instruction" rows="4" minlength="20" maxlength="4000" required placeholder="Answer from supplied evidence, follow explicit limits, verify outcomes, and recover honestly from failed operations."></textarea></label>
-              <label><span class="field-label">WHY THIS MAY HELP</span><textarea name="rationale" rows="2" maxlength="1000" placeholder="Link the proposed behavior to observed failures."></textarea></label>
-              <button class="primary-button" type="submit">Create reviewable candidate</button>
-            </form>
-            <div id="strategy-version-list" class="memory-proposal-list"></div>
-          </article>
-        </section>
-
-        <section id="evolution-view" class="view panel-view">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">FEEDBACK → EVIDENCE → PROPOSAL</p>
-              <h1>Evolution lab</h1>
-              <p>Convert your ratings into a better behavioral prompt. Nothing changes until you approve it.</p>
-            </div>
-            <button id="propose-button" class="primary-button">Generate upgrade</button>
-          </div>
-
-          <div class="stats-grid">
-            <article class="stat-card"><span>TOTAL SIGNALS</span><strong id="feedback-total">0</strong><small>ratings collected</small></article>
-            <article class="stat-card"><span>POSITIVE</span><strong id="feedback-positive">0%</strong><small>helpful responses</small></article>
-            <article class="stat-card"><span>MIND VERSION</span><strong id="version-number">1</strong><small>reversible iterations</small></article>
-          </div>
-
-          <div id="no-proposal" class="empty-panel">
-            <div class="empty-glyph">↗</div>
-            <h2>No upgrade waiting</h2>
-            <p>Rate a few chat responses, add notes where useful, then ask an Ollama model to propose the next version.</p>
-          </div>
-
-          <div id="proposal-panel" class="proposal-panel hidden">
-            <div class="proposal-heading">
-              <div>
-                <p class="eyebrow">PROPOSED MIND</p>
-                <h2 id="proposal-summary"></h2>
-              </div>
-              <span id="proposal-model" class="model-badge"></span>
-            </div>
-            <p id="proposal-rationale" class="rationale"></p>
-            <div class="prompt-preview">
-              <div class="preview-label">PROPOSED SYSTEM PROMPT</div>
-              <pre id="proposal-prompt"></pre>
-            </div>
-            <div>
-              <div class="preview-label">ACCEPTANCE TESTS</div>
-              <div id="proposal-tests" class="tests"></div>
-            </div>
-            <div id="proposal-evaluation" class="proposal-evaluation"></div>
-            <div class="proposal-actions">
-              <button id="reject-proposal" class="secondary-button">Discard</button>
-              <button id="evaluate-proposal" class="secondary-button">Run blind evaluation</button>
-              <button id="apply-proposal" class="primary-button">Approve & activate</button>
-            </div>
-          </div>
-        </section>
-
-        <section id="versions-view" class="view panel-view">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">COMPLETE & REVERSIBLE</p>
-              <h1>Mind history</h1>
-              <p>Every approved behavior change is preserved. Return to an earlier version at any time.</p>
-            </div>
-          </div>
-          <div id="versions-list" class="versions-list"></div>
-        </section>
-
-        <section id="mind-view" class="view panel-view">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">GROUNDING · COGNITION · CREATION</p>
-              <h1>Mind studio</h1>
-              <p>Shape what Evolv knows, how it approaches a problem, and what architectural changes it may propose.</p>
-            </div>
-            <button id="spark-button" class="primary-button">Surprise me</button>
-          </div>
 
           <div class="cognition-flow" aria-label="Cognitive architecture">
             <div><span>01</span><strong>Perceive</strong><small>Identify the goal and context</small></div>
@@ -719,21 +608,13 @@
               <div id="architecture-list" class="architecture-list"></div>
             </article>
           </div>
-        </section>
-
-
-        <section id="tools-view" class="view panel-view">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">BOUNDED · READ-ONLY · AUDITED</p>
-              <h1>Tool control</h1>
-              <p>Choose which offline tools Evolv may use. Every invocation is recorded and visible here.</p>
-            </div>
-            <label class="tool-master-toggle">
-              <input id="tools-master" type="checkbox" checked />
-              <span>Tools enabled</span>
-            </label>
           </div>
+          <div class="settings-section hidden" data-section="tools">
+            <p class="settings-section-lede">What Evolv may do besides talk. Every use is recorded.</p>
+            <label class="tool-master-toggle section-lead-control">
+              <input id="tools-master" type="checkbox" checked />
+              <span>Let Evolv use tools</span>
+            </label>
           <div class="tools-layout">
             <div>
               <article class="tool-builder-card">
@@ -757,7 +638,91 @@
               <div id="tool-runs-list" class="tool-runs-list"></div>
             </div>
           </div>
+          </div>
+          <div class="settings-section hidden" data-section="learning">
+            <p class="settings-section-lede">What Evolv has learned from your ratings, and the evidence behind it.</p>
+            <div class="section-lead-control"><button id="propose-button" class="primary-button" type="button">Suggest an improvement</button></div>
+          <div class="stats-grid intelligence-stats">
+            <article class="stat-card"><span>ROUTED</span><strong id="route-count">0</strong><small>Auto decisions</small></article>
+            <article class="stat-card"><span>ROUTE RATING</span><strong id="route-success">0%</strong><small>helpful rated routes</small></article>
+            <article class="stat-card"><span>MEMORY INBOX</span><strong id="memory-proposal-count">0</strong><small>waiting for review</small></article>
+            <article class="stat-card"><span>EVAL CASES</span><strong id="evaluation-case-count">0</strong><small>from your feedback</small></article>
+          </div>
+          <div class="intelligence-grid">
+            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">TRANSPARENT ROUTING</p><h2>Recent decisions</h2></div></div><div id="routing-history" class="routing-history"></div></article>
+            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">EVIDENCE</p><h2>Learning runs</h2></div></div><div id="evaluation-history" class="evaluation-history"></div></article>
+          </div>
+          <div class="intelligence-grid">
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">LOCAL · NO JUDGE CALL</p><h2>Run evidence</h2></div><span id="evolution-run-count" class="model-badge">0 RUNS</span></div>
+              <p class="settings-note">Completion, tools, citations, latency, tokens, and cost come from recorded run facts. Quality and factuality stay unscored until you rate the answer.</p>
+              <div id="run-evidence-history" class="routing-history"></div>
+            </article>
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">EXPLICIT FEEDBACK ONLY</p><h2>Recurring failures</h2></div><span id="recurring-failure-count" class="model-badge">0 RECURRING</span></div>
+              <p class="settings-note">Patterns appear only after your negative ratings. Selecting them does not change Evolv; it only links evidence to a reviewable candidate.</p>
+              <div id="failure-pattern-list" class="routing-history"></div>
+            </article>
+          </div>
+          <article class="mind-card specialist-comparison-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">CONTROL ARM · RECORDED PER RUN</p><h2>Were specialists worth it</h2></div><span id="specialist-verdict-badge" class="model-badge">NO VERDICT</span></div>
+            <p id="specialist-verdict" class="settings-note">Run some goals with specialists on and some with them off. Nothing here is inferred — every figure comes from runs you already finished.</p>
+            <div id="specialist-cohorts" class="specialist-cohorts"></div>
+            <div id="specialist-gaps" class="routing-history"></div>
+            <p id="specialist-method" class="settings-note"></p>
+          </article>
+          <article class="mind-card strategy-lab-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">BENCHMARK → REVIEW → APPROVE</p><h2>Strategy lab</h2></div><button id="rollback-strategy" class="secondary-button" type="button">Rollback active strategy</button></div>
+            <p class="settings-note">A benchmark runs five fixed cases twice (10 model calls). Cloud models may create provider charges. Evolv will never activate a candidate automatically.</p>
+            <form id="strategy-candidate-form" class="stack-form">
+              <label><span class="field-label">CANDIDATE NAME</span><input name="name" maxlength="100" required placeholder="Evidence and verification discipline" /></label>
+              <label><span class="field-label">GUIDANCE TO TEST</span><textarea name="instruction" rows="4" minlength="20" maxlength="4000" required placeholder="Answer from supplied evidence, follow explicit limits, verify outcomes, and recover honestly from failed operations."></textarea></label>
+              <label><span class="field-label">WHY THIS MAY HELP</span><textarea name="rationale" rows="2" maxlength="1000" placeholder="Link the proposed behavior to observed failures."></textarea></label>
+              <button class="primary-button" type="submit">Create reviewable candidate</button>
+            </form>
+            <div id="strategy-version-list" class="memory-proposal-list"></div>
+          </article>
+
+          <div class="stats-grid">
+            <article class="stat-card"><span>TOTAL SIGNALS</span><strong id="feedback-total">0</strong><small>ratings collected</small></article>
+            <article class="stat-card"><span>POSITIVE</span><strong id="feedback-positive">0%</strong><small>helpful responses</small></article>
+            <article class="stat-card"><span>MIND VERSION</span><strong id="version-number">1</strong><small>reversible iterations</small></article>
+          </div>
+
+          <div id="no-proposal" class="empty-panel">
+            <div class="empty-glyph">↗</div>
+            <h2>No upgrade waiting</h2>
+            <p>Rate a few chat responses, add notes where useful, then ask an Ollama model to propose the next version.</p>
+          </div>
+
+          <div id="proposal-panel" class="proposal-panel hidden">
+            <div class="proposal-heading">
+              <div>
+                <p class="eyebrow">PROPOSED MIND</p>
+                <h2 id="proposal-summary"></h2>
+              </div>
+              <span id="proposal-model" class="model-badge"></span>
+            </div>
+            <p id="proposal-rationale" class="rationale"></p>
+            <div class="prompt-preview">
+              <div class="preview-label">PROPOSED SYSTEM PROMPT</div>
+              <pre id="proposal-prompt"></pre>
+            </div>
+            <div>
+              <div class="preview-label">ACCEPTANCE TESTS</div>
+              <div id="proposal-tests" class="tests"></div>
+            </div>
+            <div id="proposal-evaluation" class="proposal-evaluation"></div>
+            <div class="proposal-actions">
+              <button id="reject-proposal" class="secondary-button">Discard</button>
+              <button id="evaluate-proposal" class="secondary-button">Run blind evaluation</button>
+              <button id="apply-proposal" class="primary-button">Approve & activate</button>
+            </div>
+          </div>
+          <div id="versions-list" class="versions-list"></div>
+          </div>
         </section>
+
       </main>
     </div>
 

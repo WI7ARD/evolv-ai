@@ -55,7 +55,12 @@ test("serves the application shell", async () => {
   assert.doesNotMatch(shell, /id="live-button"/);
   assert.doesNotMatch(shell, /whisper-voice/);
   assert.doesNotMatch(shell, /Open palm/i);
-  assert.match(shell, /id="intelligence-view"/);
+  // One Settings destination with sections, not five top-level views.
+  assert.match(shell, /id="settings-view"/);
+  assert.doesNotMatch(shell, /id="(?:intelligence|evolution|versions|mind|tools)-view"/);
+  for (const section of ["answers", "memory", "tools", "learning"]) {
+    assert.match(shell, new RegExp(`data-section="${section}"`));
+  }
   assert.match(shell, /Memory Inbox/);
   assert.match(shell, /id="obsidian-status-badge"/);
   assert.match(shell, /id="tool-recipe-generate"/);
