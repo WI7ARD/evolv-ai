@@ -1,35 +1,20 @@
 # Evolv Sandbox SDK
 
-A proposed format for extending the simulation world with new object types,
-skills, and zones.
+How to extend the simulation world with new object types, skills, and zones.
 
-> **This is a design, not a feature.** No code reads this format. `objectTypes`
-> has never appeared anywhere in `lib/` or `server/` in the project's history,
-> and the pack system that 0.6.4 assumed would deliver extensions never carried
-> a `world` field either. `lib/world.mjs` exports frozen `ZONES` and `SKILLS`
-> literals — the set is written in the file and nothing extends it.
->
-> Removing packs in 0.6.5 therefore broke nothing here; it removed a delivery
-> vehicle this document had assumed and which had never been connected. What
-> follows is worth keeping because the constraints are the interesting part and
-> they have held up — but read it as a specification to build against, not as
-> instructions you can follow today.
+The contract is **declarative**, matching the Marketplace pack format. An
+extension is data: it names object types, the skills that may act on them, and
+where they appear. It carries no code and executes nothing. This is not a
+limitation to be worked around later — it is the reason a user can install one
+without auditing it.
 
-An extension would be data: it names object types, the skills that may act on
-them, and where they appear. It carries no code and executes nothing. This is not
-a limitation to be worked around later — it is the reason a user could install
-one without auditing it.
-
-Version the design targets: `WORLD_VERSION = 1` (`lib/world.mjs`).
+Version: `WORLD_VERSION = 1` (`lib/world.mjs`).
 
 ---
 
 ## The one rule
 
 **Everything drawn must be derived from something that happened.**
-
-This part is not aspirational — it is how `lib/world.mjs` already works, and it
-is the constraint any extension format has to inherit.
 
 `perceive(session)` is a pure function of a real sandbox session. It has no
 state of its own, no timers, and no random placement that varies between
@@ -96,7 +81,7 @@ availability on real state — `sandbox`, `validated`, `failed-check`.
 
 The tool layer stays the only thing that acts. A skill that could execute
 would be an executable plugin, which is a different security model with a much
-higher bar (see the roadmap, §11, where that route was closed).
+higher bar (see the roadmap, §11).
 
 ## Zones
 
@@ -108,33 +93,34 @@ Coordinates are percentages of the canvas. Zones must not overlap; the
 renderer clips objects to their zone, so an overlapping layout hides work
 rather than revealing it.
 
-## Delivery — unresolved
+## Packaging
 
-This is the open question, and it is the reason none of the above is built.
+A world extension ships inside a normal `.evolvpack` under `world`:
 
-Earlier drafts assumed a world extension would ship inside a `.evolvpack` under
-a `world` key. Packs were removed in 0.6.5 (roadmap §11) and had never
-implemented that key, so there is currently no answer to "where does an
-extension come from".
+```json
+{
+  "schemaVersion": 1,
+  "id": "evolv.migrations-world",
+  "name": "Migrations World",
+  "version": "1.0.0",
+  "minEvolvVersion": "0.6.3",
+  "permissions": [],
+  "world": {
+    "worldVersion": 1,
+    "zones": [ ... ],
+    "objectTypes": [ ... ],
+    "skills": [ ... ]
+  }
+}
+```
 
-What the answer must preserve, whatever it turns out to be:
-
-- **No permissions.** A declaration that reads existing records and draws them
-  grants nothing. Installing a world extension should never be a security
-  decision, and if a proposed delivery mechanism makes it one, that mechanism is
-  wrong for this.
-- **Validated before it renders**, against the rules below.
-- **Pulled, not pushed.** The same conclusion the roadmap reached about plugins
-  generally: build the install path when somebody wants to ship an extension,
-  not on the chance that they might.
-
-A file the user points at, validated on load, would satisfy all three and is
-considerably less machinery than a catalog.
+It needs no permissions. A declaration that reads existing records and draws
+them grants nothing, which is the point: installing a world extension should
+never be a security decision.
 
 ## Validation
 
-The validator does not exist yet. When it does, an extension should be rejected
-if it:
+An extension is rejected if it:
 
 - names a `derivedFrom` that is not a known record set;
 - names a tool that does not exist or is not enabled;
@@ -146,9 +132,8 @@ if it:
 ## Stability
 
 `WORLD_VERSION` changes when the shape of `perceive()` output changes.
-Extensions would declare the version they target and be refused against a build
-that does not implement it, rather than being silently half-rendered. The
-constant is real and lives in `lib/world.mjs`; the refusal is not built.
+Extensions declare the version they target and are refused against a build
+that does not implement it, rather than being silently half-rendered.
 
 ## What is deliberately absent
 

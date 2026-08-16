@@ -30,9 +30,10 @@ flowchart TB
     end
 
     subgraph renderer["Renderer — vanilla ES modules, no framework"]
-        app["app.js<br/>chat, projects, settings"]
+        app["app.js<br/>chat, settings, marketplace"]
         physicsui["physics.js<br/>canvas renderer"]
         labui["lab.js<br/>lab display"]
+        agentui["agent-workspace.js"]
         demoui["demo.js"]
     end
 
@@ -51,6 +52,7 @@ flowchart TB
         agent["Agent runtime<br/>agent-runtime.mjs"]
         obsidian["Obsidian service<br/>obsidian.mjs"]
         physics["Physics engine<br/>physics.mjs · headless Matter.js"]
+        market["Marketplace / packs<br/>marketplace*.mjs"]
         memory["Memory + projects<br/>memory.mjs · projects.mjs"]
     end
 
@@ -256,28 +258,27 @@ by accident, because it never holds a handle to one.
 | Risk ladder | `lib/tool-contracts.mjs` | the six-tier permission model above |
 | Tool batching | `lib/tool-batching.mjs` | groups a round's calls into concurrent batches of four |
 | Agent runtime | `lib/agent-runtime.mjs` | runs, steps, budgets, checkpoints, pause/resume, approvals |
-| Goal runner | `lib/goal-runner.mjs`, `lib/goal-contracts.mjs` | plan → verify → evidence for multi-step answers |
-| Escalation | `lib/goal-escalation.mjs` | decides, without calling a model, whether a message is work rather than a question |
-| Specialists | `lib/agents.mjs` | the roles a plan step can be executed as, and what each may reach |
+| Goal runner | `lib/goal-runner.mjs`, `lib/goal-contracts.mjs` | plan → verify → evidence for multi-step goals |
 | Obsidian | `lib/obsidian.mjs`, `lib/obsidian-vault.mjs` | indexes your vault, proposes edits as diffs |
 | Physics | `lib/physics.mjs`, `server/physics-routes.mjs` | headless Matter.js, perception, scene save/load |
 | Sandbox | `lib/sandbox.mjs`, `server/sandbox-routes.mjs` | disposable workspace for simulated edits |
+| Marketplace | `lib/marketplace*.mjs`, `lib/pack-dev.mjs` | the plugin system — signed packs, permission grants, install log |
 | Memory | `lib/memory.mjs` | memory nodes and edges, continual memory proposals |
 | Projects | `lib/projects.mjs` | project files, tasks, knowledge chunks, grants |
 | Evolution | `lib/evolution.mjs` | run evaluation, benchmark cases, failure patterns |
 | Secrets | `lib/secrets.mjs` | API keys, encrypted via OS keychain on desktop |
 | Schema | `lib/schema.mjs` | 78 tables, ordered migration ledger with SHA-256 checksums |
 
-### There is no plugin system
+### The plugin system
 
-There was one — signed `.evolvpack` files, a catalog, publisher trust, a
-permission review dialog — and it was removed in 0.6.5 along with the storefront
-that browsed it. It existed so that somebody could extend Evolv, and nobody was
-going to. The schema migrations that created its tables are still in place,
-because the ledger has to stay replayable; the tables are simply unused.
+Packs are the extension mechanism. A pack is signed, declares the permissions it
+wants, and gets only those — `lib/marketplace.mjs` holds the permission
+vocabulary, and a granted pack's tool calls carry `packPermissions` through to
+the registry, which filters the tool list before the model ever sees it. A pack
+that was not granted `models.send-files` does not get offered the tools that
+would read project files.
 
-Tools are defined in-process against `lib/tool-contracts.mjs`, and the risk
-ladder above is the whole permission model.
+---
 
 ## Not built yet
 

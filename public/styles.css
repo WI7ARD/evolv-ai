@@ -12,20 +12,6 @@
   --acid-soft: rgba(189, 255, 71, 0.11);
   --danger: #ff826e;
   --sidebar: 252px;
-
-  /* A scale, so spacing is chosen from a set rather than invented per rule.
-     The interface had 9px, 12px, 14px, 18px, 20px, 22px and 26px gaps doing
-     the same job in different places, which is why nothing lined up. */
-  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
-  /* Type: one step per role. Anything not on this list is a mistake. */
-  --t-micro: 9px;    /* monospace eyebrows and field labels */
-  --t-small: 11px;   /* secondary and supporting text */
-  --t-body: 13px;    /* everything you actually read */
-  --t-lead: 15px;
-  --t-title: 19px;   /* card headings */
-  --t-display: 30px; /* page headings */
-  --radius: 8px;
-  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--acid);
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 
@@ -182,8 +168,7 @@ body::before {
 }
 .controls { display: flex; gap: 18px; align-items: center; }
 .control { display: grid; gap: 4px; }
-.control > span, .version-pill > span, .field-label { color: var(--muted-2); font: var(--t-micro)/1.4 "DM Mono", monospace; letter-spacing: .14em; }
-.field-label { display: block; margin-bottom: var(--s2); }
+.control > span, .version-pill > span, .field-label { color: var(--muted-2); font: 8px "DM Mono", monospace; letter-spacing: .14em; }
 select {
   appearance: none; min-width: 165px; border: 0; color: var(--text); background: transparent;
   padding: 2px 25px 2px 0; font-size: 12px;
@@ -372,9 +357,9 @@ html.tts-speaking .mobile-brand img { animation: circuit-voice-core .46s ease-in
 .mode-guide-card strong { font-size: 12px; }
 .mode-guide-card small { color: var(--muted); font-size: 9px; line-height: 1.5; }
 .mind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.mind-card { min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--panel); padding: var(--s5); display: grid; gap: var(--s3); align-content: start; }
+.mind-card { min-width: 0; border: 1px solid var(--line-soft); background: var(--panel); padding: 22px; }
 .mind-card-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
-.mind-card-heading h2 { margin: 0; font-size: var(--t-title); font-weight: 500; letter-spacing: -.01em; }
+.mind-card-heading h2 { margin: 0; font-size: 18px; font-weight: 500; }
 .mind-explainer { color: var(--muted); font-size: 11px; line-height: 1.6; }
 .stack-form { display: grid; gap: 9px; margin: 18px 0 22px; }
 .stack-form input, .stack-form textarea {
@@ -403,8 +388,7 @@ html.tts-speaking .mobile-brand img { animation: circuit-voice-core .46s ease-in
 .tool-meta { color: var(--acid); font: 8px "DM Mono", monospace; }
 .tool-master-toggle { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
 .tool-master-toggle input, .tool-switch input { accent-color: var(--acid); }
-.tool-switch { display: flex; align-items: center; gap: var(--s2); color: var(--muted); font-size: var(--t-body); line-height: 1.45; }
-.tool-switch input { flex: 0 0 auto; width: 15px; height: 15px; margin: 0; }
+.tool-switch { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; }
 .tool-run-card.failed { border-color: rgba(255,130,110,.3); }
 
 dialog { width: min(440px, calc(100% - 30px)); padding: 0; color: var(--text); background: transparent; border: 0; }
@@ -415,10 +399,10 @@ dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(4px); }
 .dialog-close { border: 0; background: transparent; color: var(--muted); font-size: 25px; }
 .range-label > span { display: flex; justify-content: space-between; font-size: 12px; }
 .range-label output { color: var(--acid); font: 11px "DM Mono", monospace; }
-.range-label small, .settings-note { color: var(--muted-2); font-size: var(--t-small); }
+.range-label small, .settings-note { color: var(--muted-2); font-size: 10px; }
 input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; }
 .settings-card select { width: 100%; border: 1px solid var(--line); padding: 11px; margin-top: 8px; background-color: #0c0e0e; }
-.settings-note { line-height: 1.6; margin: 0; max-width: 68ch; }
+.settings-note { line-height: 1.55; margin: 0; }
 .voice-settings-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .voice-settings-heading .settings-note { margin-top: 5px; }
 .status-pill { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; color: var(--muted-2); font: 8px "DM Mono", monospace; text-transform: uppercase; }
@@ -691,10 +675,7 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .failure-pattern-item { cursor: pointer; }
 .failure-pattern-item input { accent-color: var(--accent); }
 .intelligence-settings-card { align-content: start; gap: 14px; }
-/* :not(.tool-switch) matters: a switch is a row, and this rule used to win on
-   specificity and turn every one of them into a two-line grid with the box
-   floating above its own label. */
-.intelligence-settings-card > label:not(.tool-switch) { display: grid; gap: var(--s2); }
+.intelligence-settings-card > label { display: grid; gap: 6px; }
 .intelligence-settings-card input[type="number"], .intelligence-settings-card select { width: 100%; border: 1px solid var(--line); background: #0b0e0d; color: var(--text); padding: 9px; }
 .intelligence-models, .memory-proposal-list, .routing-history, .evaluation-history { display: grid; gap: 8px; margin-top: 12px; }
 .intelligence-model { display: grid; grid-template-columns: minmax(140px, 1fr) auto repeat(4, 54px) auto; align-items: end; gap: 7px; border: 1px solid var(--line-soft); padding: 9px; }
@@ -1066,103 +1047,3 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .world-canvas { display: block; width: 100%; height: 300px; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; margin: 14px 0 10px; }
 .world-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
 .world-skills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-
-/* A run happening inside a conversation. Folded shut by default: the person
-   asked a question and is waiting for an answer, not supervising a process. */
-.goal-progress { margin: 0 0 10px; border-left: 2px solid var(--line); padding: 0 0 0 10px; }
-.goal-progress > summary { display: flex; justify-content: space-between; gap: 10px; cursor: pointer; list-style: none; align-items: baseline; }
-.goal-progress > summary::-webkit-details-marker { display: none; }
-.goal-progress > summary strong { font-size: 11px; font-weight: 500; }
-.goal-progress > summary span { color: var(--muted-2); font: 8px "DM Mono", monospace; letter-spacing: 0.08em; }
-.goal-steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
-.goal-step { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: baseline; font-size: 11px; color: var(--muted); }
-.goal-step-mark { color: var(--muted-2); font: 10px "DM Mono", monospace; }
-.goal-step.is-running { color: var(--text); }
-.goal-step.is-running .goal-step-mark { color: var(--acid); }
-.goal-step.is-done .goal-step-mark { color: var(--acid); }
-.goal-step.is-unmet .goal-step-mark, .goal-step.is-failed .goal-step-mark { color: #d6a84a; }
-.goal-step-agent { color: var(--muted-2); font: 8px "DM Mono", monospace; letter-spacing: 0.08em; text-transform: uppercase; }
-.goal-criteria { margin-top: 10px; }
-.goal-criteria ul { margin: 4px 0 0; padding-left: 16px; color: var(--muted); font-size: 11px; display: grid; gap: 2px; }
-.goal-why { margin: 8px 0 0; color: var(--muted-2); font-size: 10px; line-height: 1.5; }
-
-/* Settings sections. One destination with a tab rail, rather than five
-   top-level entries whose names had to be learned before they meant anything. */
-.settings-tabs { display: flex; gap: 2px; margin: 0 0 22px; border-bottom: 1px solid var(--line-soft); }
-.settings-tab {
-  background: transparent; border: 0; border-bottom: 2px solid transparent;
-  padding: 9px 14px; color: var(--muted); font-size: 12px; letter-spacing: .01em;
-}
-.settings-tab:hover { color: var(--text); }
-.settings-tab.active { color: var(--text); border-bottom-color: var(--acid); }
-.settings-tab:focus-visible { outline: 2px solid var(--acid); outline-offset: -2px; }
-.settings-section.hidden { display: none; }
-.settings-section-lede { margin: 0 0 20px; max-width: 62ch; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.section-lead-control { display: inline-flex; margin: 0 0 18px; }
-/* The one starter that is an action rather than a sentence to send. */
-.starter-spark { border-style: dashed; color: var(--acid); }
-
-/* ─────────────────────────────────────────────────────────────────────────
-   Rhythm.
-
-   The interface was built one card at a time over months, so each card set
-   its own spacing and the page never lined up down a column. This layer sets
-   the shared behaviour once, at the end, where it can be read as a set of
-   decisions rather than found scattered through 1,000 lines.
-   ───────────────────────────────────────────────────────────────────────── */
-
-.panel-view { padding: var(--s7) var(--s6) var(--s6); }
-.panel-header { margin-bottom: var(--s6); gap: var(--s5); }
-.panel-header h1 { margin: 0 0 var(--s2); font-size: var(--t-display); font-weight: 500; letter-spacing: -.02em; }
-.panel-header p { margin: 0; max-width: 66ch; color: var(--muted); font-size: var(--t-body); line-height: 1.6; }
-
-/* Cards sit on one grid with one gutter, whatever they contain. */
-.intelligence-grid, .tools-layout, .settings-section > .stats-grid { gap: var(--s4); margin-bottom: var(--s4); }
-.settings-section > .mind-card { margin-bottom: var(--s4); }
-
-/* Controls. Every input answers to the same shape, so a number field and a
-   select no longer disagree about their own height. */
-.stack-form { gap: var(--s3); margin: var(--s4) 0 var(--s5); }
-.stack-form input, .stack-form textarea, .stack-form select,
-.intelligence-settings-card input[type="number"], .intelligence-settings-card select {
-  border-radius: 6px; padding: 9px 11px; font-size: var(--t-body);
-}
-/* A number is a few characters wide. Stretching one across a card made the
-   monthly cost limit look like a search box. */
-.intelligence-settings-card input[type="number"] { width: 10ch; }
-
-/* One visible focus treatment across the whole interface, rather than the
-   browser default in some places and nothing in others. */
-:where(button, select, textarea, input, [tabindex]):focus-visible {
-  outline: none; box-shadow: var(--focus); border-radius: 4px;
-}
-
-/* Reach labels sat inline and read as part of the sentence before them —
-   "records where each fact came from. READS ONLY". They are metadata. */
-.agent-model-pin .reach { display: block; margin-top: var(--s1); }
-.agent-model-pin { gap: var(--s4); padding: var(--s3) 0; border-top: 1px solid var(--line-soft); }
-.agent-model-pin:first-of-type { border-top: 0; }
-.agent-model-pin small { display: block; margin-top: 2px; line-height: 1.5; }
-
-@media (prefers-reduced-motion: no-preference) {
-  .view.active { animation: view-in .18s ease-out; }
-  @keyframes view-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-}
-
-/* Cards size to their own content. Stretching a short card to match a tall
-   neighbour left a third of it empty and made the column look broken. */
-.intelligence-grid { align-items: start; }
-/* A button is as wide as its label. Full-width primary buttons read as banners
-   and made "Save" look like the most important thing on the page. */
-.mind-card > .primary-button, .mind-card > .secondary-button,
-.stack-form > button { justify-self: start; padding-inline: var(--s5); }
-
-/* Tools. Forty tools in a half-width column beside an empty activity pane made
-   a five-thousand-pixel page where the thing you came for was the narrow half.
-   The list gets the room; activity is a sidebar, and the list itself wraps
-   instead of running straight down. */
-.tools-layout { grid-template-columns: minmax(0, 2.2fr) minmax(240px, 1fr); gap: var(--s5); margin-top: var(--s5); align-items: start; }
-.tools-layout #tools-list { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--s3); }
-.tools-layout #tools-list > * { border-radius: 6px; }
-.preview-label { margin-top: var(--s5); }
-@media (max-width: 1100px) { .tools-layout { grid-template-columns: 1fr; } }

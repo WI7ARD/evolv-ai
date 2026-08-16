@@ -212,7 +212,7 @@ When connected, the vault is the authoritative memory source. Existing Evolv mem
 
 ## Project memory
 
-**Settings → Memory** holds a small graph of typed records — projects, tasks, decisions, preferences, and notes — that persist across conversations and accounts' isolated databases. Active project and task records are always in context (your current focus), and other records are retrieved semantically per message, exactly like knowledge. Records can be linked to each other, and the model sees those links.
+The Mind Studio's **Project memory** panel holds a small graph of typed records — projects, tasks, decisions, preferences, and notes — that persist across conversations and accounts' isolated databases. Active project and task records are always in context (your current focus), and other records are retrieved semantically per message, exactly like knowledge. Records can be linked to each other, and the model sees those links.
 
 For plain `npm start`, memory remains manually Obsidian-compatible without granting external-folder access. Writing `[[Title]]` inside a record's text creates graph links. **Export Obsidian vault** writes Markdown notes into the profile data folder, and **Import vault…** reads selected `.md` notes back non-destructively. Use Evolv.exe for the dedicated live vault described above.
 
@@ -273,7 +273,7 @@ are processed inside the browser and are not uploaded to the Node server.
 
 ## Knowledge and cognitive modes
 
-**Settings → Memory** lets you add knowledge under General, Project, NLP, Computer
+The Mind Studio lets you add knowledge under General, Project, NLP, Computer
 Vision, Machine Learning, Deep Learning, Creative, and preference domains.
 Evolv embeds approved records with `nomic-embed-text:latest` and retrieves the
 most relevant records for each chat request. If that embedding model is not
@@ -324,42 +324,44 @@ Type `/sandbox` in chat to review open simulations, run their checks, or
 discard them. While any simulation is open, Evolv says so — the project on
 disk is unchanged until you say otherwise.
 
-## Answers that take more than one step
+## Verified goal runner
 
-Some questions are jobs. Ask Evolv to check something across a whole project, or
-to establish a fact rather than recall one, and it works through it in several
-steps instead of replying off the top of its head: it looks things up, reasons
-over what it found, and checks the result against what you asked for before
-answering.
+Type `/agent` in the chat box to plan and run a bounded goal; `/agent <goal>`
+drafts the objective in one step. The command is handled in the browser and is
+never sent to a model.
 
-There is nothing to turn on and no form to fill in. Evolv decides, in the
-conversation, using a text-only rule that calls no model — so an ordinary
-question never pays a round trip to discover it was ordinary. It is deliberately
-reluctant: it wants two independent signs that a message spans a corpus or asks
-for something to be established, and it refuses outright when there is no
-project folder or vault to work over.
+You state the outcome and its success criteria, and a model of your choice
+proposes a structured plan. Nothing runs until you have read that plan and
+approved it — and you can edit it first. Safe local reads then proceed on their
+own, while network research, file changes, engineering checks, and Obsidian
+note changes each stop for their own approval. A run completes only when a
+final verification step records evidence for the original criteria; a model
+answer without evidence is reported as partial or failed, never as success.
 
-Each step is given to whichever role suits it — a researcher that gathers and
-cites, an analyst that reasons over what was gathered, a critic that checks the
-claims against your criteria, a writer that produces the answer. Each role has
-its own reach: the critic can read but never change anything, because a judge
-that can alter what it is judging is not a judge. Any of them can be pinned to
-its own model, since checking an answer is worth more than searching a folder.
+Runs are durable: they survive a restart, can be paused, resumed, replanned,
+or cancelled, and each keeps its own step history, evidence, and budget.
 
-A plan that only reads starts on its own — reading is what answering a question
-already does. A plan that would change a file stops and shows itself first, and
-every individual change stops again at its own approval gate. A run finishes
-only when a verification step records evidence for the original criteria; an
-answer without evidence is reported as partial, never as success.
+## Evolv Marketplace
 
-The steps appear under the reply as they happen, and the reply is what the run
-produced. Runs are durable: they survive a restart, and can be paused, resumed,
-replanned or cancelled.
+Marketplace turns Evolv into a modular, local-first capability platform. The
+bundled offline catalog includes Arduino Debugger, Linux Repair Agent,
+Repository Auditor, UI Critic, Local AI Setup Assistant, Motorcycle
+Maintenance Assistant, Small Business Knowledge Assistant, and Game
+Development Assistant.
 
-Whether any of this actually helps is measured rather than assumed. Turning the
-roles off runs every step as one voice, and **Settings → Learning** compares
-answers given both ways — completion, sources, tool reliability, your ratings,
-cost — and refuses to draw a conclusion until there are enough of each.
+Packs are declarative: they may register specialist agents, prompt commands,
+workflows, knowledge, documentation, and validated configuration, but cannot
+execute JavaScript, shell commands, packages, or installation hooks. Every
+permission is shown before installation; update permissions require fresh
+approval. Installed state and encrypted pack secrets are isolated per profile.
+
+Open **Marketplace** in the sidebar to browse, search, install, configure,
+disable, update, export, or uninstall packs. Developer Mode validates local
+`.evolvpack` files and generates complete starter packs.
+
+- [Marketplace architecture](docs/MARKETPLACE.md)
+- [Pack format and manifest](docs/PACK_FORMAT.md)
+- [Pack development tutorial](docs/PACK_DEVELOPMENT.md)
 
 ## Configuration
 

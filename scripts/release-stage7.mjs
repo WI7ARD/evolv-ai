@@ -37,18 +37,14 @@ requireText("public/styles.css", [
   /\.conversation-list\s*\{[\s\S]*overflow:\s*visible/
 ]);
 requireText("public/app.js", [
-  /renderGoalProgress/,
+  /marketplaceInstallInFlight/,
+  /verified\.installedRecord/,
   /\/api\/projects\/demo/
 ]);
 requireText("server.mjs", [/\/api\/projects\/demo/, /projectService\.createDemo/]);
-// "Linux Mint" was a 0.5-era requirement, from when the Linux binary had to be
-// produced on that distribution by hand. The release now builds an AppImage in
-// CI, so requiring the guide to name Mint would force it to say something
-// untrue. What still matters is that the guide covers getting back in and
-// getting it running on Linux.
-requireText("docs/USER-GUIDE.md", [/[Rr]ecovery/, /AppImage/]);
+requireText("docs/USER-GUIDE.md", [/Marketplace/, /Recovery/, /Linux Mint/]);
 requireText("docs/RECOVERY.md", [/backup/i, /recovery code/i, /integrity/i]);
-requireText("docs/RELEASE-NOTES-0.5.0-PERSONAL.md", [/0\.5\.0/, /sidebar/i]);
+requireText("docs/RELEASE-NOTES-0.5.0-PERSONAL.md", [/0\.5\.0/, /pack install/i, /sidebar/i]);
 requireText("docs/STAGE-7-RELIABILITY-RELEASE.md", [/Windows package/, /Linux/, /not verified/i]);
 requireText(".itch.toml", [/path\s*=\s*"Evolv\.exe"/, /platform\s*=\s*"windows"/]);
 requireText(".itch-linux.toml", [/path\s*=\s*"Evolv"/, /platform\s*=\s*"linux"/]);
