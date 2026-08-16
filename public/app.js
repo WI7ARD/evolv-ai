@@ -1635,19 +1635,19 @@ async function refreshIntelligence({ refreshModels = false } = {}) {
 }
 
 const COHORT_ROWS = [
-  ["Runs", (cohort) => cohort.runs],
-  ["Completed", (cohort) => (cohort.completionRate == null ? "—" : `${Math.round(cohort.completionRate * 100)}% of ${cohort.finishedRuns}`)],
-  ["Cited evidence", (cohort) => (cohort.groundingRate == null ? "—" : `${Math.round(cohort.groundingRate * 100)}%`)],
-  ["Tool reliability", (cohort) => (cohort.toolReliability == null ? "—" : `${Math.round(cohort.toolReliability * 100)}%`)],
-  ["Tool calls per run", (cohort) => (cohort.toolCalls == null ? "—" : cohort.toolCalls)],
+  ["Answers", (cohort) => cohort.runs],
+  ["Finished the job", (cohort) => (cohort.completionRate == null ? "—" : `${Math.round(cohort.completionRate * 100)}% of ${cohort.finishedRuns}`)],
+  ["Showed its sources", (cohort) => (cohort.groundingRate == null ? "—" : `${Math.round(cohort.groundingRate * 100)}%`)],
+  ["Tools that worked", (cohort) => (cohort.toolReliability == null ? "—" : `${Math.round(cohort.toolReliability * 100)}%`)],
+  ["Tools used each time", (cohort) => (cohort.toolCalls == null ? "—" : cohort.toolCalls)],
   ["Your rating", (cohort) => (cohort.meanRating == null ? "unrated" : `${cohort.meanRating} over ${cohort.ratedRuns}`)],
-  ["Cost units per run", (cohort) => (cohort.meanCostUnits == null ? "—" : cohort.meanCostUnits)],
-  ["Latency", (cohort) => (cohort.meanLatencyMs == null ? "—" : `${Math.round(cohort.meanLatencyMs / 100) / 10}s`)]
+  ["What it cost each time", (cohort) => (cohort.meanCostUnits == null ? "—" : cohort.meanCostUnits)],
+  ["How long it took", (cohort) => (cohort.meanLatencyMs == null ? "—" : `${Math.round(cohort.meanLatencyMs / 100) / 10}s`)]
 ];
 
 const GAP_LABEL = {
-  completionRate: "Completion rate", groundingRate: "Cited evidence",
-  toolReliability: "Tool reliability", rating: "Your rating", costUnits: "Cost per run"
+  completionRate: "Finished the job", groundingRate: "Showed its sources",
+  toolReliability: "Tools that worked", rating: "Your rating", costUnits: "What it cost"
 };
 
 async function renderSpecialistComparison() {
@@ -1662,7 +1662,7 @@ async function renderSpecialistComparison() {
   }
   container.innerHTML = `
     <table class="specialist-table">
-      <thead><tr><th></th><th>Specialists</th><th>One voice</th></tr></thead>
+      <thead><tr><th></th><th>With roles</th><th>Without</th></tr></thead>
       <tbody>${COHORT_ROWS.map(([label, read]) => `
         <tr><th scope="row">${escapeHtml(label)}</th>
           <td>${escapeHtml(String(read(report.cohorts.specialists)))}</td>
@@ -1676,7 +1676,7 @@ async function renderSpecialistComparison() {
   $("#specialist-gaps").innerHTML = showable.length ? showable.map(([metric, gap]) => `
     <div class="route-history-item${gap.separated ? " is-separated" : ""}">
       <strong>${escapeHtml(GAP_LABEL[metric] || metric)}</strong>
-      <p>${gap.delta > 0 ? "+" : ""}${escapeHtml(String(Math.round(gap.delta * 1000) / 1000))} with specialists · z ${escapeHtml(String(Math.round(gap.z * 100) / 100))} · ${gap.separated ? "separated from its own noise" : "inside its own noise"}</p>
+      <p>${gap.delta > 0 ? "+" : ""}${escapeHtml(String(Math.round(gap.delta * 1000) / 1000))} with roles · z ${escapeHtml(String(Math.round(gap.z * 100) / 100))} · ${gap.separated ? "separated from its own noise" : "inside its own noise"}</p>
     </div>`).join("") : "";
   const method = $("#specialist-method");
   if (method) {
@@ -1688,9 +1688,9 @@ async function renderSpecialistComparison() {
 
 // What each specialist may reach, said in words rather than a policy name.
 const REACH_LABEL = {
-  all: "reads, and may propose changes",
-  read: "reads only",
-  none: "no tools — reasons over what other steps found"
+  all: "can read, and can suggest changes",
+  read: "can only read",
+  none: "no tools — works from what the other steps found"
 };
 
 async function renderAgentModelPins() {
@@ -1712,7 +1712,7 @@ async function renderAgentModelPins() {
           <span class="reach">${escapeHtml(REACH_LABEL[agent.tools] || agent.tools || "")}</span>
         </label>
         <select id="agent-model-${escapeHtml(agent.id)}" data-agent-model="${escapeHtml(agent.id)}">
-          <option value="">The goal's own model</option>
+          <option value="">Same model as the rest</option>
           ${options.map((value) => `<option value="${escapeHtml(value)}"${value === agent.model ? " selected" : ""}>${escapeHtml(value)}</option>`).join("")}
         </select>
       </div>`;
@@ -2815,7 +2815,7 @@ function renderVersions() {
         body: JSON.stringify({ versionId: button.dataset.id })
       });
       await refreshState();
-      toast("Earlier mind restored.");
+      toast("Restored an earlier version of how Evolv behaves.");
     } catch (error) {
       toast(error.message, "error");
     }
@@ -3164,7 +3164,7 @@ async function extractMemoryFromChat() {
     return;
   }
   if (!elements.model.value || elements.model.value === "auto") {
-    toast("Choose a specific model for manual memory extraction.", "error");
+    toast("Pick a specific model at the top first.", "error");
     return;
   }
   const button = $("#memory-extract");
@@ -3350,7 +3350,7 @@ function renderMacros() {
     try {
       await api(`/api/tool-macros/${encodeURIComponent(button.dataset.id)}`, { method: "DELETE" });
       await refreshMacros();
-      toast("Composite tool deleted.");
+      toast("Bundle deleted.");
     } catch (error) {
       toast(error.message, "error");
     }
@@ -3371,7 +3371,7 @@ function renderMacros() {
             method: "POST", body: "{}"
           });
           await refreshMacros();
-          toast("Generated tool rolled back to the selected approved version.");
+          toast("Tool rolled back to the version you picked.");
         } catch (error) { toast(error.message, "error"); }
       }));
     } catch (error) { toast(error.message, "error"); }
@@ -3381,7 +3381,7 @@ function renderMacros() {
 async function designArchitecture(event) {
   event.preventDefault();
   if (!elements.model.value || elements.model.value === "auto") {
-    toast("Choose a specific model to design an architecture proposal.", "error");
+    toast("Pick a specific model at the top first.", "error");
     return;
   }
   const button = $("#architecture-propose");
@@ -3398,7 +3398,7 @@ async function designArchitecture(event) {
     });
     event.currentTarget.reset();
     await refreshState();
-    toast("Architecture proposal created. No files were changed.");
+    toast("Suggestion written down. Nothing was changed.");
   } catch (error) {
     toast(error.message, "error");
   } finally {
@@ -3510,7 +3510,7 @@ function bindEvents() {
       localStorage.setItem("evolv:active-project", project.id);
       form.reset();
       await refreshProjects();
-      toast("Project created. Connect its folder when you want Evolv to read project files.");
+      toast("Project created. Connect a folder when you want Evolv to read your files.");
     } catch (error) { toast(error.message, "error"); }
   });
   $("#project-connect-folder")?.addEventListener("click", async () => {
@@ -3522,7 +3522,7 @@ function bindEvents() {
       if (picked.canceled) return;
       await api(`/api/projects/${encodeURIComponent(project.id)}/connect`, { method: "POST", body: JSON.stringify({ grant: picked.grant }) });
       await refreshProjects();
-      toast("Project folder connected. Evolv still needs your approval before any write.");
+      toast("Folder connected. Evolv can read it, and still needs your approval before changing anything.");
     } catch (error) { toast(error.message, "error"); }
   });
   $("#project-sync-files")?.addEventListener("click", async (event) => {
@@ -3659,7 +3659,7 @@ function bindEvents() {
         })
       });
       await refreshIntelligence();
-      toast("Intelligence settings saved.");
+      toast("Saved.");
     } catch (error) { toast(error.message, "error"); }
   });
   // Saved the moment it is flipped rather than under the button below it: that
@@ -3671,8 +3671,8 @@ function bindEvents() {
       await api("/api/intelligence/settings", { method: "PATCH", body: JSON.stringify({ agentSpecialists: enabled }) });
       await refreshIntelligence();
       toast(enabled
-        ? "Goal steps are shared out between specialists."
-        : "Goals now run as one voice. Runs started from here go into the control column.");
+        ? "Evolv will use different roles for different steps."
+        : "Evolv will use one role for every step. Answers from now on go in the comparison's second column.");
     } catch (error) {
       event.target.checked = !enabled;
       toast(error.message, "error");
@@ -3686,7 +3686,7 @@ function bindEvents() {
       await api("/api/settings", { method: "PATCH", body: JSON.stringify({ agentModels }) });
       await renderAgentModelPins();
       const pinned = Object.values(agentModels).filter(Boolean).length;
-      toast(pinned ? `Saved. ${pinned} specialist${pinned === 1 ? "" : "s"} pinned to a model.` : "Saved. Every specialist uses the goal's own model.");
+      toast(pinned ? `Saved. ${pinned} role${pinned === 1 ? "" : "s"} now use their own model.` : "Saved. Every role uses the same model as the rest.");
     } catch (error) { toast(error.message, "error"); }
   });
   $("#intelligence-models")?.addEventListener("click", async (event) => {
@@ -3701,7 +3701,7 @@ function bindEvents() {
         method: "PATCH", body: JSON.stringify(preference)
       });
       await refreshIntelligence();
-      toast("Auto model preference saved.");
+      toast("Saved.");
     } catch (error) { toast(error.message, "error"); }
   });
   $("#memory-proposal-list")?.addEventListener("click", async (event) => {
@@ -3737,7 +3737,7 @@ function bindEvents() {
       });
       event.currentTarget.reset();
       await refreshIntelligence();
-      toast("Candidate saved for testing. Nothing was activated.");
+      toast("Saved. Run it against the current behaviour when you are ready — nothing has changed yet.");
     } catch (error) { toast(error.message, "error"); }
   });
   $("#strategy-version-list")?.addEventListener("click", async (event) => {
@@ -3748,7 +3748,7 @@ function bindEvents() {
       if (event.target.closest(".benchmark-strategy")) {
         const provider = elements.provider.value;
         const model = elements.model.value;
-        if (!model || model === "auto") return toast("Choose a specific model in the top bar before benchmarking.", "error");
+        if (!model || model === "auto") return toast("Pick a specific model at the top before running this — Auto cannot be compared against itself.", "error");
         const cloud = provider !== "ollama";
         const warning = `This runs 5 fixed cases against the baseline and candidate (10 model calls).${cloud ? " Your cloud provider may charge for all 10 calls." : " It will use your local model."} Continue?`;
         if (!window.confirm(warning)) return;
@@ -3759,7 +3759,7 @@ function bindEvents() {
           method: "POST", body: JSON.stringify({ provider, model })
         });
         await refreshIntelligence();
-        toast("Benchmark complete. Review the measured comparison before approval.");
+        toast("Both versions have answered. Compare them below before you keep either.");
       } else if (event.target.closest(".approve-strategy")) {
         await api(`/api/evolution/strategies/${encodeURIComponent(strategyId)}/decision`, {
           method: "POST", body: JSON.stringify({ decision: "approved", benchmarkRunId: card.dataset.benchmarkId })
@@ -3771,7 +3771,7 @@ function bindEvents() {
           method: "POST", body: JSON.stringify({ decision: "rejected" })
         });
         await refreshIntelligence();
-        toast("Candidate rejected. Active behavior was not changed.");
+        toast("Discarded. Evolv still behaves the way it did.");
       }
     } catch (error) {
       await refreshIntelligence().catch(() => {});
@@ -3783,7 +3783,7 @@ function bindEvents() {
     try {
       await api("/api/evolution/rollback", { method: "POST", body: "{}" });
       await refreshIntelligence();
-      toast("Previous approved strategy restored.");
+      toast("Rolled back to how Evolv behaved before.");
     } catch (error) { toast(error.message, "error"); }
   });
   $("#approve-selected-memories")?.addEventListener("click", async () => {
@@ -4044,9 +4044,9 @@ function bindEvents() {
   });
   $("#tool-recipe-generate")?.addEventListener("click", async () => {
     const request = $("#tool-recipe-request").value.trim();
-    if (!request) return toast("Describe the tool you want to generate.", "error");
+    if (!request) return toast("Say what you want the tool to do.", "error");
     const recipeModel = $("#tool-recipe-model").value;
-    if (!recipeModel) return toast("Choose a specific model to generate a recipe.", "error");
+    if (!recipeModel) return toast("Pick a specific model at the top first.", "error");
     const button = $("#tool-recipe-generate");
     button.disabled = true;
     button.textContent = "Generating recipe...";

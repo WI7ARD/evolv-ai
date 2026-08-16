@@ -61,14 +61,14 @@ test("serves the application shell", async () => {
   for (const section of ["answers", "memory", "tools", "learning"]) {
     assert.match(shell, new RegExp(`data-section="${section}"`));
   }
-  assert.match(shell, /Memory Inbox/);
+  assert.match(shell, /Things Evolv wants to remember/);
   assert.match(shell, /id="obsidian-status-badge"/);
   assert.match(shell, /id="tool-recipe-generate"/);
   assert.match(shell, /\/assets\/evolv-logo\.png/);
-  assert.match(shell, /CLOUD PROVIDERS ALLOWED TO RECEIVE VAULT EXCERPTS/);
-  assert.match(shell, /Run evidence/);
-  assert.match(shell, /Strategy lab/);
-  assert.match(shell, /Were specialists worth it/);
+  assert.match(shell, /CLOUD PROVIDERS THAT MAY SEE YOUR NOTES/);
+  assert.match(shell, /How answers actually went/);
+  assert.match(shell, /Test a change to how Evolv behaves/);
+  assert.match(shell, /Were the roles worth it/);
   // The shell no longer carries a storefront or a goal form. A run happens in
   // the conversation, so there is nothing else to serve for it.
   assert.doesNotMatch(shell, /agent-workspace\.js/);

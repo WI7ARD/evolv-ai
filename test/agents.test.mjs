@@ -165,7 +165,7 @@ test("the roster is settable in the interface, from the server's own list", asyn
   // Clearing a pin has to be a change, not an omission.
   assert.match(app, /\$\$\("\[data-agent-model\]"\)/);
   // What each specialist may reach, in words rather than a policy name.
-  assert.match(app, /reasons over what other steps found/);
+  assert.match(app, /works from what the other steps found/);
 });
 
 test("the runner executes each step as the specialist the plan assigned", async () => {
