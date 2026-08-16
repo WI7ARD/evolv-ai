@@ -1,11 +1,21 @@
 # Evolv — Architecture and Roadmap
 
-Written against the code as it stands at `0.6.3`, not a blank page. Evolv is
-roughly 30,000 lines of working software, and a large part of what the brief
-asks for in Phase 1 is already built. The useful version of this document is
-therefore not a greenfield design; it is an honest inventory, a set of gaps,
-and an argued opinion about three decisions in the brief that would damage the
-product if taken literally.
+Written against the code at `0.6.3`, revised at `0.6.5`. Evolv is roughly
+30,000 lines of working software, and a large part of what the brief asks for in
+Phase 1 is already built. The useful version of this document is therefore not a
+greenfield design; it is an honest inventory, a set of gaps, and an argued
+opinion about the decisions in the brief that would damage the product if taken
+literally.
+
+Two of those decisions have since been made, and this document records what was
+decided rather than quietly agreeing with itself after the fact:
+
+- **Plugins.** §11 laid out route A (stay declarative) and route B (executable
+  plugins) and said to choose deliberately. The choice was neither: the pack
+  system and the Marketplace that browsed it were **removed** in 0.6.5.
+- **Multi-agent.** §8 proposed more executors behind one runtime. What shipped
+  is narrower and, on the evidence, better: **roles inside the single executor**.
+  §8 explains the difference and why.
 
 ---
 
@@ -26,8 +36,8 @@ narrower and more specific than "build the safest AI workspace possible".
 | Crash recovery | **Done** | Startup reconciliation closes interrupted messages, runs, leases |
 | Memory system / Obsidian | **Done** | Live-indexed vault, embeddings + lexical fallback, BYO vault, one vault per profile |
 | Secret protection | **Done** | `logger.redactLogValue`, secret-name path denial, write-only encrypted provider keys |
-| Plugin architecture | **Done, deliberately declarative** | Signed `.evolvpack`, no JS/shell/install hooks |
-| Multi-agent runtime substrate | **Partial** | 11-state machine, plans, steps, evidence, budgets, leases — one executor |
+| Plugin architecture | **Removed at 0.6.5** | Was signed `.evolvpack` with no JS/shell/install hooks; taken out because nobody was going to write one (§11) |
+| Multi-agent runtime substrate | **Done at 0.6.5** | 11-state machine, plans, steps, evidence, budgets, leases; five specialist roles inside one executor, each with its own reach and optional model (§8) |
 | Snapshots / unlimited undo | **Gap** | Vault changes have undo; **project files do not** |
 | Git commit before risky edits | **Gap** | Git is read-only (`status`, `diff`) |
 | Post-edit validation with auto-revert | **Gap** | Validation exists, but as a separately approved action, not a gate |
@@ -66,7 +76,7 @@ lowering its resolution would be a regression.
 └──────────────┬─────────────────────────────────────────────┘
                │ narrow IPC (no fs, no shell, no process)
 ┌─ Renderer (sandboxed) ─────────────────────────────────────┐
-│ chat · approvals · rollback timeline · runs · marketplace   │
+│ chat · approvals · rollback timeline · runs · settings      │
 └──────────────┬─────────────────────────────────────────────┘
                │ authenticated loopback HTTP + NDJSON
 ┌─ Server ───────────────────────────────────────────────────┐
@@ -76,7 +86,7 @@ lowering its resolution would be a regression.
                │
 ┌─ Domain services ──────────────────────────────────────────┐
 │ providers │ tools │ approvals │ agent-runtime │ goal-runner │
-│ memory │ vault │ projects │ marketplace │ evolution         │
+│ memory │ vault │ projects │ evolution │ escalation          │
 │                                                             │
 │ NEW: snapshots │ shadow-workspace │ validation │ replay      │
 └──────────────┬─────────────────────────────────────────────┘
@@ -121,7 +131,9 @@ lib/
   approvals.mjs      one approval envelope for every effect
   tool-contracts.mjs risk ladder, signals, dry-run policy
   agent-runtime.mjs  run/plan/step state machine
-  goal-runner.mjs    the first executor behind that runtime
+  goal-runner.mjs    the only executor behind that runtime
+  goal-escalation.mjs pure rule: is this message work or a question?
+  agents.mjs         the roles a step may be executed as
   snapshots.mjs      NEW  content-addressed capture and restore
   blob-store.mjs     NEW  sha256 → file, shared by snapshots and attachments
   shadow.mjs         NEW  copy-on-write overlay, promote/discard
@@ -129,7 +141,6 @@ lib/
   replay.mjs         NEW  ordered session reconstruction
 server/              route modules, split by domain as they grow
 public/              renderer (vanilla ESM, no build step)
-packs/               bundled marketplace packs
 docs/                stage documents and this roadmap
 ```
 
@@ -187,12 +198,15 @@ tests/lint/build run there, failure discards, success offers promotion.
 **M5 — Context engine.** Active file, recent git history, open project files,
 prior turns — assembled with a token budget rather than repeated prompting.
 
-**M6 — Multi-agent roles.** Sequential, specialised executors behind the
-existing runtime, sharing one approval envelope.
+**M6 — Multi-agent roles. Shipped at 0.6.5**, as roles inside the one executor
+rather than as separate executors — see §8 for why the narrower version turned
+out to be the right one.
 
-**M7 — Executable plugins**, only if §11 route B is chosen deliberately.
+**M7 — Executable plugins. Not happening.** §11 was decided by removal.
 
-**M8 — Simulation UI.** The visual layer over M3, if it earns its place.
+**M8 — Simulation UI.** The visual layer over M3, if it earns its place. The
+sandbox world SDK (`docs/SANDBOX-SDK.md`) was written against the pack format
+and currently has no install path — see that document.
 
 ---
 
@@ -321,28 +335,56 @@ trust failure in AI tooling.
 
 ## 8. Agent architecture
 
-The runtime already models runs, plans, steps, attempts, evidence, budgets,
-leases, checkpoints, and eleven legal states with enforced transitions. It has
-one executor (`goal-runner-v1`). Multi-agent means **more executors behind the
-same runtime**, not a new system.
+*Revised at 0.6.5 — this section proposed one thing and a narrower thing
+shipped. Both are kept, because the difference is the interesting part.*
+
+The runtime models runs, plans, steps, attempts, evidence, budgets, leases,
+checkpoints, and eleven legal states with enforced transitions. It has one
+executor (`goal-runner-v1`).
+
+**What this document originally proposed** was more executors behind the same
+runtime — `reviewer-v1`, `tester-v1`, `security-v1`, `documenter-v1` — handing
+off through an `agent_messages` table, each with its own budget.
+
+**What shipped instead** is roles *inside* the one executor. A plan step names a
+specialist; the specialist is a voice, a temperature, and a ceiling on what that
+step may reach:
 
 ```text
 AgentRuntime  (durable state, budgets, approvals, events)
-   ├── goal-runner-v1        general planner/executor  [exists]
-   ├── reviewer-v1           reads a diff, produces findings
-   ├── tester-v1             runs validation in a shadow, reports
-   ├── security-v1           scans a diff for secrets and risky patterns
-   └── documenter-v1         proposes docs from approved changes
+   └── goal-runner-v1
+         ├── researcher   gathers and cites            reads only
+         ├── engineer     proposes precise changes     may propose changes
+         ├── analyst      reasons over what was found  no tools
+         ├── critic       checks claims against criteria   reads only
+         └── writer       produces the final answer    no tools
 ```
 
-Roles hand off through `agent_messages`. Each role gets its own budget. All of
-them share one approval envelope, so a user never faces per-agent approval
-fatigue.
+The reach column is the point. The critic can read and never change anything,
+because a judge that can alter what it is judging is not a judge — and that is
+enforced at the tool gate, not merely requested in a prompt. Any role can be
+pinned to its own model, because checking an answer against evidence is worth
+more than searching a folder and paying top rates for every step is how this
+becomes too expensive to use.
+
+**Why the narrower version was right.** Separate executors would have needed a
+message bus, per-executor budget arithmetic, and a second scheduler, and every
+one of those is a place for a run to get stuck in a state the runtime cannot
+account for. Roles needed none of it: the plan already had steps, the steps
+already had a gate, and a role is just an answer to "who is doing this one".
+The whole feature is 173 lines in `lib/agents.mjs`.
 
 **Do not build voting.** Concurrent agents voting on solutions multiplies cost
 and latency, is hard to audit, and rarely beats one strong model with good
 context. Sequential specialists with explicit handoffs are cheaper, auditable,
 and explainable — which matters more here than raw capability.
+
+**Do measure it.** Specialists rest on a claim — that a model told which job it
+is doing does that job better — and the claim went untested for as long as every
+answer used them. Turning them off runs every step as one voice, and the two
+arms are compared on completion, sources, tool reliability, rating and cost, with
+the comparison refusing a verdict until both sides have enough runs behind them.
+A feature built on an argument should be able to survive being checked.
 
 ---
 
@@ -408,32 +450,48 @@ Additions required by the new subsystems:
 
 ---
 
-## 11. Plugin system — the decision that matters most
+## 11. Plugin system — decided by removal
 
-The current Marketplace is **declarative by design**: packs may register
-agents, prompt commands, workflows, knowledge, documentation, and validated
-configuration. They cannot execute JavaScript, run shell commands, install
-packages, or hook installation. Permissions are shown before install and
-re-approved on update. Packs are Ed25519-signed.
+*Resolved at 0.6.5.*
 
-The brief asks for plugins that add *tools, deployments, and custom agents*.
-Tools and deployments mean executing third-party code. That is a different
-security model, not an extension of this one.
+This section used to describe a live pack system and ask for a deliberate choice
+between two futures. The choice was made, and it was neither.
 
-**Route A — stay declarative.** Plugins compose existing approved built-ins
-(this is what the tool-recipe system already does: up to eight sequential calls
-to enabled built-ins, no code, no URLs, no nesting). Safe, limited, and honest.
+**What existed.** Packs were declarative by design: they could register agents,
+prompt commands, workflows, knowledge, documentation, and validated
+configuration, and could not execute JavaScript, run shell commands, install
+packages, or hook installation. Permissions were shown before install and
+re-approved on update. Packs were Ed25519-signed. A Marketplace browsed a
+catalog, tracked publisher trust, and handled updates and reviews.
 
-**Route B — executable plugins.** Requires: a separate OS process, not `vm` or
-`isolated-vm`; a capability manifest declaring exactly which tools and paths it
-may touch; brokered IPC where the host performs every effect on the plugin's
-behalf and applies the same risk ladder; resource and time budgets; mandatory
-signing with publisher identity; and a review process for anything listed
-publicly.
+**Route A** was to stay declarative — plugins composing approved built-ins, which
+is what the tool-recipe system already does: up to eight sequential calls to
+enabled built-ins, no code, no URLs, no nesting.
 
-Route B is a quarter of engineering work on its own. Do not drift into it
-accidentally by loosening the pack format. Decide it explicitly. If the answer
-is "not yet", say so in the docs so contributors do not assume otherwise.
+**Route B** was executable plugins, which needs a separate OS process (not `vm`
+or `isolated-vm`), a capability manifest naming exactly which tools and paths it
+may touch, brokered IPC where the host performs every effect and applies the same
+risk ladder, resource and time budgets, mandatory signing with publisher
+identity, and a review process for anything listed publicly. A quarter of
+engineering on its own.
+
+**What was decided.** Both routes answer "how should third parties extend
+Evolv", and the honest answer turned out to be that third parties were not going
+to. About 1,900 lines of library, a sidebar view, three dialogs, publisher trust,
+signing, release channels, a review outbox and a starter generator existed so
+that somebody could install something, and nobody was going to. It was removed
+in 0.6.5 along with everything that reached into it.
+
+The schema migrations that created the pack tables are still in place, because
+the ledger has to stay replayable. The tables are simply unused.
+
+**If this comes back**, route B is still the expensive one and its requirements
+above are still the requirements. What changed is the prior: the next version
+should be pulled by somebody who wants to ship an extension, not pushed on the
+chance that they might.
+
+Note that `scripts/pack-win.mjs` is Windows packaging and has nothing to do with
+any of this.
 
 ---
 
@@ -461,9 +519,11 @@ transitions, tool calls, evidence, and approvals in order.
 proposed actions with risk tiers shown before execution*, never a free-text
 instruction that silently dispatches.
 
-The `/agent` composer command shipped in this branch is the pattern to follow:
-one entry point, in the place people already type, resolving to a reviewable
-plan.
+`/agent` was that pattern, and it was still one step too many. It has been
+removed: a message that needs several verified steps is now recognised as such
+in the conversation, with no command and no form. The pattern to follow is
+narrower than "one entry point" — it is **no entry point**, with the reviewable
+plan surfacing only when there is a change to approve.
 
 ---
 
@@ -508,7 +568,7 @@ decomposition of `server.mjs`.
 | Providers | `fetch` | Streaming already normalised across five providers |
 | Renderer | Vanilla ESM | No framework — this is a security property |
 | Tests | `node:test` | Plus the explicit runner added this branch |
-| Packaging | Custom `pack-win.mjs` | Forge cannot handle this toolchain reliably |
+| Packaging | Custom `pack-win.mjs` | Forge cannot handle this toolchain reliably. Unrelated to the removed pack system, despite the name |
 
 ---
 
@@ -540,9 +600,12 @@ an SDK is a multi-quarter project that does not itself make anything safer
 gap — no project-file undo — stays open. Mitigation: M1–M3 first, and the
 visual layer only over real run state.
 
-**Risk 3 — Executable plugins.** Would invalidate the current, genuinely
-defensible claim that packs cannot run code. Mitigation: decide route A or B
-explicitly (§11); if B, budget a full quarter and a review process.
+**Risk 3 — Executable plugins. Closed.** The risk was that loosening the pack
+format would drift into executing third-party code and quietly invalidate the
+claim that packs cannot. It was closed by removing packs entirely (§11). If an
+extension mechanism returns, this risk returns with it and the mitigation is
+unchanged: decide explicitly, and budget a full quarter and a review process for
+anything executable.
 
 **Risk 4 — "Validate then auto-revert" versus "commands always need
 approval".** These two brief requirements contradict each other: running tests
@@ -589,8 +652,13 @@ is urgent; both should be measured rather than guessed.
    nothing should acquire one later.
 2. **Build the shadow workspace, not the 2D world — at least first.** One is
    the safety mechanism; the other is a picture of it.
-3. **Keep plugins declarative until you deliberately decide otherwise.** It is
-   currently one of the few genuinely unusual security claims Evolv can make.
+3. **Plugins were removed rather than kept declarative.** The security claim
+   was real and unusual, and it was protecting a mechanism nobody was going to
+   use. If extensions come back, they should be pulled by someone who wants to
+   ship one, not offered on the chance that they might.
+4. **Multi-agent shipped as roles, not as executors** (§8), and whether the
+   roles help is measured against answers produced without them rather than
+   assumed.
 
 Everything else in the brief is either already built or straightforwardly
 buildable on what exists.
