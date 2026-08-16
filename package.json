@@ -1,7 +1,7 @@
 {
   "name": "evolv-local-ai",
   "productName": "Evolv",
-  "version": "0.6.5",
+  "version": "0.6.4",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -62,7 +62,6 @@
     "@electron-forge/cli": "7.11.2",
     "@electron-forge/maker-zip": "7.11.2",
     "@electron-forge/plugin-auto-unpack-natives": "7.11.2",
-    "acorn": "8.17.0",
     "electron": "41.10.4",
     "esbuild": "^0.28.1"
   },
