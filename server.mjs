@@ -1010,6 +1010,10 @@ async function handleEvolvInstall(req, res, body) {
   req.on("close", unsubscribe);
   await run.done;
   unsubscribe();
+  // Ollama now holds models it did not hold when the list was last cached.
+  // Without this the new build stays out of the model dropdown for up to five
+  // minutes, while the sidebar already reports it as ready.
+  providerService.invalidateModels("ollama");
   writeStreamEvent(res, { type: "install", ...run.snapshot() });
   if (!res.writableEnded) res.end();
 }
