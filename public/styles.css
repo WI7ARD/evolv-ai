@@ -138,6 +138,13 @@ body::before {
 .command-menu strong { font: 11px "DM Mono", monospace; color: var(--acid); }
 .command-menu span { color: var(--muted); }
 .edit-banner { margin: 0 auto 8px; width: min(760px, 92%); display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); background: #171b1a; padding: 8px 13px; font-size: 11px; color: var(--muted); }
+/* Inside .composer-wrap, above the message box.
+   It used to sit after .messages in normal flow. .messages reserves 190px of
+   bottom padding for the fixed composer, but the panel was a sibling *after*
+   that reservation, so it landed underneath the composer and was painted over
+   by it — present, visible by every CSS measure, and impossible to see or
+   click. That made "Get Evolv Local" unreachable for anyone who already had a
+   model, which is everyone the offer is aimed at. */
 .local-setup { margin: 0 auto 10px; width: min(760px, 92%); border: 1px solid var(--line); background: #171b1a; padding: 14px 16px; display: grid; gap: 12px; }
 .local-setup-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .local-setup-copy strong { display: block; font-size: 12px; }
