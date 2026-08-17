@@ -1437,9 +1437,19 @@ async function attachToInstall() {
   if (installStream) return installStream;
   installStream = (async () => {
     try {
+      // Raw fetch rather than api(), because this response is a stream and
+      // api() parses it as JSON — but the CSRF header has to be sent by hand
+      // as a result, and it was not. Every mutating request needs it, including
+      // the cancel button beside this one, which used api() and worked while
+      // install returned 403. Nobody noticed because the button that starts
+      // this was itself painted underneath the composer and could not be
+      // clicked.
       const response = await fetch("/api/ollama/install-evolv", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(app.auth?.csrfToken ? { "x-evolv-csrf": app.auth.csrfToken } : {})
+        },
         // Whichever builds the panel offered. An empty value lets the server
         // choose its default, which is what a rejoining client sends.
         body: JSON.stringify(elements.installButton?.dataset.models
