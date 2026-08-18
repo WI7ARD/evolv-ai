@@ -101,22 +101,49 @@ test("a tool call with no provider step is never replayed as a function call", (
   assert.match(narrated, /meeting\.md/, "the result the model already has is still available to it");
 });
 
-test("a call that does carry the provider's step is replayed exactly", () => {
-  const signed = {
-    type: "function_call", id: "fc_1", call_id: "call_b", name: "read_obsidian_note",
-    arguments: { path: "ideas.md" }, thought_signature: "sig-from-gemini"
+// This test previously asserted that a stored step goes back "byte for byte,
+// signature included", with `call_id` and `thought_signature` on the
+// function_call. Both were wrong, and together they are the 400 that followed:
+//
+//   Request contains an invalid argument.
+//
+// The Interactions API's FunctionCallStep has exactly four fields — type, id,
+// name, arguments. `thought_signature` is a field on the *legacy* generateContent
+// `Part`, not on a step; in this API the signature rides on a `thought` step.
+// And a function_result's `call_id` points at the call's `id`, so sending a
+// `call_id` on the call itself is a second unknown field. Google rejects unknown
+// fields and names none of them.
+test("a stored call goes back with the fields this API defines, and no others", () => {
+  const stored = {
+    type: "function_call", id: "fc_1", name: "read_obsidian_note",
+    arguments: { path: "ideas.md" },
+    // Left over from an older Evolv, or from the model's own output shape.
+    call_id: "call_b", thought_signature: "sig-from-gemini", status: "completed"
   };
   const messages = [
     { role: "user", content: "read it" },
-    { role: "assistant", content: "", tool_calls: [{ id: "call_b", providerState: { geminiStep: signed }, function: { name: "read_obsidian_note", arguments: { path: "ideas.md" } } }] },
-    { role: "tool", tool_call_id: "call_b", tool_name: "read_obsidian_note", content: "the note body" }
+    { role: "assistant", content: "", tool_calls: [{ id: "fc_1", providerState: { geminiStep: stored }, function: { name: "read_obsidian_note", arguments: { path: "ideas.md" } } }] },
+    { role: "tool", tool_call_id: "fc_1", tool_name: "read_obsidian_note", content: "the note body" }
   ];
 
   const input = toGeminiInteractionInput(messages);
   const call = input.find((step) => step.type === "function_call");
-  assert.deepEqual(call, signed, "the provider's own step goes back byte for byte, signature included");
+  assert.deepEqual(call, { type: "function_call", id: "fc_1", name: "read_obsidian_note", arguments: { path: "ideas.md" } });
   const result = input.find((step) => step.type === "function_result");
-  assert.equal(result.call_id, "call_b", "and its result is still a real function_result");
+  assert.equal(result.call_id, "fc_1", "a result points back at the call's id");
+});
+
+test("a thought step keeps its signature, which is where the signature actually lives", () => {
+  // Stripping unknown fields must not strip the one thing the model needs back.
+  const thought = { type: "thought", signature: "sig-from-gemini", summary: [{ type: "text", text: "considering" }], extra: "not a field" };
+  const input = toGeminiInteractionInput([
+    { role: "user", content: "think" },
+    { role: "assistant", content: "", provider_state: [{ geminiStep: thought }] }
+  ]);
+  const replayed = input.find((step) => step.type === "thought");
+  assert.equal(replayed.signature, "sig-from-gemini");
+  assert.deepEqual(replayed.summary, [{ type: "text", text: "considering" }]);
+  assert.equal("extra" in replayed, false);
 });
 
 test("a conversation that changed providers mid-way keeps both halves", () => {
@@ -127,14 +154,14 @@ test("a conversation that changed providers mid-way keeps both halves", () => {
     { role: "user", content: "search" },
     { role: "assistant", content: "", tool_calls: [{ id: "call_o", providerState: { openaiItem: { id: "fc_x" } }, function: { name: "search_memory", arguments: {} } }] },
     { role: "tool", tool_call_id: "call_o", tool_name: "search_memory", content: "three matches" },
-    { role: "assistant", content: "", tool_calls: [{ id: "call_g", providerState: { geminiStep: { type: "function_call", call_id: "call_g", name: "read_file", arguments: {}, thought_signature: "s" } }, function: { name: "read_file", arguments: {} } }] },
+    { role: "assistant", content: "", tool_calls: [{ id: "call_g", providerState: { geminiStep: { type: "function_call", id: "call_g", name: "read_file", arguments: {} } }, function: { name: "read_file", arguments: {} } }] },
     { role: "tool", tool_call_id: "call_g", tool_name: "read_file", content: "file body" }
   ];
 
   const input = toGeminiInteractionInput(messages);
   const calls = input.filter((step) => step.type === "function_call");
   assert.equal(calls.length, 1, "only the Gemini call is replayable as a call");
-  assert.equal(calls[0].call_id, "call_g");
+  assert.equal(calls[0].id, "call_g");
   const results = input.filter((step) => step.type === "function_result");
   assert.equal(results.length, 1, "and only its result is a function_result");
   assert.equal(results[0].call_id, "call_g");

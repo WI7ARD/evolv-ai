@@ -19,7 +19,11 @@ import { toolCall, textDelta, finish, providerState } from "../lib/ai-events.mjs
 // request — because every previous version of this bug lived in one of the
 // joins between those, not inside any of them.
 
+// As Gemini sends it, plus the two fields older Evolv builds bolted on. The
+// Interactions API defines exactly four fields on a function_call step, so the
+// extras are stripped on the way back out — see the last assertion below.
 const STEP = { type: "function_call", id: "fc_1", call_id: "fc_1", name: "list_workspace_files", arguments: { path: "." }, signature: "Cs4BAdHtim9abc==" };
+const STEP_ON_THE_WIRE = { type: "function_call", id: "fc_1", name: "list_workspace_files", arguments: { path: "." } };
 
 test("the bridge carries the provider's own step onto the call", () => {
   const event = toolCall({ id: "fc_1", name: "list_workspace_files", arguments: { path: "." }, providerState: { geminiStep: STEP } });
@@ -60,9 +64,16 @@ test("the step survives storage and comes back on the next request", async (t) =
     "the repair pass rewrites calls to give them ids and must not drop it");
 
   // And the adapter replays the provider's step rather than rebuilding one.
+  //
+  // This used to assert the step went back "exactly as it arrived, signature
+  // included". Storage keeps it whole, which is what this test is about, but
+  // the wire cannot: the Interactions API defines four fields on a
+  // function_call, and `call_id` and `signature` are not among them. Sending
+  // them is answered with "Request contains an invalid argument" and no clue
+  // which field caused it. The signature travels on a `thought` step instead.
   const input = toGeminiInteractionInput(repaired);
   const replayed = input.find((step) => step.type === "function_call");
-  assert.deepEqual(replayed, STEP, "the step goes back exactly as it arrived, signature included");
+  assert.deepEqual(replayed, STEP_ON_THE_WIRE, "only the fields this API defines go out");
 });
 
 test("a call made elsewhere is narrated, not rebuilt as a call", () => {

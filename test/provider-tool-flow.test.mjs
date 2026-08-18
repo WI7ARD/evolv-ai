@@ -113,8 +113,9 @@ test("a Gemini Interactions function call arrives as a runnable tool call, signa
     routes.set("/interactions", (res) => {
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(sse([
-        { name: "step.start", data: { index: 0, step: { type: "function_call", id: "fc_1", call_id: "call_1", name: "calculate" } } },
-        { name: "step.stop", data: { index: 0, step: { type: "function_call", id: "fc_1", call_id: "call_1", name: "calculate", arguments: { expression: "2+2" }, thought_signature: "sig-abc" } } },
+        { name: "step.start", data: { index: 0, step: { type: "function_call", id: "call_1", name: "calculate" } } },
+        { name: "step.stop", data: { index: 0, step: { type: "function_call", id: "call_1", name: "calculate", arguments: { expression: "2+2" } } } },
+        { name: "step.stop", data: { index: 1, step: { type: "thought", signature: "sig-abc", summary: [{ type: "text", text: "adding" }] } } },
         { name: "interaction.completed", data: { interaction: { id: "int_1", status: "completed" } } }
       ]));
     });
@@ -124,8 +125,11 @@ test("a Gemini Interactions function call arrives as a runnable tool call, signa
     assert.equal(calls.length, 1);
     assert.equal(calls[0].id, "call_1");
     assert.equal(calls[0].function.name, "calculate");
-    assert.equal(calls[0].providerState?.geminiStep?.thought_signature, "sig-abc",
-      "the signature has to survive, or the next round is a 400");
+    // The signature rides on a `thought` step in this API, not on the call —
+    // that is a legacy generateContent field — and it has to be kept, because
+    // the next round replays it.
+    const thought = chunks.map((chunk) => chunk.providerState?.geminiStep).find((step) => step?.type === "thought");
+    assert.equal(thought?.signature, "sig-abc", "the signature has to survive the round trip");
 
     // The revision this adapter is written against is pinned on the request.
     const chat = seen.find((entry) => entry.url.includes("/interactions"));
