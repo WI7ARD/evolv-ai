@@ -78,5 +78,13 @@ test("nothing writes an empty array into a message in the first place", async ()
 
   // The stored metadata and the sent message now agree; they did not before,
   // which is how the empty array reached the database at all.
-  assert.match(server, /\.\.\.\(normalizedCalls\.length \? \{ tool_calls: normalizedCalls \} : \{\}\)\s*\n\s*\}/);
+  // The rule is that tool_calls is only ever written when there are some — not
+  // that it is the last key in the object. Pinning what follows it made this
+  // fail the moment provider_state was stored beside it, which is a change to
+  // the neighbourhood rather than to the rule.
+  assert.match(server, /\.\.\.\(normalizedCalls\.length \? \{ tool_calls: normalizedCalls \} : \{\}\)/);
+  // Comments removed first: the line that explains this bug necessarily
+  // contains the shape it is warning about.
+  const code = server.split("\n").filter((line) => !line.trim().startsWith("//")).join("\n");
+  assert.doesNotMatch(code, /tool_calls: \[\]/, "an empty array is never written");
 });

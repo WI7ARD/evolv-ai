@@ -36,6 +36,7 @@ import { assessModelFit, isFavorite, toggleFavorite } from "./lib/model-fit.mjs"
 import { affordableBuilds, freeDiskBytes, ollamaIsLocal } from "./lib/disk-space.mjs";
 import { classifyModelFailure, isFailing } from "./lib/model-health.mjs";
 import { sanitizeConversation } from "./lib/message-hygiene.mjs";
+import { createFailureLedger, describeToolFailure } from "./lib/tool-feedback.mjs";
 import { agentModelOverride, listAgents } from "./lib/agents.mjs";
 import { imageMediaType } from "./lib/images.mjs";
 import os from "node:os";
@@ -1689,6 +1690,9 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
   });
 
   let totalCalls = 0;
+  // Identical failing calls within this turn. Two of the same failure means the
+  // guidance was not taken, and the message escalates rather than repeats.
+  const failureLedger = createFailureLedger();
   let activeAssistantId = null;
   let lastContent = "";
   let lastThinking = "";
@@ -1713,6 +1717,10 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
       let content = "";
       let thinking = "";
       const toolCalls = [];
+      // The provider's own account of this turn — reasoning items with their
+      // signatures, response item ids. Opaque here; only the adapter that
+      // produced it understands it, and only it reads it back.
+      const providerStates = [];
       const ollamaBody = {
         model: selectedModel,
         messages,
@@ -1757,6 +1765,7 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
         }
         if (chunk.message?.content) emitFiltered(thinkFilter.feed(chunk.message.content));
         if (chunk.message?.tool_calls?.length) toolCalls.push(...chunk.message.tool_calls);
+        if (chunk.providerState) providerStates.push(chunk.providerState);
       });
       agentRuntime.recordEffect(agentRunId, agentStepId, "after", "model.stream", {
         round, contentCharacters: content.length, thinkingCharacters: thinking.length, toolCalls: toolCalls.length
@@ -1820,10 +1829,17 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
           },
           // Stored only when there were calls, matching what is sent. Storing an
           // empty array here is what put `tool_calls: []` into replayed history.
-          ...(normalizedCalls.length ? { tool_calls: normalizedCalls } : {})
+          ...(normalizedCalls.length ? { tool_calls: normalizedCalls } : {}),
+          // Stored whole. A reasoning item replayed without its signature is
+          // the same fault as a tool call replayed without one.
+          ...(providerStates.length ? { provider_state: providerStates } : {})
         }
       });
-      messages.push({ role: "assistant", content, thinking, ...(normalizedCalls.length ? { tool_calls: normalizedCalls } : {}) });
+      messages.push({
+        role: "assistant", content, thinking,
+        ...(normalizedCalls.length ? { tool_calls: normalizedCalls } : {}),
+        ...(providerStates.length ? { provider_state: providerStates } : {})
+      });
       if (!normalizedCalls.length) {
         const completedRun = agentRuntime.complete(agentRunId, {
           output: { messageId: activeAssistantId, status: "complete", toolCalls: totalCalls },
@@ -1913,9 +1929,17 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
             pendingApproval: Boolean(result.pendingApproval),
             durationMs: reused ? 0 : result.durationMs
           });
+          // A failed tool is an input the model can act on, not the end of the
+          // turn. The error is kept verbatim and first — it is the fact — with
+          // Evolv's reading of it appended, so the model can tell "fix the
+          // arguments" from "this tool does not exist" instead of repeating an
+          // identical call until the round limit.
+          const failureCount = result.ok || result.pendingApproval ? 0 : failureLedger.record(call);
           const toolOutput = reused
             ? `${result.output}\n[duplicate call — cached result reused; do not repeat this call]`
-            : result.output;
+            : result.ok || result.pendingApproval
+              ? result.output
+              : describeToolFailure(call, result.output, { repeated: failureCount });
           database.addMessage({
             conversationId,
             role: "tool",
