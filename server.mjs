@@ -37,6 +37,7 @@ import { affordableBuilds, freeDiskBytes, ollamaIsLocal } from "./lib/disk-space
 import { classifyModelFailure, isFailing } from "./lib/model-health.mjs";
 import { sanitizeConversation } from "./lib/message-hygiene.mjs";
 import { createFailureLedger, describeToolFailure } from "./lib/tool-feedback.mjs";
+import { createToolCheckpoints, checkpointNotice } from "./lib/tool-checkpoint.mjs";
 import { agentModelOverride, listAgents } from "./lib/agents.mjs";
 import { imageMediaType } from "./lib/images.mjs";
 import os from "node:os";
@@ -1699,6 +1700,11 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
   // Dedupe identical tool calls within one request so a stuck model cannot
   // burn the call budget re-running the same tool; repeats reuse the result.
   const executedCalls = new Map();
+  // The same idea, but surviving the request. A turn that was interrupted or
+  // suspended for an approval comes back with a new call id for the same work;
+  // the checkpoint recognises it and hands back what it produced the first time
+  // rather than doing it again.
+  const toolCheckpoints = createToolCheckpoints({ database, riskOf: (name) => toolRegistry.riskOf(name) });
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
       // The last round is asked without tools, so the turn always ends with the
@@ -1885,7 +1891,16 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
             arguments: call.function.arguments,
             status: "running"
           });
-          if (!reused) {
+          // Checked before the budget is spent and before the tool is started:
+          // a call answered from a checkpoint did not happen, so it should not
+          // be charged for and should not reach the registry, where an
+          // approval-gated tool would file a second proposal.
+          const checkpoint = reused ? null : toolCheckpoints.find(conversationId, call);
+          if (checkpoint) {
+            executedCalls.set(callKey, Promise.resolve({
+              runId: checkpoint.runId, ok: true, output: checkpoint.output, durationMs: 0, fromCheckpoint: true
+            }));
+          } else if (!reused) {
             agentRuntime.consumeBudget(agentRunId, { toolCalls: 1 });
             executedCalls.set(callKey, toolRegistry.execute(call.function.name, call.function.arguments, {
               conversationId,
@@ -1901,9 +1916,9 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
             }));
           }
           agentRuntime.recordEffect(agentRunId, agentStepId, "before", "tool.execute", {
-            callId: call.id, toolName: call.function.name, cached: reused
+            callId: call.id, toolName: call.function.name, cached: reused, checkpointed: Boolean(checkpoint)
           });
-          return { call, callKey, reused, pending: executedCalls.get(callKey) };
+          return { call, callKey, reused, checkpointed: Boolean(checkpoint), pending: executedCalls.get(callKey) };
         });
 
         // allSettled rather than all: one rejection must not leave the other
@@ -1911,20 +1926,28 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
         // unhandled rejection warning next to it.
         const settled = await Promise.allSettled(started.map((entry) => entry.pending));
 
+        // The first rejection ends the turn, but only after every sibling in
+        // the batch has been recorded. They ran concurrently and had their
+        // effects already; throwing on the spot discarded their results, and a
+        // tool whose effect happened but whose result was never stored is
+        // exactly the one that runs a second time when the turn is resumed.
+        let batchFailure = null;
         for (const [index, entry] of started.entries()) {
           const outcome = settled[index];
           if (outcome.status === "rejected") {
             // A failure is not a result worth reusing; drop it so a later
             // identical call gets a real attempt rather than this rejection.
             executedCalls.delete(entry.callKey);
-            throw outcome.reason;
+            batchFailure = batchFailure || outcome.reason;
+            continue;
           }
-          const { call, reused } = entry;
+          const { call, reused, checkpointed } = entry;
           const result = outcome.value;
           agentRuntime.recordEffect(agentRunId, agentStepId, "after", "tool.execute", {
             callId: call.id,
             toolName: call.function.name,
             cached: reused,
+            checkpointed,
             ok: Boolean(result.ok),
             pendingApproval: Boolean(result.pendingApproval),
             durationMs: reused ? 0 : result.durationMs
@@ -1935,11 +1958,19 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
           // arguments" from "this tool does not exist" instead of repeating an
           // identical call until the round limit.
           const failureCount = result.ok || result.pendingApproval ? 0 : failureLedger.record(call);
-          const toolOutput = reused
-            ? `${result.output}\n[duplicate call — cached result reused; do not repeat this call]`
-            : result.ok || result.pendingApproval
-              ? result.output
-              : describeToolFailure(call, result.output, { repeated: failureCount });
+          const toolOutput = checkpointed
+            ? checkpointNotice(result.output)
+            : reused
+              ? `${result.output}\n[duplicate call — cached result reused; do not repeat this call]`
+              : result.ok || result.pendingApproval
+                ? result.output
+                : describeToolFailure(call, result.output, { repeated: failureCount });
+          // Only a call that actually ran is stamped. Stamping the replay too
+          // would make it the newest match, and the next replay would quote a
+          // notice inside a notice instead of the result.
+          const checkpointSignature = checkpointed || reused || !result.ok || result.pendingApproval
+            ? null
+            : toolCheckpoints.stamp(conversationId, call);
           database.addMessage({
             conversationId,
             role: "tool",
@@ -1947,7 +1978,13 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
             status: result.pendingApproval ? "pending-approval" : result.ok ? "complete" : "error",
             toolName: call.function.name,
             toolCallId: call.id,
-            metadata: { runId: result.runId, agentRunId, durationMs: result.durationMs, untrusted: true, pendingApproval: Boolean(result.pendingApproval), ...(reused ? { cached: true } : {}) }
+            metadata: {
+              runId: result.runId, agentRunId, durationMs: result.durationMs, untrusted: true,
+              pendingApproval: Boolean(result.pendingApproval),
+              ...(reused ? { cached: true } : {}),
+              ...(checkpointed ? { checkpointReplay: true } : {}),
+              ...(checkpointSignature ? { checkpoint: checkpointSignature } : {})
+            }
           });
           messages.push({ role: "tool", tool_name: call.function.name, tool_call_id: call.id, content: toolOutput });
           writeStreamEvent(res, {
@@ -1956,8 +1993,9 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
             runId: result.runId,
             tool: call.function.name,
             status: result.pendingApproval ? "approval_required" : result.ok ? "completed" : "failed",
-            cached: reused,
-            durationMs: reused ? 0 : result.durationMs,
+            cached: reused || checkpointed,
+            checkpointed,
+            durationMs: reused || checkpointed ? 0 : result.durationMs,
             output: toolOutput
           });
           if (result.pendingApproval) {
@@ -1982,6 +2020,7 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
             return;
           }
         }
+        if (batchFailure) throw batchFailure;
       }
       // Hand the overflow back by name. Without this the model has no way to
       // know part of what it asked for never happened, and will describe a
