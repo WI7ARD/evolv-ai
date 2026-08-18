@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeConversation } from "../lib/message-hygiene.mjs";
-import { normalizeMessagesOpenAi, toAnthropicMessages, toGeminiContents, toOllamaMessages } from "../lib/providers.mjs";
+import { normalizeMessagesOpenAi, toAnthropicMessages, toOllamaMessages } from "../lib/providers.mjs";
+import { toGeminiInteractionInput } from "../lib/gemini-interactions.mjs";
 import {
-  inspectAnthropicRequest, inspectGeminiRequest, inspectOllamaRequest, inspectOpenAiRequest, reportRequestProblems
+  inspectAnthropicRequest, inspectGeminiInteractionInput, inspectOllamaRequest, inspectOpenAiRequest, reportRequestProblems
 } from "../lib/provider-contract.mjs";
 import { imageMediaType } from "../lib/images.mjs";
 
@@ -100,7 +101,7 @@ function refuse(problems, where) {
 
 const checkOpenAi = (messages, where) => refuse(inspectOpenAiRequest(messages), where);
 const checkAnthropic = (messages, where) => refuse(inspectAnthropicRequest(messages), where);
-const checkGemini = (contents, where) => refuse(inspectGeminiRequest(contents), where);
+const checkGemini = (input, where) => refuse(inspectGeminiInteractionInput(input), where);
 const checkOllama = (messages, where) => refuse(inspectOllamaRequest(messages), where);
 
 test("every provider's rules hold for two thousand damaged conversations", () => {
@@ -112,7 +113,7 @@ test("every provider's rules hold for two thousand damaged conversations", () =>
 
     checkOpenAi(normalizeMessagesOpenAi(sanitized), `${where} (OpenAI)`);
     checkAnthropic(toAnthropicMessages(sanitized), `${where} (Anthropic)`);
-    checkGemini(toGeminiContents(sanitized), `${where} (Gemini)`);
+    checkGemini(toGeminiInteractionInput(sanitized), `${where} (Gemini)`);
     checkOllama(toOllamaMessages(sanitized), `${where} (Ollama)`);
   }
 });
@@ -128,7 +129,7 @@ test("the rules above can actually fail", () => {
     try {
       checkOpenAi(normalizeMessagesOpenAi(raw), "unrepaired");
       checkAnthropic(toAnthropicMessages(raw), "unrepaired");
-      checkGemini(toGeminiContents(raw), "unrepaired");
+      checkGemini(toGeminiInteractionInput(raw), "unrepaired");
     } catch {
       rejected += 1;
     }
@@ -154,7 +155,7 @@ test("the images the fuzzer generates actually reach the providers", () => {
   for (let seed = 1; seed <= 200; seed += 1) {
     const sanitized = sanitizeConversation(conversation(random(seed)));
     blocks += toAnthropicMessages(sanitized).flatMap((message) => message.content).filter((block) => block.type === "image").length;
-    blocks += toGeminiContents(sanitized).flatMap((content) => content.parts).filter((part) => part.inlineData).length;
+    blocks += toGeminiInteractionInput(sanitized).flatMap((step) => step.content || []).filter((part) => part.type === "image").length;
   }
   assert.ok(blocks > 100, `only ${blocks} images reached a provider across 200 conversations`);
 });
@@ -169,7 +170,7 @@ test("malformed tool arguments do not abort the request", () => {
   ];
 
   assert.deepEqual(toAnthropicMessages(messages)[1].content[0].input, {});
-  assert.deepEqual(toGeminiContents(messages)[1].parts[0].functionCall.args, {});
+  assert.deepEqual(toGeminiInteractionInput(messages).find((step) => step.type === "function_call").arguments, {});
 });
 
 test("an attached image is described as what it actually is", () => {
@@ -189,7 +190,7 @@ test("an attached image is described as what it actually is", () => {
 
   const withImage = [{ role: "user", content: "what is this?", images: [png] }];
   assert.equal(toAnthropicMessages(withImage)[0].content[1].source.media_type, "image/png");
-  assert.equal(toGeminiContents(withImage)[0].parts[1].inlineData.mimeType, "image/png");
+  assert.equal(toGeminiInteractionInput(withImage)[0].content[1].mime_type, "image/png");
 });
 
 test("a malformed request is named by Evolv before a provider has to refuse it", () => {
@@ -227,6 +228,6 @@ test("a conversation nobody damaged is still delivered in full", () => {
 
   assert.deepEqual(sanitizeConversation(healthy), healthy);
   assert.equal(toAnthropicMessages(healthy).length, 5, "system is carried separately, the rest survive");
-  assert.equal(toGeminiContents(healthy).length, 5);
+  assert.equal(toGeminiInteractionInput(healthy).length, 5);
   assert.equal(normalizeMessagesOpenAi(healthy).length, 6);
 });

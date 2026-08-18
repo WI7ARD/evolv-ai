@@ -17,10 +17,14 @@ test.before(async () => {
       res.end(JSON.stringify({ data: [{ id: "mock-chat", name: "Mock Chat" }] }));
       return;
     }
-    if (req.url === "/v1/chat/completions" && req.method === "POST") {
+    // OpenAI speaks the Responses API. openrouter and custom stay on
+    // chat-completions, which is what they actually implement.
+    if (req.url === "/v1/responses" && req.method === "POST") {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "Hello " } }] })}\n\n`);
-      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "provider." } }] })}\n\n`);
+      const sse = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+      sse({ type: "response.output_text.delta", delta: "Hello " });
+      sse({ type: "response.output_text.delta", delta: "provider." });
+      sse({ type: "response.completed", response: { status: "completed" } });
       res.end("data: [DONE]\n\n");
       return;
     }

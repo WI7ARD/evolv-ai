@@ -1768,14 +1768,16 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
       // its extra calls are not quietly dropped — they are named back to it
       // below so it can ask again, which turns ten into 4 / 4 / 2 instead of
       // six built and four silently lost.
-      // Anything not named here is discarded, which is how Gemini's
-      // thoughtSignature used to be lost between the round that produced a tool
-      // call and the round that replayed it. providerMeta is the carrier for
-      // whatever a provider requires echoed back verbatim.
+      // Anything not named here is discarded, which is how Gemini's signature
+      // used to be lost between the round that produced a tool call and the
+      // round that replayed it. providerState carries the provider's own
+      // representation of the call, kept whole and handed back verbatim, so a
+      // field nobody has discovered yet survives the same way the ones we know
+      // about do.
       const normalize = (call) => ({
         id: call.id || crypto.randomUUID(),
         type: "function",
-        ...(call.providerMeta ? { providerMeta: call.providerMeta } : {}),
+        ...(call.providerState ? { providerState: call.providerState } : {}),
         function: {
           name: call.function?.name || "",
           arguments: typeof call.function?.arguments === "string"

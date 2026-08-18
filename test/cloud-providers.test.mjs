@@ -98,12 +98,20 @@ test.before(async () => {
         { name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] }
       ] });
     }
-    if (req.url.startsWith("/gemini/models/") && req.url.includes(":streamGenerateContent") && req.method === "POST") {
+    // Gemini speaks the Interactions API. The stream is a sequence of steps
+    // rather than candidates-and-parts, and each finished step carries the
+    // provider's own representation — including the signature a replayed tool
+    // call has to hand back.
+    if (req.url === "/gemini/interactions" && req.method === "POST") {
       res.writeHead(200, { "content-type": "text/event-stream" });
       const sse = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
-      sse({ candidates: [{ content: { parts: [{ text: "Hi from " }] } }] });
-      sse({ candidates: [{ content: { parts: [{ text: "Gemini." }] } }] });
-      sse({ candidates: [{ content: { parts: [{ functionCall: { name: "calculator", args: { expression: "2+2" } } }] } }] });
+      sse({ type: "step.start", index: 0, step: { type: "model_output" } });
+      sse({ type: "step.delta", index: 0, delta: { type: "text", text: "Hi from " } });
+      sse({ type: "step.delta", index: 0, delta: { type: "text", text: "Gemini." } });
+      sse({ type: "step.stop", index: 0 });
+      sse({ type: "step.start", index: 1, step: { type: "function_call", id: "fc_1", call_id: "fc_1", name: "calculator" } });
+      sse({ type: "step.stop", index: 1, step: { type: "function_call", id: "fc_1", call_id: "fc_1", name: "calculator", arguments: { expression: "2+2" }, signature: "sig-abc" } });
+      sse({ type: "interaction.completed", interaction: { status: "completed" } });
       return res.end();
     }
 
@@ -168,7 +176,9 @@ test("Anthropic discovery, capabilities, and native message streaming", async ()
       model: "claude-4-sonnet",
       messages: [{ role: "system", content: "Be brief." }, { role: "user", content: "hi" }],
       options: { temperature: 0, maxTokens: 8192 }
-    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk.message));
+    // finish and usage events carry no message. The old generateContent bridge
+    // emitted neither, so pushing chunk.message unguarded used to be safe.
+    }, AbortSignal.timeout(5000), (chunk) => { if (chunk.message) chunks.push(chunk.message); });
     assert.equal(chunks.map((message) => message.content || "").join(""), "Hi from Claude.");
     assert.ok(chunks.filter((message) => message.content).length >= 2, "text arrives as incremental deltas");
     assert.equal(chunks.map((message) => message.thinking || "").join(""), "Let me reason.");
@@ -201,7 +211,7 @@ test("OpenRouter discovery reads capability metadata and streams SSE with reason
       model: "anthropic/claude-3.5-sonnet",
       messages: [{ role: "user", content: "hi" }],
       options: { temperature: 0 }
-    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk.message));
+    }, AbortSignal.timeout(5000), (chunk) => { if (chunk.message) chunks.push(chunk.message); });
     assert.equal(chunks.map((message) => message.content || "").join(""), "Routed reply.");
     assert.equal(chunks.map((message) => message.thinking || "").join(""), "Thinking… ");
     const toolCall = chunks.find((message) => message.tool_calls)?.tool_calls[0];
@@ -226,17 +236,20 @@ test("Gemini filters non-chat models and bridges generateContent responses", asy
     await service.streamRound("gemini", {
       model: "gemini-2.5-pro",
       messages: [{ role: "user", content: "hi" }],
-      options: { temperature: 0 }
-    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk.message));
+      options: { temperature: 0, maxTokens: 4096 }
+    }, AbortSignal.timeout(5000), (chunk) => { if (chunk.message) chunks.push(chunk.message); });
     assert.equal(chunks.map((message) => message.content || "").join(""), "Hi from Gemini.");
     assert.ok(chunks.filter((message) => message.content).length >= 2, "text arrives as incremental deltas");
     const toolCall = chunks.find((message) => message.tool_calls)?.tool_calls[0];
     assert.equal(toolCall.function.name, "calculator");
     assert.deepEqual(toolCall.function.arguments, { expression: "2+2" });
 
-    const chatRequest = lastRequest((url) => url.includes(":streamGenerateContent"));
-    assert.equal(chatRequest.url, "/gemini/models/gemini-2.5-pro:streamGenerateContent?alt=sse");
-    assert.equal(JSON.parse(chatRequest.body).generationConfig.maxOutputTokens, 4096, "default max tokens applied");
+    const chatRequest = lastRequest((url) => url.includes("/interactions"));
+    assert.equal(chatRequest.url, "/gemini/interactions");
+    // The Interactions API names it generation_config.max_output_tokens, and
+    // only carries it when a caller asked for one — the adapter invents no
+    // default of its own. Every caller in Evolv supplies a limit.
+    assert.equal(JSON.parse(chatRequest.body).generation_config.max_output_tokens, 4096);
   });
 });
 
@@ -267,17 +280,22 @@ test("a repaired conversation reaches every provider in a shape it accepts", asy
         model, messages, options: { temperature: 0, maxTokens: 1024 }
       }, AbortSignal.timeout(5000), () => {});
 
-      const request = lastRequest((item) => (url ? item === url : item.includes("streamGenerateContent")));
+      const request = lastRequest((item) => (url ? item === url : item.includes("/interactions")));
       const body = JSON.parse(request.body);
-      const turns = body.messages || body.contents;
+      const turns = body.messages || body.contents || body.input;
 
       assert.ok(turns.length, `${providerId} received a conversation`);
       // The two shapes every provider rejects.
-      assert.equal(turns.some((turn) => !(turn.content || turn.parts)?.length), false,
+      // Gemini's steps carry content, result, or neither — a function_call is a
+       // step in its own right with nothing nested inside it.
+      assert.equal(turns.some((turn) => turn.role && !(turn.content || turn.parts)?.length), false,
         `${providerId} was sent a message with no content`);
       assert.equal(JSON.stringify(turns).includes("call_above_the_window"), false,
         `${providerId} was sent a result for a call it never saw`);
-      assert.equal(turns[0].role, "user", `${providerId} needs the conversation to start with the user`);
+      // Gemini's Interactions input is a list of typed steps rather than roled
+      // messages; the equivalent requirement is that it opens with the user's.
+      const opensWithUser = providerId === "gemini" ? turns[0].type === "user_input" : turns[0].role === "user";
+      assert.ok(opensWithUser, `${providerId} needs the conversation to start with the user`);
     }
   });
 });
@@ -293,7 +311,7 @@ test("a model that refuses a sampling parameter is asked again without it", asyn
       model: "openai/gpt-5.5",
       messages: [{ role: "user", content: "hi" }],
       options: { temperature: 0.9 }
-    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk.message));
+    }, AbortSignal.timeout(5000), (chunk) => { if (chunk.message) chunks.push(chunk.message); });
 
     // The reply arrives rather than the person seeing a 400 about a number
     // they never chose.
@@ -331,7 +349,7 @@ test("Gemini is sent no systemInstruction rather than an empty one", async () =>
       options: { temperature: 0, maxTokens: 64 }
     }, AbortSignal.timeout(5000), () => {});
 
-    const body = JSON.parse(lastRequest((url) => url.includes("streamGenerateContent")).body);
+    const body = JSON.parse(lastRequest((url) => url.includes("/interactions")).body);
     assert.equal("systemInstruction" in body, false);
   });
 });
