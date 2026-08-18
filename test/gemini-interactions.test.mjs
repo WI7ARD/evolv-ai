@@ -65,3 +65,80 @@ test("Gemini Interactions stream preserves function-call steps for exact statele
   assert.equal(replay[1].call_id, "call_1");
   assert.equal(replay[1].result[0].text, "4");
 });
+
+// The 400 a user actually hit, on a build that had every other part of this
+// work in it:
+//
+//   Function call is missing a thought_signature in functionCall parts. This is
+//   required for tools to work correctly. Additional data, function call
+//   default_api:list_obsidian_notes, position 4.
+//
+// Position 4 is history, not the current turn. Evolv now stores the provider's
+// own step for every call it makes, but nothing can retrofit one onto a call
+// made before that — or onto a call made by a different provider in the same
+// conversation. Those were being replayed as a fabricated function_call with no
+// signature, which is precisely what Gemini refuses.
+test("a tool call with no provider step is never replayed as a function call", () => {
+  const messages = [
+    { role: "user", content: "what notes do I have?" },
+    // Written before Evolv kept provider state: tool_calls, no provider_state.
+    { role: "assistant", content: "", tool_calls: [{ id: "call_a", function: { name: "list_obsidian_notes", arguments: { limit: 20 } } }] },
+    { role: "tool", tool_call_id: "call_a", tool_name: "list_obsidian_notes", content: "meeting.md\nideas.md" },
+    { role: "assistant", content: "You have two notes." },
+    { role: "user", content: "open the second one" }
+  ];
+
+  const input = toGeminiInteractionInput(messages);
+  assert.equal(input.some((step) => step.type === "function_call"), false,
+    "an unsigned call must not be sent; this is the 400");
+  assert.equal(input.some((step) => step.type === "function_result"), false,
+    "and its result must not be sent as an orphan answering nothing");
+
+  // The work is not thrown away either — the model can still see what it did.
+  const narrated = input.filter((step) => step.type === "user_input")
+    .flatMap((step) => step.content).map((part) => part.text).join("\n");
+  assert.match(narrated, /list_obsidian_notes/);
+  assert.match(narrated, /meeting\.md/, "the result the model already has is still available to it");
+});
+
+test("a call that does carry the provider's step is replayed exactly", () => {
+  const signed = {
+    type: "function_call", id: "fc_1", call_id: "call_b", name: "read_obsidian_note",
+    arguments: { path: "ideas.md" }, thought_signature: "sig-from-gemini"
+  };
+  const messages = [
+    { role: "user", content: "read it" },
+    { role: "assistant", content: "", tool_calls: [{ id: "call_b", providerState: { geminiStep: signed }, function: { name: "read_obsidian_note", arguments: { path: "ideas.md" } } }] },
+    { role: "tool", tool_call_id: "call_b", tool_name: "read_obsidian_note", content: "the note body" }
+  ];
+
+  const input = toGeminiInteractionInput(messages);
+  const call = input.find((step) => step.type === "function_call");
+  assert.deepEqual(call, signed, "the provider's own step goes back byte for byte, signature included");
+  const result = input.find((step) => step.type === "function_result");
+  assert.equal(result.call_id, "call_b", "and its result is still a real function_result");
+});
+
+test("a conversation that changed providers mid-way keeps both halves", () => {
+  // Started on OpenAI, switched to Gemini. The OpenAI call has an openaiItem,
+  // not a geminiStep, so it cannot be replayed as a Gemini call — but the model
+  // still needs to know it happened.
+  const messages = [
+    { role: "user", content: "search" },
+    { role: "assistant", content: "", tool_calls: [{ id: "call_o", providerState: { openaiItem: { id: "fc_x" } }, function: { name: "search_memory", arguments: {} } }] },
+    { role: "tool", tool_call_id: "call_o", tool_name: "search_memory", content: "three matches" },
+    { role: "assistant", content: "", tool_calls: [{ id: "call_g", providerState: { geminiStep: { type: "function_call", call_id: "call_g", name: "read_file", arguments: {}, thought_signature: "s" } }, function: { name: "read_file", arguments: {} } }] },
+    { role: "tool", tool_call_id: "call_g", tool_name: "read_file", content: "file body" }
+  ];
+
+  const input = toGeminiInteractionInput(messages);
+  const calls = input.filter((step) => step.type === "function_call");
+  assert.equal(calls.length, 1, "only the Gemini call is replayable as a call");
+  assert.equal(calls[0].call_id, "call_g");
+  const results = input.filter((step) => step.type === "function_result");
+  assert.equal(results.length, 1, "and only its result is a function_result");
+  assert.equal(results[0].call_id, "call_g");
+  const narrated = input.filter((step) => step.type === "user_input").flatMap((step) => step.content).map((part) => part.text).join("\n");
+  assert.match(narrated, /search_memory/);
+  assert.match(narrated, /three matches/);
+});

@@ -170,7 +170,14 @@ test("malformed tool arguments do not abort the request", () => {
   ];
 
   assert.deepEqual(toAnthropicMessages(messages)[1].content[0].input, {});
-  assert.deepEqual(toGeminiInteractionInput(messages).find((step) => step.type === "function_call").arguments, {});
+
+  // Gemini gets no function_call here at all: this call carries no provider
+  // step, so a replay would have to invent a thought_signature and be refused.
+  // What matters for this test is that the nonsense arguments still produce a
+  // request rather than a SyntaxError.
+  const gemini = toGeminiInteractionInput(messages);
+  assert.equal(gemini.some((step) => step.type === "function_call"), false);
+  assert.ok(gemini.length >= 2, "the exchange is still carried, as narration");
 });
 
 test("an attached image is described as what it actually is", () => {

@@ -65,20 +65,31 @@ test("the step survives storage and comes back on the next request", async (t) =
   assert.deepEqual(replayed, STEP, "the step goes back exactly as it arrived, signature included");
 });
 
-test("a call made elsewhere is rebuilt rather than dropped", () => {
-  // A conversation that started on OpenAI or Ollama has no Gemini step to
-  // replay. It still has to be sendable — reconstructed from name and
-  // arguments, without inventing a signature.
+test("a call made elsewhere is narrated, not rebuilt as a call", () => {
+  // This test previously asserted the opposite — that a call with no Gemini
+  // step is "reconstructed from name and arguments, without inventing a
+  // signature" — and that expectation was wrong. Gemini rejects the request
+  // outright:
+  //
+  //   Function call is missing a thought_signature in functionCall parts.
+  //
+  // "Without inventing a signature" is not a safe middle ground, because a
+  // functionCall part with no signature is not a weaker call, it is an invalid
+  // one. A conversation that started on OpenAI or Ollama, or that predates
+  // Evolv keeping provider state at all, has nothing to replay — so the
+  // exchange goes back as context rather than as a call.
   const input = toGeminiInteractionInput([
     { role: "user", content: "list the files" },
     { role: "assistant", content: "", tool_calls: [{ id: "c1", function: { name: "search_memory", arguments: "{}" } }] },
     { role: "tool", tool_call_id: "c1", tool_name: "search_memory", content: "nothing" }
   ]);
-  const call = input.find((step) => step.type === "function_call");
 
-  assert.equal(call.name, "search_memory");
-  assert.deepEqual(call.arguments, {}, "a JSON string from another provider becomes an object");
-  assert.equal("signature" in call, false, "nothing is invented");
+  assert.equal(input.some((step) => step.type === "function_call"), false);
+  assert.equal(input.some((step) => step.type === "function_result"), false);
+  const narrated = input.filter((step) => step.type === "user_input")
+    .flatMap((step) => step.content).map((part) => part.text).join("\n");
+  assert.match(narrated, /search_memory/, "the model is still told what it called");
+  assert.match(narrated, /nothing/, "and what came back");
 });
 
 // Reasoning items are the other half of opaque provider state.
