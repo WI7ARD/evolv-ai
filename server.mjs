@@ -38,6 +38,7 @@ import { classifyModelFailure, isFailing } from "./lib/model-health.mjs";
 import { sanitizeConversation } from "./lib/message-hygiene.mjs";
 import { createFailureLedger, describeToolFailure } from "./lib/tool-feedback.mjs";
 import { createToolCheckpoints, checkpointNotice } from "./lib/tool-checkpoint.mjs";
+import { describeStorageFailure } from "./lib/storage-failure.mjs";
 import { agentModelOverride, listAgents } from "./lib/agents.mjs";
 import { imageMediaType } from "./lib/images.mjs";
 import os from "node:os";
@@ -2092,10 +2093,15 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
     });
     if (!res.destroyed) {
       if (run) writeStreamEvent(res, { type: "run", runId: agentRunId, stepId: agentStepId, state: run.state, budgets: run.budgets });
+      // A turn that died because the disk filled should say so. The stream
+      // never had a status code to hide behind, so this was already reaching
+      // the transcript as "database or disk is full" — true, but not a next
+      // step, and easy to read as Evolv being broken.
+      const storage = describeStorageFailure(error);
       writeStreamEvent(res, {
         type: "error",
-        code: run?.state === "cancelled" ? "RUN_CANCELLED" : runInterrupted ? "INTERRUPTED" : (error.code || "CHAT_ERROR"),
-        error: run?.state === "cancelled" ? "Agent run cancelled." : runInterrupted ? "Generation interrupted." : error.message
+        code: run?.state === "cancelled" ? "RUN_CANCELLED" : runInterrupted ? "INTERRUPTED" : storage ? storage.code : (error.code || "CHAT_ERROR"),
+        error: run?.state === "cancelled" ? "Agent run cancelled." : runInterrupted ? "Generation interrupted." : storage ? storage.message : error.message
       });
       writeStreamEvent(res, { type: "complete", conversationId, messageId: activeAssistantId, runId: agentRunId, status: runInterrupted ? "interrupted" : "error" });
       res.end();
@@ -3555,9 +3561,16 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const requestId = crypto.randomUUID();
-    const status = error.status || 500;
-    const exposeMessage = status < 500 || status === 503 || error.expose === true;
-    if (error.retryAfter) res.setHeader("retry-after", String(error.retryAfter));
+    // A full disk is not an Evolv bug, and a reference number is no use to
+    // someone who needs to delete a file. Storage failures are named and given
+    // their next step instead of being hidden behind a 500.
+    const storage = describeStorageFailure(error);
+    const status = storage ? storage.status : (error.status || 500);
+    const exposeMessage = Boolean(storage) || status < 500 || status === 503 || error.expose === true;
+    const retryAfter = storage?.retryAfter || error.retryAfter;
+    if (retryAfter) res.setHeader("retry-after", String(retryAfter));
+    // The original error is still what gets logged: the person needs the next
+    // step, whoever reads the log needs the stack.
     if (status >= 500) logger.error("http.request-failed", {
       requestId,
       method: req.method,
@@ -3566,8 +3579,8 @@ const server = http.createServer(async (req, res) => {
       error
     });
     json(res, status, {
-      error: exposeMessage ? error.message : `Unexpected server error. Reference: ${requestId}`,
-      code: error.code,
+      error: storage ? storage.message : exposeMessage ? error.message : `Unexpected server error. Reference: ${requestId}`,
+      code: storage ? storage.code : error.code,
       requestId: exposeMessage ? undefined : requestId
     });
   }
