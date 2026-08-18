@@ -1,4 +1,4 @@
-# Evolv Personal 0.6.4 User Guide
+# Evolv Personal 0.7.0 User Guide
 
 ## Start and sign in
 

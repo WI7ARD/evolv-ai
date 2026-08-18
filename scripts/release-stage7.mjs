@@ -46,6 +46,12 @@ requireText("docs/USER-GUIDE.md", [/Marketplace/, /Recovery/, /Linux Mint/]);
 requireText("docs/RECOVERY.md", [/backup/i, /recovery code/i, /integrity/i]);
 requireText("docs/RELEASE-NOTES-0.5.0-PERSONAL.md", [/0\.5\.0/, /pack install/i, /sidebar/i]);
 requireText("docs/STAGE-7-RELIABILITY-RELEASE.md", [/Windows package/, /Linux/, /not verified/i]);
+// The two suites that stand between a release and the failures 0.7.0 was about.
+// The full test run below would catch them breaking, but not them being
+// deleted, and a gate that quietly stops checking something is worse than one
+// that never checked it.
+requireText("test/failure-matrix.test.mjs", [/PROVIDER_AUTH_FAILED/, /PROVIDER_CIRCUIT_OPEN/, /PROVIDER_UNREACHABLE/]);
+requireText("test/chaos.test.mjs", [/SQLITE_FULL/, /integrityCheck/, /malformed|not json/]);
 requireText(".itch.toml", [/path\s*=\s*"Evolv\.exe"/, /platform\s*=\s*"windows"/]);
 requireText(".itch-linux.toml", [/path\s*=\s*"Evolv"/, /platform\s*=\s*"linux"/]);
 
