@@ -40,6 +40,12 @@ test("chat runs persist plans, leased steps, ordered events, checkpoints, and bo
   assert.equal(run.budgets.maxToolCalls, 2);
   assert.deepEqual(run.request, { model: "test-model", mode: "standard" });
 
+  const rerouted = runtime.updateRoute(run.id, {
+    providerId: "ollama", modelId: "fallback-model", reason: "requested model unavailable"
+  });
+  assert.equal(rerouted.modelId, "fallback-model");
+  assert.ok(rerouted.events.some((event) => event.type === "routing.fallback" && event.payload.modelId === "fallback-model"));
+
   assert.throws(() => runtime.createChatRun({
     conversationId: conversation.id,
     objective: "Duplicate",

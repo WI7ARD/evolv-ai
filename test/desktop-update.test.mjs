@@ -21,10 +21,10 @@ test("new GitHub releases require exact ZIP and SHA-256 assets", () => {
   const selected = selectRelease({
     tag_name: "v0.6.3",
     name: "Evolv 0.6.3",
-    html_url: "https://github.com/WI7ARD/evolv-personal/releases/tag/v0.6.3",
+    html_url: "https://github.com/WI7ARD/evolv-ai/releases/tag/v0.6.3",
     assets: [
-      { name: "Evolv-win32-x64-0.6.3.zip", browser_download_url: "https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip" },
-      { name: "Evolv-win32-x64-0.6.3.zip.sha256", browser_download_url: "https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip.sha256" }
+      { name: "Evolv-win32-x64-0.6.3.zip", browser_download_url: "https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip" },
+      { name: "Evolv-win32-x64-0.6.3.zip.sha256", browser_download_url: "https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip.sha256" }
     ]
   }, "0.6.2");
   assert.equal(selected.available, true);
@@ -42,8 +42,8 @@ test("desktop updater verifies, stages, and prepares an atomic Windows restart",
   const release = {
     tag_name: "v0.6.3",
     assets: [
-      { name: "Evolv-win32-x64-0.6.3.zip", browser_download_url: "https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip" },
-      { name: "Evolv-win32-x64-0.6.3.zip.sha256", browser_download_url: "https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip.sha256" }
+      { name: "Evolv-win32-x64-0.6.3.zip", browser_download_url: "https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip" },
+      { name: "Evolv-win32-x64-0.6.3.zip.sha256", browser_download_url: "https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/Evolv-win32-x64-0.6.3.zip.sha256" }
     ]
   };
   const fetchImpl = async (url) => {
@@ -102,7 +102,7 @@ test("update downloads reject redirects away from GitHub", async () => {
     fetchImpl: async () => new Response(null, { status: 302, headers: { location: "https://evil.example/update.zip" } }),
     platform: "win32"
   });
-  await assert.rejects(() => service.trustedFetch("https://github.com/WI7ARD/evolv-personal/releases/download/v0.6.3/update.zip"), /not trusted/);
+  await assert.rejects(() => service.trustedFetch("https://github.com/WI7ARD/evolv-ai/releases/download/v0.6.3/update.zip"), /not trusted/);
 });
 
 test("the renderer exposes clear update controls without receiving filesystem access", async () => {

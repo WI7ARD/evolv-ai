@@ -11,13 +11,13 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           lfs: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - name: Verify tag and package version
         shell: pwsh
@@ -52,4 +52,3 @@ jobs:
           $zip = "out/make/zip/win32/x64/Evolv-win32-x64-$version.zip"
           $checksum = "$zip.sha256"
           gh release create "v$version" $zip $checksum --title "Evolv $version" --generate-notes --verify-tag
-

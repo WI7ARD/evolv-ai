@@ -84,9 +84,9 @@ On Windows, you can also double-click `start.cmd`.
 
 ## Desktop updates and GitHub releases
 
-Evolv 0.6.3 is the first updater-capable Windows build. In the packaged app,
+Evolv 0.6.4 includes the updater-capable Windows build. In the packaged app,
 open **Settings â†’ Software updates**. Evolv checks the stable release from
-`WI7ARD/evolv-personal`, requires an exact release ZIP and `.sha256` file,
+`WI7ARD/evolv-ai`, requires an exact release ZIP and `.sha256` file,
 verifies the packaged executable and application archive, then replaces the
 portable app folder and restarts. It never installs drafts or prereleases and
 never downloads an update silently.
@@ -94,7 +94,7 @@ never downloads an update silently.
 The GitHub repository and release workflow are prepared locally but cannot be
 published until GitHub CLI is reauthenticated. See
 [docs/GITHUB-RELEASES.md](docs/GITHUB-RELEASES.md) for the release procedure.
-Version 0.6.3 must be installed manually once; subsequent stable releases can
+Version 0.6.4 must be installed manually once; subsequent stable releases can
 be installed inside Evolv.
 
 The first page creates Evolv's local password and a one-time recovery code.
@@ -121,9 +121,9 @@ add a key for any of:
 | Provider | Notes |
 | --- | --- |
 | Ollama | Local, no key required (default `http://127.0.0.1:11434`) |
-| OpenAI | Chat models via the OpenAI API |
+| OpenAI | Chat models via the stateless Responses API with native tools and reasoning summaries |
 | Anthropic | Claude models via the Messages API with native token streaming |
-| Google Gemini | Gemini models via the Generative Language API with native token streaming |
+| Google Gemini | Gemini models via stateless Interactions with typed steps and native tool calls |
 | OpenRouter | Any OpenRouter-hosted model, with capability metadata |
 | Custom | Any OpenAI-compatible endpoint (HTTPS, or HTTP on loopback only) |
 
@@ -136,10 +136,12 @@ Custom endpoints are validated to block private, link-local, and loopback
 targets (except explicit `localhost`) and to reject credentials or redirects.
 
 Capabilities (tools, vision, thinking) are detected per model and shown as
-badges in the picker, exactly as for local models. All providers stream
-token-by-token, a stray malformed stream line is skipped instead of aborting
-the reply, and the **Max reply tokens** setting (Settings → Generation)
-controls the output ceiling for cloud models (default 4K).
+badges in the picker, exactly as for local models. Provider streams are
+normalized into one versioned internal event contract. OpenAI Responses output
+items and Gemini Interactions steps are persisted exactly for stateless tool
+continuation, while malformed stream records are skipped without aborting the
+reply. The **Max reply tokens** setting (Settings → Generation) controls the
+output ceiling for cloud models (default 4K).
 
 ## Local security
 

@@ -17,10 +17,11 @@ test.before(async () => {
       res.end(JSON.stringify({ data: [{ id: "mock-chat", name: "Mock Chat" }] }));
       return;
     }
-    if (req.url === "/v1/chat/completions" && req.method === "POST") {
+    if (req.url === "/v1/responses" && req.method === "POST") {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "Hello " } }] })}\n\n`);
-      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "provider." } }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Hello " })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: "provider." })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "response.completed", response: { status: "completed" } })}\n\n`);
       res.end("data: [DONE]\n\n");
       return;
     }
@@ -62,8 +63,8 @@ test("provider credentials are encrypted at rest and never exported", async () =
     model: "mock-chat",
     messages: [{ role: "user", content: "hi" }],
     options: { temperature: 0 }
-  }, AbortSignal.timeout(5000), (chunk) => {
-    content += chunk.message?.content || "";
+  }, AbortSignal.timeout(5000), (event) => {
+    if (event.type === "text.delta") content += event.delta;
   });
   assert.equal(content, "Hello provider.");
   database.close();

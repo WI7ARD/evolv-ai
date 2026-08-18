@@ -265,9 +265,9 @@ test("exposes bounded tool configuration", async () => {
   const payload = await response.json();
   assert.ok(payload.tools.some((tool) => tool.name === "calculate"));
   assert.ok(payload.tools.every((tool) => tool.contractVersion === 1 && tool.inputSchema?.type === "object" && tool.outputSchema));
-  assert.ok(payload.tools.every((tool) => ["read", "network-read", "approval-write"].includes(tool.risk)));
+  assert.ok(payload.tools.every((tool) => ["read", "network-read", "approval-write", "sandbox"].includes(tool.risk)));
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "approval-write").map((tool) => tool.name).sort(), [
-    "propose_engineering_check", "propose_obsidian_archive", "propose_obsidian_create", "propose_obsidian_edit", "propose_obsidian_move",
+    "propose_engineering_check", "propose_obsidian_archive", "propose_obsidian_create", "propose_obsidian_edit", "propose_obsidian_move", "propose_sandbox_promotion",
     "propose_web_research", "propose_workspace_create", "propose_workspace_edit"
   ]);
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "network-read").map((tool) => tool.name).sort(), [

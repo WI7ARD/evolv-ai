@@ -1,0 +1,123 @@
+// Physics sandbox HTTP surface.
+//
+// The scene lives in the server, so these routes are a window onto it rather
+// than a second copy of it. Two shapes of read, because they answer different
+// questions: /frame is geometry for drawing, /look is meaning for reading.
+// Keeping them apart stops the renderer from paying for prose and stops a
+// model from parsing vertex arrays to find out whether a ball has stopped.
+//
+// Every write here is the same set of actions the model's tools call, through
+// the same service method, so a person clicking a button and a model calling
+// physics_build cannot drift apart.
+
+export async function handlePhysicsRoutes(context) {
+  const { req, res, url, readBody, bodyLimit, json, physicsService, database } = context;
+  if (!url.pathname.startsWith("/api/physics")) return false;
+  if (!physicsService) {
+    throw Object.assign(new Error("The physics sandbox is unavailable in this build."), {
+      status: 503, code: "CAPABILITY_UNAVAILABLE"
+    });
+  }
+
+  // Drawing data: solved vertices, no prose. Polled every frame, so it stays
+  // as small as it can be.
+  if (req.method === "GET" && url.pathname === "/api/physics/frame") {
+    json(res, 200, physicsService.frame());
+    return true;
+  }
+
+  // Perception: the same reading a model gets from physics_look.
+  if (req.method === "GET" && url.pathname === "/api/physics") {
+    json(res, 200, physicsService.perceive());
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/physics/actions") {
+    const body = await readBody(req, bodyLimit);
+    const actions = Array.isArray(body.actions) ? body.actions : [body];
+    if (actions.length === 0 || actions.length > 50) {
+      throw Object.assign(new Error("Send between 1 and 50 actions."), { status: 400, code: "PHYSICS_INVALID" });
+    }
+    // Applied in order, and a bad one stops the batch rather than leaving the
+    // caller guessing which half of their scene exists.
+    const results = [];
+    for (const action of actions) {
+      results.push(physicsService.apply(action?.action, action || {}));
+    }
+    json(res, 200, { results, scene: physicsService.perceive() });
+    return true;
+  }
+
+  // Advancing time is a POST because it changes the world, even though it adds
+  // nothing to it.
+  if (req.method === "POST" && url.pathname === "/api/physics/step") {
+    const body = await readBody(req, bodyLimit);
+    const stepped = physicsService.step(body.steps === undefined ? 1 : body.steps);
+    json(res, 200, { ...stepped, frame: physicsService.frame() });
+    return true;
+  }
+
+  // Dragging gets its own route rather than going through /actions, which
+  // returns full perception. A drag fires many times a second, and building a
+  // prose summary of the scene for every mouse move is work nobody reads.
+  if (req.method === "POST" && url.pathname === "/api/physics/drag") {
+    const body = await readBody(req, bodyLimit);
+    const phase = String(body.phase || "move");
+    if (phase === "start") physicsService.grab({ id: body.id, x: body.x, y: body.y });
+    else if (phase === "end") physicsService.release();
+    else physicsService.dragTo({ x: body.x, y: body.y, live: body.live !== false });
+    json(res, 200, { phase, frame: physicsService.frame() });
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/physics/at") {
+    json(res, 200, { object: physicsService.at(url.searchParams.get("x"), url.searchParams.get("y")) });
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/api/physics") {
+    json(res, 200, physicsService.clear());
+    return true;
+  }
+
+  // Reset undoes a run without touching what was built.
+  if (req.method === "POST" && url.pathname === "/api/physics/reset") {
+    json(res, 200, { scene: physicsService.reset() });
+    return true;
+  }
+
+  // Saved scenes. The engine holds no database handle — it stays memory-only,
+  // which is what keeps its tools in the automatic risk tier — so persistence
+  // lives out here, moving opaque snapshots between the two.
+  if (url.pathname === "/api/physics/scenes") {
+    if (req.method === "GET") {
+      json(res, 200, { scenes: database.listPhysicsScenes({ limit: url.searchParams.get("limit") || 50 }) });
+      return true;
+    }
+    if (req.method === "POST") {
+      const body = await readBody(req, bodyLimit);
+      const snapshot = physicsService.snapshot();
+      json(res, 201, database.savePhysicsScene({
+        name: body.name, snapshot, objectCount: snapshot.objects.length + snapshot.joints.length
+      }));
+      return true;
+    }
+  }
+
+  const sceneMatch = url.pathname.match(/^\/api\/physics\/scenes\/([^/]+)(?:\/(load))?$/);
+  if (sceneMatch) {
+    const id = decodeURIComponent(sceneMatch[1]);
+    if (req.method === "POST" && sceneMatch[2] === "load") {
+      const saved = database.getPhysicsScene(id);
+      if (!saved) throw Object.assign(new Error("That scene no longer exists."), { status: 404, code: "SCENE_NOT_FOUND" });
+      json(res, 200, { name: saved.name, scene: physicsService.restore(saved.snapshot) });
+      return true;
+    }
+    if (req.method === "DELETE") {
+      json(res, 200, { removed: database.deletePhysicsScene(id) });
+      return true;
+    }
+  }
+
+  return false;
+}

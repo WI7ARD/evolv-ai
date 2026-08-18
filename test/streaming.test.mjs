@@ -316,7 +316,7 @@ test("approval-required tools pause the run and a reviewed decision resumes the 
       function: {
         name: "propose_workspace_create",
         arguments: {
-          path: "work/agent-runtime-review-only.txt",
+          path: "test/agent-runtime-review-only.txt",
           content: "This proposal is rejected by the test and must never be written.",
           summary: "Verify the run approval boundary."
         }
@@ -360,7 +360,7 @@ test("tool loop stops at the round limit", async () => {
   assert.equal(errorEvent.code, "TOOL_LOOP_LIMIT");
   const complete = events.findLast((event) => event.type === "complete");
   assert.equal(complete.status, "limit");
-  assert.equal(events.filter((event) => event.type === "tool_result").length, 4);
+  assert.equal(events.filter((event) => event.type === "tool_result").length, 11);
 });
 
 test("duplicate tool calls reuse the cached result", async () => {

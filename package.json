@@ -1,8 +1,9 @@
 {
   "name": "evolv-local-ai",
   "productName": "Evolv",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "main": "electron/main.mjs",
   "config": {
@@ -11,11 +12,11 @@
   "description": "A local-first, Ollama-powered chat that improves through explicit feedback and reversible prompt upgrades.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/WI7ARD/evolv-personal.git"
+    "url": "https://github.com/WI7ARD/evolv-ai.git"
   },
-  "homepage": "https://github.com/WI7ARD/evolv-personal",
+  "homepage": "https://github.com/WI7ARD/evolv-ai",
   "bugs": {
-    "url": "https://github.com/WI7ARD/evolv-personal/issues"
+    "url": "https://github.com/WI7ARD/evolv-ai/issues"
   },
   "scripts": {
     "postinstall": "node scripts/patch-extract-zip.mjs && node scripts/repair-electron.mjs",
@@ -28,12 +29,14 @@
     "package:linux": "electron-forge package --platform=linux --arch=x64",
     "make:linux": "electron-forge make --platform=linux --arch=x64",
     "dist:linux": "node scripts/pack-win.mjs --platform=linux",
+    "installer:win": "node scripts/make-installers.mjs --platform=win32",
+    "installer:linux": "node scripts/make-installers.mjs --platform=linux",
     "linux:validate": "node scripts/validate-linux.mjs",
     "itch:validate": "node scripts/itch-release.mjs validate",
     "itch:push": "node scripts/itch-release.mjs push",
     "itch:validate:linux": "node scripts/itch-release.mjs validate linux",
     "itch:push:linux": "node scripts/itch-release.mjs push linux",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test": "node scripts/run-tests.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:persisted": "node scripts/persisted-smoke.mjs",
     "smoke:models": "node scripts/models-smoke.mjs",
@@ -52,17 +55,18 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
-    "better-sqlite3": "12.9.0"
+    "better-sqlite3": "12.9.0",
+    "matter-js": "^0.20.0"
   },
   "devDependencies": {
     "@electron-forge/cli": "7.11.2",
     "@electron-forge/maker-zip": "7.11.2",
     "@electron-forge/plugin-auto-unpack-natives": "7.11.2",
-    "electron": "41.9.2",
+    "electron": "41.10.4",
     "esbuild": "^0.28.1"
   },
   "overrides": {
-    "tar": "7.5.16",
+    "tar": "7.5.22",
     "tmp": "0.2.7"
   }
 }

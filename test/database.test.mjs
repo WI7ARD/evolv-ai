@@ -33,9 +33,10 @@ test("SQLite repository persists conversations and message status", async (t) =>
     conversationId: conversation.id,
     role: "assistant",
     content: "Par",
-    status: "streaming"
+    status: "streaming",
+    model: "stale-model"
   });
-  database.updateMessage(assistantId, { content: "Partial", status: "interrupted" });
+  database.updateMessage(assistantId, { content: "Partial", status: "interrupted", model: "fallback-model" });
   database.autoTitleConversation(conversation.id, "A useful conversation title");
   const loaded = database.getConversation(conversation.id);
   assert.equal(loaded.title, "A useful conversation title");
@@ -43,6 +44,7 @@ test("SQLite repository persists conversations and message status", async (t) =>
   assert.equal(loaded.messages[0].id, userId);
   assert.equal(loaded.messages[1].content, "Partial");
   assert.equal(loaded.messages[1].status, "interrupted");
+  assert.equal(loaded.messages[1].model, "fallback-model", "a disclosed model fallback is persisted accurately");
 });
 
 test("startup reconciliation closes records interrupted by an application restart", async (t) => {
@@ -82,6 +84,17 @@ test("startup reconciliation closes records interrupted by an application restar
   assert.equal(database.reconcileAfterRestart().messages, 0, "reconciliation must be idempotent");
   const audit = database.raw.prepare("SELECT metadata_json FROM audit_events WHERE event_type = 'recovery.startup-reconciled'").get();
   assert.deepEqual(JSON.parse(audit.metadata_json), counts);
+});
+
+test("evaluation runs validate and normalize their model before reaching SQLite", async (t) => {
+  const { root, database } = await fixture();
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const id = database.createEvaluationRun({ providerId: "ollama", model: "fallback-evaluator" });
+  assert.equal(database.getEvaluationRun(id).modelId, "fallback-evaluator");
+  assert.throws(() => database.createEvaluationRun({ providerId: "ollama" }), (error) => error.code === "EVALUATION_MODEL_REQUIRED");
 });
 
 test("a requested baseline personality upgrade is versioned, activated, and reversible", async (t) => {

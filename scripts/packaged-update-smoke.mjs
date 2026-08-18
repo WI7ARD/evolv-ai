@@ -24,8 +24,8 @@ const release = {
   tag_name: `v${version}`,
   name: `Evolv ${version}`,
   assets: [
-    { name: path.basename(zipPath), browser_download_url: `https://github.com/WI7ARD/evolv-personal/releases/download/v${version}/${path.basename(zipPath)}` },
-    { name: `${path.basename(zipPath)}.sha256`, browser_download_url: `https://github.com/WI7ARD/evolv-personal/releases/download/v${version}/${path.basename(zipPath)}.sha256` }
+    { name: path.basename(zipPath), browser_download_url: `https://github.com/WI7ARD/evolv-ai/releases/download/v${version}/${path.basename(zipPath)}` },
+    { name: `${path.basename(zipPath)}.sha256`, browser_download_url: `https://github.com/WI7ARD/evolv-ai/releases/download/v${version}/${path.basename(zipPath)}.sha256` }
   ]
 };
 
