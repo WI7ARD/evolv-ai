@@ -7,7 +7,13 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 
-export const DEFAULT_UPDATE_REPOSITORY = "WI7ARD/evolv-personal";
+import { EVOLV_REPOSITORY } from "../lib/version.mjs";
+import { applyUpdate, parseBlockMap, planUpdate } from "../lib/block-delta.mjs";
+
+// Read from package.json rather than written here, so the updater and the
+// release workflow cannot point at different repositories again. The fallback
+// only matters if the manifest is unreadable, which is a packaging accident.
+export const DEFAULT_UPDATE_REPOSITORY = EVOLV_REPOSITORY || "WI7ARD/evolv-ai";
 const MAX_UPDATE_BYTES = 2 * 1024 ** 3;
 const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
 const TRUSTED_DOWNLOAD_HOSTS = new Set([
@@ -41,17 +47,28 @@ export function compareVersions(left, right) {
   return 0;
 }
 
-export function selectRelease(payload, currentVersion) {
+// What each platform ships. Windows gets a portable ZIP that replaces a folder;
+// Linux gets a single AppImage file, plus the block map that lets an installed
+// copy rebuild it from the parts that changed instead of downloading 300 MB.
+export function releaseAssetNames(version, platform = "win32") {
+  return platform === "linux"
+    ? { package: `Evolv-${version}-x86_64.AppImage`, blocks: `Evolv-${version}-x86_64.AppImage.blocks` }
+    : { package: `Evolv-win32-x64-${version}.zip`, blocks: "" };
+}
+
+export function selectRelease(payload, currentVersion, platform = "win32") {
   if (!payload || payload.draft || payload.prerelease) throw new Error("No stable GitHub release is available.");
   const version = normalizeVersion(payload.tag_name);
   const available = compareVersions(version, currentVersion) > 0;
-  const zipName = `Evolv-win32-x64-${version}.zip`;
-  const checksumName = `${zipName}.sha256`;
+  const names = releaseAssetNames(version, platform);
+  const checksumName = `${names.package}.sha256`;
   const assets = Array.isArray(payload.assets) ? payload.assets : [];
-  const zip = assets.find((asset) => asset?.name === zipName);
-  const checksum = assets.find((asset) => asset?.name === checksumName);
+  const find = (name) => (name ? assets.find((asset) => asset?.name === name) : null);
+  const zip = find(names.package);
+  const checksum = find(checksumName);
+  const blocks = find(names.blocks);
   if (available && (!zip?.browser_download_url || !checksum?.browser_download_url)) {
-    throw new Error(`GitHub release ${version} is missing its ZIP or SHA-256 file.`);
+    throw new Error(`GitHub release ${version} is missing its ${platform === "linux" ? "AppImage" : "ZIP"} or SHA-256 file.`);
   }
   return {
     available,
@@ -59,8 +76,10 @@ export function selectRelease(payload, currentVersion) {
     name: String(payload.name || `Evolv ${version}`).slice(0, 160),
     notes: String(payload.body || "").slice(0, 8_000),
     pageUrl: String(payload.html_url || ""),
-    zip: zip ? { name: zipName, url: zip.browser_download_url } : null,
-    checksum: checksum ? { name: checksumName, url: checksum.browser_download_url } : null
+    zip: zip ? { name: names.package, url: zip.browser_download_url } : null,
+    checksum: checksum ? { name: checksumName, url: checksum.browser_download_url } : null,
+    // Absent only means a full download; the update still works.
+    blocks: blocks?.browser_download_url ? { name: names.blocks, url: blocks.browser_download_url } : null
   };
 }
 
@@ -97,6 +116,10 @@ export class DesktopUpdateService {
     extractImpl = extractWindowsZip,
     spawnImpl = spawn,
     platform = process.platform,
+    // Set by the AppImage runtime to the path of the running image. Its absence
+    // on Linux means Evolv was started some other way — unpacked, or from
+    // source — and replacing a file nobody installed is not the updater's call.
+    appImagePath = process.env.APPIMAGE || "",
     pid = process.pid
   }) {
     this.currentVersion = normalizeVersion(currentVersion);
@@ -108,16 +131,27 @@ export class DesktopUpdateService {
     this.extractImpl = extractImpl;
     this.spawnImpl = spawnImpl;
     this.platform = platform;
+    this.appImagePath = appImagePath ? path.resolve(appImagePath) : "";
     this.pid = pid;
+    this.savings = null;
     this.release = null;
     this.staged = null;
     this.phase = "idle";
     this.error = "";
   }
 
+  supported() {
+    if (this.platform === "win32") return true;
+    // Linux updates replace the running AppImage. Anything else was installed
+    // by a package manager or run from source, and owns its own updates.
+    return this.platform === "linux" && Boolean(this.appImagePath);
+  }
+
   status() {
     return {
-      supported: this.platform === "win32",
+      supported: this.supported(),
+      // How much of the download the block map saved, once one is planned.
+      savings: this.savings,
       currentVersion: this.currentVersion,
       repository: this.repository,
       phase: this.phase,
@@ -133,12 +167,16 @@ export class DesktopUpdateService {
     };
   }
 
-  async trustedFetch(value, { api = false } = {}) {
+  async trustedFetch(value, { api = false, range = null } = {}) {
     let url = validateUpdateUrl(value, { api });
     for (let redirect = 0; redirect <= 5; redirect += 1) {
       const response = await this.fetchImpl(url, {
         redirect: "manual",
-        headers: { "user-agent": `Evolv/${this.currentVersion}`, accept: api ? "application/vnd.github+json" : "application/octet-stream" }
+        headers: {
+          "user-agent": `Evolv/${this.currentVersion}`,
+          accept: api ? "application/vnd.github+json" : "application/octet-stream",
+          ...(range ? { range: `bytes=${range.start}-${range.end}` } : {})
+        }
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         if (redirect === 5) throw new Error("The update download redirected too many times.");
@@ -154,13 +192,13 @@ export class DesktopUpdateService {
   }
 
   async check() {
-    if (this.platform !== "win32") return this.status();
+    if (!this.supported()) return this.status();
     this.phase = "checking";
     this.error = "";
     try {
       const response = await this.trustedFetch(`https://api.github.com/repos/${this.repository}/releases/latest`, { api: true });
       const payload = await response.json();
-      this.release = selectRelease(payload, this.currentVersion);
+      this.release = selectRelease(payload, this.currentVersion, this.platform);
       this.phase = this.release.available ? "available" : "current";
     } catch (error) {
       this.phase = "error";
@@ -169,8 +207,66 @@ export class DesktopUpdateService {
     return this.status();
   }
 
+  // The published SHA-256 is the anchor for everything that follows: on Linux
+  // the block map has to agree with it before a single byte is reused.
+  async expectedChecksum() {
+    const checksumResponse = await this.trustedFetch(this.release.checksum.url);
+    const checksumText = await checksumResponse.text();
+    if (checksumText.length > 1_024) throw new Error("The update checksum file is oversized.");
+    const expected = checksumText.match(/\b[a-fA-F0-9]{64}\b/)?.[0]?.toLowerCase();
+    if (!expected) throw new Error("The update checksum file is invalid.");
+    return expected;
+  }
+
+  // Rebuilds the new AppImage out of the one already installed plus the parts
+  // that differ. Most of the image is Electron and does not change between
+  // releases, so this is usually a few megabytes instead of three hundred.
+  async stageAppImage(updateRoot, expected) {
+    const target = path.join(updateRoot, this.release.zip.name);
+    let plan = null;
+    if (this.release.blocks) {
+      const mapResponse = await this.trustedFetch(this.release.blocks.url);
+      const map = parseBlockMap(Buffer.from(await mapResponse.arrayBuffer()));
+      // A block map that describes some other file would direct the assembly
+      // to build that file instead, and it would pass its own hash check.
+      if (map.sha256 !== expected) throw new Error("The block map does not describe the published release.");
+      plan = await planUpdate(this.appImagePath, map);
+    }
+
+    if (plan) {
+      const result = await applyUpdate({
+        localPath: this.appImagePath,
+        outputPath: target,
+        plan,
+        fetchRange: async (start, end) => {
+          const response = await this.trustedFetch(this.release.zip.url, { range: { start, end } });
+          // A server that ignores the range returns the whole file with 200,
+          // which would be assembled into nonsense.
+          if (response.status !== 206) throw new Error("The update server did not honour a byte range request.");
+          return Buffer.from(await response.arrayBuffer());
+        }
+      });
+      this.savings = { fetchedBytes: result.fetchBytes, reusedBytes: result.reusedBytes, totalBytes: plan.length };
+    } else {
+      // No block map, or nothing installed to reuse: an ordinary download.
+      const response = await this.trustedFetch(this.release.zip.url);
+      if (!response.body) throw new Error("The update package had no body.");
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(target, { flags: "w" }));
+      const actual = await sha256File(target);
+      if (actual !== expected) {
+        await fs.rm(target, { force: true });
+        throw new Error("The downloaded update failed SHA-256 verification.");
+      }
+      const { size } = await fs.stat(target);
+      this.savings = { fetchedBytes: size, reusedBytes: 0, totalBytes: size };
+    }
+
+    await fs.chmod(target, 0o755);
+    this.staged = { sourceDir: "", zipPath: target, packagePath: target, version: this.release.version, expected };
+  }
+
   async download() {
-    if (this.platform !== "win32") throw new Error("Automatic installation is currently available on Windows only.");
+    if (!this.supported()) throw new Error("Automatic installation is not available on this platform.");
     if (!this.release?.available) await this.check();
     if (!this.release?.available || !this.release.zip || !this.release.checksum) {
       throw new Error(this.error || "No newer release is available.");
@@ -179,14 +275,15 @@ export class DesktopUpdateService {
     this.error = "";
     try {
       const updateRoot = path.join(this.userDataPath, "updates", this.release.version);
+      await fs.mkdir(updateRoot, { recursive: true });
+      const expected = await this.expectedChecksum();
+      if (this.platform === "linux") {
+        await this.stageAppImage(updateRoot, expected);
+        this.phase = "ready";
+        return this.status();
+      }
       const zipPath = path.join(updateRoot, this.release.zip.name);
       const stagingRoot = path.join(updateRoot, "staged");
-      await fs.mkdir(updateRoot, { recursive: true });
-      const checksumResponse = await this.trustedFetch(this.release.checksum.url);
-      const checksumText = await checksumResponse.text();
-      if (checksumText.length > 1_024) throw new Error("The update checksum file is oversized.");
-      const expected = checksumText.match(/\b[a-fA-F0-9]{64}\b/)?.[0]?.toLowerCase();
-      if (!expected) throw new Error("The update checksum file is invalid.");
 
       const zipResponse = await this.trustedFetch(this.release.zip.url);
       const length = Number(zipResponse.headers.get("content-length") || 0);
@@ -231,9 +328,35 @@ export class DesktopUpdateService {
     }
   }
 
+  // Replacing a single file, which is the whole reason AppImages are pleasant
+  // to update. The copy lands beside the target first so the rename that swaps
+  // it in is atomic and on the same filesystem — userData is usually not.
+  async installAppImage() {
+    const target = this.appImagePath;
+    await fs.access(path.dirname(target), constants.W_OK);
+    const staging = `${target}.new`;
+    const previous = `${target}.previous`;
+    await fs.copyFile(this.staged.packagePath, staging);
+    await fs.chmod(staging, 0o755);
+    // Verified once more where it will actually run: a copy onto a full disk
+    // can truncate, and this is the last moment it costs nothing to notice.
+    if (await sha256File(staging) !== this.staged.expected) {
+      await fs.rm(staging, { force: true });
+      throw new Error("The staged AppImage failed verification after copying.");
+    }
+    await fs.rm(previous, { force: true });
+    await fs.rename(target, previous);
+    await fs.rename(staging, target);
+    const child = this.spawnImpl(target, [], { detached: true, stdio: "ignore" });
+    child.unref?.();
+    this.phase = "installing";
+    return { ...this.status(), willRestart: true };
+  }
+
   async prepareInstall() {
     if (!this.staged) throw new Error("Download and verify the update first.");
-    if (this.platform !== "win32") throw new Error("Automatic installation is currently available on Windows only.");
+    if (this.platform === "linux") return this.installAppImage();
+    if (this.platform !== "win32") throw new Error("Automatic installation is not available on this platform.");
     await fs.access(this.installDir, constants.W_OK);
     const scriptPath = path.join(this.userDataPath, "updates", "apply-evolv-update.ps1");
     await fs.mkdir(path.dirname(scriptPath), { recursive: true });

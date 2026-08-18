@@ -105,6 +105,63 @@ body::before {
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #d6a84a; box-shadow: 0 0 8px #d6a84a; }
 .status-dot.connected { background: var(--acid); box-shadow: 0 0 8px var(--acid); }
 .status-dot.error { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+/* Reachable but nothing to run: neither ready nor broken, and the amber is the
+   difference between the two greens people would otherwise read as the same. */
+.status-dot.needs-model { background: #d6a84a; box-shadow: 0 0 8px #d6a84a; }
+/* Which specialist a step was handed to, told apart from the step's own state
+   at a glance rather than read. */
+.status-pill.agent { border-color: var(--acid); color: var(--acid); }
+.agent-handover { margin: -4px 0 12px; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; }
+.agent-model-pins { display: grid; gap: 10px; margin: 4px 0 12px; }
+.agent-model-pin { display: grid; grid-template-columns: 1fr minmax(160px, 46%); gap: 10px; align-items: center; }
+.agent-model-pin strong { display: block; font-size: 12px; }
+.agent-model-pin small { color: var(--muted); font-size: 11px; }
+.agent-model-pin .reach { color: var(--muted-2); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+/* The two arms side by side. A table, because the whole point is reading one
+   row across and seeing whether the two numbers differ. */
+.specialist-cohorts { margin: 4px 0 12px; overflow-x: auto; }
+.specialist-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.specialist-table th, .specialist-table td { padding: 5px 8px; text-align: right; border-bottom: 1px solid var(--line); }
+.specialist-table thead th { color: var(--muted-2); font: 8px "DM Mono", monospace; letter-spacing: 0.1em; text-transform: uppercase; }
+.specialist-table tbody th { text-align: left; color: var(--muted); font-weight: 400; }
+.specialist-table tbody tr:last-child th, .specialist-table tbody tr:last-child td { border-bottom: 0; }
+.route-history-item.is-separated { border-left-color: var(--acid); }
+.model-badge.is-positive { border-color: var(--acid); color: var(--acid); }
+.model-control { display: flex; align-items: center; gap: 6px; }
+.favorite-button { background: transparent; border: 1px solid var(--line); color: var(--muted); padding: 2px 7px; font-size: 13px; line-height: 1.2; cursor: pointer; }
+.favorite-button:hover { color: var(--text); border-color: var(--muted); }
+.favorite-button[aria-pressed="true"] { color: var(--acid); border-color: var(--acid); }
+.command-menu { margin: 0 auto 8px; width: min(760px, 92%); border: 1px solid var(--line); background: #171b1a; display: grid; }
+.command-menu button { display: flex; justify-content: space-between; gap: 14px; padding: 9px 13px; background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); color: var(--text); font-size: 11px; text-align: left; cursor: pointer; }
+.command-menu button:last-child { border-bottom: 0; }
+.command-menu button:hover, .command-menu button.active { background: #1f2523; }
+.command-menu strong { font: 11px "DM Mono", monospace; color: var(--acid); }
+.command-menu span { color: var(--muted); }
+.edit-banner { margin: 0 auto 8px; width: min(760px, 92%); display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); background: #171b1a; padding: 8px 13px; font-size: 11px; color: var(--muted); }
+/* Inside .composer-wrap, above the message box.
+   It used to sit after .messages in normal flow. .messages reserves 190px of
+   bottom padding for the fixed composer, but the panel was a sibling *after*
+   that reservation, so it landed underneath the composer and was painted over
+   by it — present, visible by every CSS measure, and impossible to see or
+   click. That made "Get Evolv Local" unreachable for anyone who already had a
+   model, which is everyone the offer is aimed at. */
+.local-setup { margin: 0 auto 10px; width: min(760px, 92%); border: 1px solid var(--line); background: #171b1a; padding: 14px 16px; display: grid; gap: 12px; }
+.local-setup-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.local-setup-copy strong { display: block; font-size: 12px; }
+.local-setup-copy p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.local-setup-progress { display: grid; gap: 7px; }
+.progress-head, .progress-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--muted); }
+.progress-head span:last-child { font: 10px "DM Mono", monospace; }
+.progress-track { height: 6px; border: 1px solid var(--line); background: #0d100f; overflow: hidden; }
+.progress-bar { height: 100%; width: 0; background: var(--acid); transition: width .25s linear; }
+/* No width to animate until Ollama reports byte totals, so an unknown size
+   reads as motion rather than as a bar stuck at zero. */
+.progress-bar.indeterminate { width: 35%; animation: progress-sweep 1.1s ease-in-out infinite; }
+@keyframes progress-sweep { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.progress-actions { display: flex; gap: 8px; }
+.progress-actions .secondary-button { padding: 6px 10px; }
+.local-setup-error { font-size: 11px; color: var(--muted); }
+.local-setup-error pre { white-space: pre-wrap; word-break: break-word; font: 10px "DM Mono", monospace; margin: 6px 0 0; }
 .privacy-note { display: flex; gap: 9px; color: var(--muted-2); padding: 8px; font-size: 10px; line-height: 1.45; }
 .privacy-note span { color: var(--acid); }
 .privacy-note p { margin: 0; }
@@ -253,6 +310,7 @@ html.tts-speaking .mobile-brand img { animation: circuit-voice-core .46s ease-in
 .panel-header { display: flex; justify-content: space-between; align-items: end; gap: 30px; border-bottom: 1px solid var(--line); padding-bottom: 34px; }
 .panel-header h1 { font-size: 42px; }
 .panel-header > div > p:last-child { color: var(--muted); max-width: 620px; font-size: 13px; line-height: 1.6; margin: 14px 0 0; }
+.panel-header-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
 .primary-button, .secondary-button { border-radius: 7px; padding: 11px 15px; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .primary-button { border: 1px solid var(--acid); background: var(--acid); color: #11150d; }
 .primary-button:hover { background: #ceff78; }
@@ -819,3 +877,180 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
   .marketplace-grid, .marketplace-toolbar { grid-template-columns: 1fr; }
   .marketplace-form-grid { display: block; }
 }
+.sandbox-banner { margin: 22px 0 0; padding: 12px 16px; border: 1px solid var(--acid); border-radius: 8px; background: color-mix(in srgb, var(--acid) 10%, transparent); color: var(--ink); font-size: 12px; font-weight: 600; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.sandbox-new { display: flex; gap: 10px; margin-top: 20px; }
+.sandbox-new input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 11px 13px; background: transparent; color: var(--ink); font-size: 12px; font-family: inherit; }
+.sandbox-new input:focus { outline: none; border-color: var(--acid); }
+@media (max-width: 760px) { .sandbox-new { flex-direction: column; } }
+/* The lab display. Cyan rather than acid green: it reads as instrumentation
+   against Evolv's usual chrome, and keeps the hand legible over dark panels. */
+.lab-view { --glow: #5df0cd; }
+/* align-items: start so a panel is as tall as its contents. Stretching leaves
+   a one-line to-do list occupying the height of the whole right column. */
+.lab-grid {
+  display: grid; align-items: start; gap: 14px; margin-top: 18px;
+  grid-template-columns: minmax(200px, 1fr) minmax(320px, 1.6fr) minmax(240px, 1fr);
+}
+.lab-column { display: flex; flex-direction: column; gap: 14px; }
+.lab-panel {
+  border: 1px solid rgba(93, 240, 205, .18); border-radius: 12px; padding: 16px;
+  background: linear-gradient(180deg, rgba(93, 240, 205, .05), transparent 60%), #0b0f10;
+  transition: border-color .25s, box-shadow .25s;
+}
+.lab-panel:hover { border-color: rgba(93, 240, 205, .32); }
+.lab-panel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 10px; }
+.lab-header-right { display: inline-flex; align-items: center; gap: 8px; }
+/* Each panel reads itself, so the button lives on the panel rather than in a
+   toolbar that would first need a way to say which panel it meant. */
+.lab-speak {
+  border: 1px solid rgba(93, 240, 205, .28); background: transparent; color: var(--glow);
+  border-radius: 6px; padding: 5px 10px; font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  font-family: inherit; cursor: pointer; transition: background .15s, border-color .15s;
+}
+.lab-speak:hover { background: rgba(93, 240, 205, .12); border-color: var(--glow); }
+.lab-panel-time .lab-speak { margin-top: 16px; padding: 8px 22px; }
+.lab-eyebrow { font-size: 10px; letter-spacing: .16em; color: var(--glow); font-weight: 700; }
+.lab-note { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
+.lab-line { font-size: 13px; color: var(--ink); margin: 4px 0 0; }
+.lab-big { font-size: 46px; font-weight: 200; color: var(--glow); margin: 0; line-height: 1; font-variant-numeric: tabular-nums; }
+.lab-big span { font-size: 20px; opacity: .7; }
+
+.lab-panel-time { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.lab-clock {
+  font-size: clamp(34px, 6vw, 62px); font-weight: 200; letter-spacing: .04em; margin: 0;
+  color: var(--glow); text-shadow: 0 0 22px rgba(93, 240, 205, .45); font-variant-numeric: tabular-nums;
+}
+/* The focused panel's summary, shown in the words it would be spoken in, so
+   the Speak button is never a surprise. */
+.lab-summary {
+  margin: 22px 0 0; max-width: 34ch; font-size: 15px; line-height: 1.6;
+  color: var(--ink); min-height: 3em;
+}
+
+.lab-tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.lab-task { font-size: 12px; color: var(--ink); padding-left: 16px; position: relative; line-height: 1.45; }
+.lab-task::before { content: ""; position: absolute; left: 0; top: .45em; width: 7px; height: 7px; border: 1px solid var(--glow); border-radius: 2px; }
+.lab-task.in-progress::before { background: var(--glow); }
+
+.lab-forecast { display: flex; gap: 14px; margin-top: 12px; }
+.lab-forecast div { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); }
+.lab-forecast strong { color: var(--glow); font-size: 10px; letter-spacing: .1em; }
+.lab-field { display: flex; flex-direction: column; gap: 5px; margin-top: 14px; font-size: 10px; letter-spacing: .12em; color: var(--muted); }
+.lab-field input {
+  border: 1px solid rgba(93, 240, 205, .2); background: transparent; color: var(--ink);
+  border-radius: 6px; padding: 8px 10px; font-size: 12px; font-family: inherit; letter-spacing: normal;
+}
+.lab-field input:focus { outline: none; border-color: var(--glow); }
+
+.lab-calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.lab-cal-head { font-size: 9px; color: var(--glow); text-align: center; letter-spacing: .06em; padding-bottom: 3px; }
+.lab-cal-day { font-size: 11px; color: var(--muted); text-align: center; padding: 3px 0; border-radius: 4px; font-variant-numeric: tabular-nums; }
+.lab-cal-day.today { background: var(--glow); color: #06100d; font-weight: 700; }
+
+/* The board panel: faint circuit traces behind the text, which brighten while
+   it is speaking so the source of the voice is obvious. */
+.lab-board-inner { position: relative; overflow: hidden; border-radius: 8px; }
+.lab-traces {
+  position: absolute; inset: 0; opacity: .25; transition: opacity .3s;
+  background-image:
+    linear-gradient(90deg, rgba(93, 240, 205, .5) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(93, 240, 205, .35) 1px, transparent 1px);
+  background-size: 26px 26px, 26px 26px;
+  mask-image: radial-gradient(circle at 30% 40%, #000 0%, transparent 72%);
+}
+.lab-board-inner p { position: relative; font-size: 11px; color: var(--muted); margin: 0 0 6px; line-height: 1.5; }
+.lab-board-inner.talking { box-shadow: inset 0 0 30px rgba(93, 240, 205, .18); }
+.lab-board-inner.talking .lab-traces { opacity: .7; animation: lab-pulse 1.1s ease-in-out infinite; }
+@keyframes lab-pulse { 0%, 100% { opacity: .35; } 50% { opacity: .85; } }
+
+@media (max-width: 1080px) {
+  .lab-grid { grid-template-columns: 1fr; }
+  .lab-hand { width: min(320px, 70vw); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-board-inner.talking .lab-traces { animation: none; }
+}
+
+.physics-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.physics-controls .physics-danger { border-color: rgba(255, 68, 102, .45); color: #ff8098; margin-left: auto; }
+.physics-controls .physics-danger:hover { border-color: #ff4466; color: #ff4466; }
+#physics-delete-mode.active { border-color: #ff4466; color: #ff4466; background: rgba(255, 68, 102, .1); }
+.physics-field { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.physics-field input[type="range"] { width: 96px; accent-color: var(--acid); }
+.physics-field output { font-variant-numeric: tabular-nums; min-width: 2.2em; color: var(--ink); }
+.physics-field select {
+  border: 1px solid var(--line); background: transparent; color: var(--ink);
+  border-radius: 6px; padding: 7px 9px; font-size: 11px; font-family: inherit;
+}
+.physics-field select:focus { outline: none; border-color: var(--acid); }
+
+/* A grid rather than a row: fourteen tools wrap into something scannable
+   instead of a line that runs off the edge or scrolls sideways. */
+.demo-hud {
+  position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid rgba(255, 68, 102, .45); border-radius: 999px;
+  background: rgba(10, 13, 14, .94); padding: 9px 12px 9px 16px;
+  font-size: 12px; color: var(--ink); box-shadow: 0 8px 30px rgba(0, 0, 0, .45);
+}
+.demo-hud .secondary-button { padding: 6px 12px; font-size: 10px; }
+.demo-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff4466; animation: demo-blink 1.4s ease-in-out infinite; }
+@keyframes demo-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .demo-dot { animation: none; } }
+
+.physics-scenes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.physics-scenes input, .physics-scenes select {
+  border: 1px solid var(--line); background: transparent; color: var(--ink);
+  border-radius: 6px; padding: 8px 10px; font-size: 11px; font-family: inherit;
+}
+.physics-scenes input { flex: 1 1 160px; min-width: 0; }
+.physics-scenes select { flex: 1 1 180px; min-width: 0; }
+.physics-scenes input:focus, .physics-scenes select:focus { outline: none; border-color: var(--acid); }
+
+.physics-tools {
+  display: grid; gap: 6px; margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  max-height: 168px; overflow-y: auto;
+}
+.physics-tool {
+  border: 1px solid var(--line); background: transparent; color: var(--muted);
+  border-radius: 7px; padding: 9px 6px; font-size: 11px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: border-color .15s, color .15s, background .15s;
+}
+.physics-tool:hover { border-color: var(--acid); color: var(--acid); background: rgba(189, 255, 71, .07); }
+.physics-joint { border-style: dashed; }
+.physics-tool.active { border-color: var(--acid); color: #11150d; background: var(--acid); border-style: solid; }
+
+.physics-canvas { display: block; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; cursor: crosshair; }
+.physics-canvas.deleting { border-color: rgba(255, 68, 102, .5); }
+.physics-readout { font-variant-numeric: tabular-nums; min-height: 1.2em; }
+@media (max-width: 620px) {
+  .physics-controls .physics-danger { margin-left: 0; }
+  .demo-hud {
+  position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 60;
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid rgba(255, 68, 102, .45); border-radius: 999px;
+  background: rgba(10, 13, 14, .94); padding: 9px 12px 9px 16px;
+  font-size: 12px; color: var(--ink); box-shadow: 0 8px 30px rgba(0, 0, 0, .45);
+}
+.demo-hud .secondary-button { padding: 6px 12px; font-size: 10px; }
+.demo-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff4466; animation: demo-blink 1.4s ease-in-out infinite; }
+@keyframes demo-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .demo-dot { animation: none; } }
+
+.physics-scenes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.physics-scenes input, .physics-scenes select {
+  border: 1px solid var(--line); background: transparent; color: var(--ink);
+  border-radius: 6px; padding: 8px 10px; font-size: 11px; font-family: inherit;
+}
+.physics-scenes input { flex: 1 1 160px; min-width: 0; }
+.physics-scenes select { flex: 1 1 180px; min-width: 0; }
+.physics-scenes input:focus, .physics-scenes select:focus { outline: none; border-color: var(--acid); }
+
+.physics-tools { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+}
+.world-panel { margin-top: 20px; }
+.world-canvas { display: block; width: 100%; height: 300px; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; margin: 14px 0 10px; }
+.world-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
+.world-skills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }

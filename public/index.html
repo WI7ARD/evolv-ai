@@ -7,6 +7,11 @@
     <title>Evolv · Local AI</title>
     <link rel="stylesheet" href="/styles.css?v=0.6.3" />
     <link rel="modulepreload" href="/agent-workspace.js?v=0.6.3" />
+    <link rel="modulepreload" href="/sandbox.js?v=0.6.3" />
+    <link rel="modulepreload" href="/world.js?v=0.6.3" />
+    <link rel="modulepreload" href="/physics.js?v=0.6.3" />
+    <link rel="modulepreload" href="/lab.js?v=0.6.3" />
+    <link rel="modulepreload" href="/demo.js?v=0.6.3" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -27,10 +32,8 @@
         <nav class="side-nav" aria-label="Workspace">
           <button class="nav-item active" data-view="chat">
             <span class="nav-icon">◌</span> Chat
-          </button>
-          <button class="nav-item" data-view="agent">
-            <span class="nav-icon">◎</span> Agent
-            <span id="agent-dot" class="notification-dot hidden"></span>
+            <span id="agent-dot" class="notification-dot hidden" title="A goal run is waiting for approval"></span>
+            <span id="sandbox-dot" class="notification-dot hidden" title="A simulation is open; the project is untouched"></span>
           </button>
           <button class="nav-item" data-view="projects">
             <span class="nav-icon">▣</span> Projects
@@ -101,9 +104,13 @@
             </label>
             <label class="control">
               <span>MODEL</span>
-              <select id="model-select" aria-label="Ollama model">
-                <option value="">Loading models…</option>
-              </select>
+              <span class="model-control">
+                <select id="model-select" aria-label="Ollama model">
+                  <option value="">Loading models…</option>
+                </select>
+                <button id="favorite-model" class="favorite-button" type="button" aria-pressed="false"
+                  aria-label="Add this model to favourites" title="Add this model to favourites">☆</button>
+              </span>
             </label>
             <label class="control">
               <span>REASONING</span>
@@ -123,6 +130,7 @@
                 <option value="creative">Muse</option>
               </select>
             </label>
+            <button id="save-chat-button" class="icon-button" aria-label="Save this chat to your Obsidian vault" title="Save this chat to your Obsidian vault">⤓</button>
             <button id="settings-button" class="icon-button" aria-label="Generation settings" title="Generation settings">⚙</button>
           </div>
           <div class="version-pill">
@@ -147,9 +155,45 @@
           </div>
 
           <div class="composer-wrap">
+          <!-- First-run setup. Hidden once a local model is installed, and the
+               only thing on screen that can start a model download. -->
+          <div id="local-setup" class="local-setup hidden" role="status" aria-live="polite">
+            <div class="local-setup-main">
+              <div class="local-setup-copy">
+                <strong id="local-setup-title">Ollama is running, but no AI models are installed.</strong>
+                <p id="local-setup-detail">Install Evolv Local to start chatting.</p>
+              </div>
+              <button id="install-evolv-local" class="primary-button" type="button">Get Evolv Local</button>
+            </div>
+            <div id="local-setup-progress" class="local-setup-progress hidden">
+              <div class="progress-head">
+                <span id="local-setup-phase">Downloading Evolv Local</span>
+                <span id="local-setup-bytes"></span>
+              </div>
+              <div class="progress-track"><div id="local-setup-bar" class="progress-bar"></div></div>
+              <div class="progress-foot">
+                <small id="local-setup-status">pulling manifest</small>
+                <span class="progress-actions">
+                  <button id="local-setup-cancel" class="secondary-button" type="button">Cancel</button>
+                  <button id="local-setup-hide" class="secondary-button" type="button">Hide</button>
+                </span>
+              </div>
+            </div>
+            <details id="local-setup-error" class="local-setup-error hidden">
+              <summary>Details</summary>
+              <pre id="local-setup-error-detail"></pre>
+            </details>
+          </div>
+            <!-- Slash commands were reachable only by typing one from memory.
+                 This lists them as they are typed. -->
+            <div id="command-menu" class="command-menu hidden" role="listbox" aria-label="Commands"></div>
+            <div id="edit-banner" class="edit-banner hidden">
+              <span>Editing your message — sending replaces the replies after it.</span>
+              <button id="edit-cancel" class="secondary-button" type="button">Cancel</button>
+            </div>
             <form id="composer" class="composer">
               <div id="attachment-strip" class="attachment-strip hidden"></div>
-              <textarea id="prompt" rows="1" placeholder="Message Evolv…" aria-label="Message"></textarea>
+              <textarea id="prompt" rows="1" placeholder="Message Evolv…    / for commands" aria-label="Message"></textarea>
               <div class="composer-footer">
                 <div class="composer-tools">
                   <button id="attach-button" class="tool-button hidden" type="button" aria-label="Attach an image" title="Attach an image">✚</button>
@@ -158,7 +202,7 @@
                   <button id="voice-toggle" class="tool-button" type="button" aria-label="Toggle spoken replies" title="Spoken replies">◖</button>
                   <button id="gesture-button" class="tool-button" type="button" aria-label="Open hand gestures" title="Hand gestures">✋</button>
                 </div>
-                <span id="composer-hint">Enter to send · Shift+Enter for a new line</span>
+                <span id="composer-hint">Enter to send · Shift+Enter for a new line · /agent · /sandbox · /physics · /lab · /demo</span>
                 <span id="voice-listen-status" class="voice-listen-status hidden" aria-live="polite">Hold the microphone button to talk</span>
                 <button id="stop-button" class="stop-button hidden" type="button">Stop</button>
                 <button id="send-button" class="send-button" type="submit" aria-label="Send">↑</button>
@@ -168,10 +212,181 @@
           </div>
         </section>
 
+        <section id="sandbox-view" class="view panel-view agent-view">
+          <div class="panel-header">
+            <div><p class="eyebrow">SAFE CHANGES</p><h1>Simulation</h1><p>Evolv tries changes in a private copy of the project first. Nothing here reaches your files until you approve the promotion in chat. Started with <code>/sandbox</code>.</p></div>
+            <div class="panel-header-actions">
+              <button id="sandbox-back-to-chat" class="secondary-button" type="button">Back to chat</button>
+              <button id="sandbox-refresh" class="secondary-button" type="button">Refresh</button>
+            </div>
+          </div>
+          <p id="sandbox-banner" class="sandbox-banner hidden" role="status" aria-live="polite"></p>
+          <form id="sandbox-new" class="sandbox-new">
+            <label class="sr-only" for="sandbox-objective">What should Evolv try?</label>
+            <input id="sandbox-objective" name="objective" type="text" maxlength="2000" autocomplete="off"
+                   placeholder="What should Evolv try? (optional)" />
+            <button id="sandbox-start" class="primary-button" type="submit">New simulation</button>
+          </form>
+          <article id="world-panel" class="mind-card world-panel">
+            <div class="mind-card-heading">
+              <div><p class="eyebrow">WORLD</p><h2>What Evolv is doing</h2></div>
+              <label class="world-toggle"><input id="world-enabled" type="checkbox" checked /> <span>Show</span></label>
+            </div>
+            <canvas id="world-canvas" class="world-canvas" role="img" aria-label="A map of the current simulation"></canvas>
+            <p id="world-caption" class="settings-note">Open a simulation to see it here.</p>
+            <div id="world-skills" class="world-skills"></div>
+          </article>
+          <div class="agent-layout">
+            <article class="mind-card agent-runs-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">SIMULATIONS</p><h2>Sessions</h2></div><span id="sandbox-count" class="status-pill">0</span></div>
+              <div id="sandbox-list" class="agent-run-list"><p class="settings-note">No simulations yet.</p></div>
+            </article>
+          </div>
+          <article id="sandbox-detail" class="mind-card agent-detail hidden" aria-live="polite"></article>
+        </section>
+
+        <section id="demo-view" class="view panel-view">
+          <div class="panel-header">
+            <div><p class="eyebrow">SHOW ME</p><h1>Demo</h1><p>Evolv runs a real experiment on itself and narrates it aloud. Nothing is pre-rendered — the physics is solved live and any answer comes from your own model. Started with <code>/demo</code>.</p></div>
+            <div class="panel-header-actions">
+              <button id="demo-back-to-chat" class="secondary-button" type="button">Back to chat</button>
+              <button id="demo-stop" class="secondary-button physics-danger hidden" type="button">Stop</button>
+              <button id="demo-start" class="primary-button" type="button">Run demo</button>
+            </div>
+          </div>
+          <article class="mind-card">
+            <div class="physics-scenes">
+              <label class="sr-only" for="demo-script">Which demo</label>
+              <select id="demo-script"></select>
+            </div>
+            <p id="demo-title" class="lab-line"></p>
+            <p id="demo-status" class="settings-note">Ready.</p>
+            <p id="demo-note" class="settings-note">Evolv does not record itself. Start whatever screen recorder you already use, then press Run demo — the narration plays through your speakers and will be picked up along with the picture.</p>
+          </article>
+        </section>
+
+        <section id="lab-view" class="view panel-view lab-view">
+          <div class="panel-header">
+            <div><p class="eyebrow">LAB DISPLAY</p><h1>Lab</h1><p>Time, weather, and open work at a glance — read aloud on request. Started with <code>/lab</code>. No camera and no microphone.</p></div>
+            <div class="panel-header-actions">
+              <button id="lab-back-to-chat" class="secondary-button" type="button">Back to chat</button>
+              <button id="lab-refresh" class="secondary-button" type="button">Refresh</button>
+              <button id="lab-stop-speech" class="secondary-button" type="button">Stop speech</button>
+            </div>
+          </div>
+
+          <div class="lab-grid">
+            <article id="lab-panel-tasks" class="lab-panel">
+              <header><span class="lab-eyebrow">TO DO</span><span class="lab-header-right"><span id="lab-task-count" class="status-pill">0</span><button class="lab-speak" type="button" data-speak="tasks" aria-label="Read open tasks aloud">Speak</button></span></header>
+              <ul id="lab-tasks" class="lab-tasks"></ul>
+            </article>
+
+            <article id="lab-panel-time" class="lab-panel lab-panel-time">
+              <p id="lab-clock" class="lab-clock">--:--:--</p>
+              <p id="lab-date" class="lab-line"></p>
+              <p id="lab-summary" class="lab-summary" aria-live="polite"></p>
+              <button class="lab-speak" type="button" data-speak="time" aria-label="Read the time aloud">Speak</button>
+            </article>
+
+            <div class="lab-column">
+              <article id="lab-panel-weather" class="lab-panel">
+                <header><span class="lab-eyebrow">WEATHER</span><button class="lab-speak" type="button" data-speak="weather" aria-label="Read the weather aloud">Speak</button></header>
+                <div id="lab-weather"></div>
+                <label class="lab-field">
+                  <span>Location</span>
+                  <input id="lab-location" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Austin, Texas" />
+                </label>
+              </article>
+
+              <article class="lab-panel">
+                <header><span class="lab-eyebrow">CALENDAR</span><span id="lab-month" class="lab-note"></span></header>
+                <div id="lab-calendar" class="lab-calendar"></div>
+              </article>
+
+              <article id="lab-panel-system" class="lab-panel lab-board">
+                <header><span class="lab-eyebrow">SYSTEM</span><button class="lab-speak" type="button" data-speak="system" aria-label="Read the system panel aloud">Speak</button></header>
+                <div id="lab-system-panel" class="lab-board-inner">
+                  <div class="lab-traces" aria-hidden="true"></div>
+                  <div id="lab-system"></div>
+                </div>
+              </article>
+            </div>
+          </div>
+          <p class="settings-note">Each panel reads itself aloud.</p>
+        </section>
+
+        <section id="physics-view" class="view panel-view agent-view">
+          <div class="panel-header">
+            <div><p class="eyebrow">SANDBOX</p><h1>Physics</h1><p>A small world with gravity. Drop objects in, press Run, and watch. Evolv can build here and see what happened — ask it to try something. Started with <code>/physics</code>.</p></div>
+            <div class="panel-header-actions">
+              <button id="physics-back-to-chat" class="secondary-button" type="button">Back to chat</button>
+            </div>
+          </div>
+          <article class="mind-card">
+            <div class="physics-controls">
+              <button id="physics-play" class="primary-button" type="button">Run</button>
+              <label class="physics-field">
+                <span>Material</span>
+                <select id="physics-material">
+                  <option value="default">Default</option>
+                  <option value="rubber">Bouncy rubber</option>
+                  <option value="metal">Heavy metal</option>
+                  <option value="wood">Light wood</option>
+                  <option value="ice">Ice</option>
+                </select>
+              </label>
+              <label class="physics-field">
+                <span>Gravity</span>
+                <input id="physics-gravity" type="range" min="-2" max="3" step="0.1" value="1" />
+                <output id="physics-gravity-value">1.0</output>
+              </label>
+              <label class="physics-field">
+                <span>Wind</span>
+                <input id="physics-wind" type="range" min="-3" max="3" step="0.1" value="0" />
+                <output id="physics-wind-value">0.0</output>
+              </label>
+              <button id="physics-reset" class="secondary-button" type="button" title="Return to how the scene looked before you pressed Run">Reset</button>
+              <button id="physics-delete-mode" class="secondary-button" type="button" aria-pressed="false">Delete tool</button>
+              <button id="physics-clear" class="secondary-button physics-danger" type="button">Clear all</button>
+            </div>
+            <div class="physics-scenes">
+              <label class="sr-only" for="physics-scene-name">Scene name</label>
+              <input id="physics-scene-name" type="text" maxlength="80" autocomplete="off" placeholder="Name this scene" />
+              <button id="physics-save" class="secondary-button" type="button">Save</button>
+              <label class="sr-only" for="physics-scene-list">Saved scenes</label>
+              <select id="physics-scene-list"><option value="">Saved scenes…</option></select>
+              <button id="physics-load" class="secondary-button" type="button">Load</button>
+              <button id="physics-scene-delete" class="secondary-button physics-danger" type="button">Delete scene</button>
+            </div>
+            <div id="physics-tools" class="physics-tools" role="group" aria-label="Objects to drop into the scene">
+              <button class="physics-tool" type="button" data-kind="box">Box</button>
+              <button class="physics-tool" type="button" data-kind="circle">Circle</button>
+              <button class="physics-tool" type="button" data-kind="triangle">Triangle</button>
+              <button class="physics-tool" type="button" data-kind="polygon">Polygon</button>
+              <button class="physics-tool" type="button" data-kind="star">Star</button>
+              <button class="physics-tool" type="button" data-kind="ramp">Ramp</button>
+              <button class="physics-tool" type="button" data-kind="motor">Motor</button>
+              <button class="physics-tool" type="button" data-kind="gear">Gear</button>
+              <button class="physics-tool" type="button" data-kind="chain">Chain</button>
+              <button class="physics-tool" type="button" data-kind="rope">Rope</button>
+              <button class="physics-tool" type="button" data-kind="ragdoll">Ragdoll</button>
+              <button class="physics-tool" type="button" data-kind="car">Car</button>
+              <button class="physics-tool physics-joint" type="button" data-joint="spring">Spring</button>
+              <button class="physics-tool physics-joint" type="button" data-joint="pin">Pin joint</button>
+            </div>
+            <canvas id="physics-canvas" class="physics-canvas" role="img" aria-label="The physics sandbox"></canvas>
+            <p id="physics-caption" class="settings-note">Empty scene. Drop something in.</p>
+            <p id="physics-readout" class="settings-note physics-readout" aria-live="polite"></p>
+          </article>
+        </section>
+
         <section id="agent-view" class="view panel-view agent-view">
           <div class="panel-header">
-            <div><p class="eyebrow">VERIFIED GOAL RUNNER</p><h1>Agent</h1><p>Approve the plan once. Evolv runs safe local reads, pauses before every outside request or change, and finishes only after verification.</p></div>
-            <button id="agent-refresh" class="secondary-button" type="button">Refresh runs</button>
+            <div><p class="eyebrow">VERIFIED GOAL RUNNER</p><h1>Agent</h1><p>Started with <code>/agent</code> in chat. Approve the plan once. Evolv runs safe local reads, pauses before every outside request or change, and finishes only after verification.</p></div>
+            <div class="panel-header-actions">
+              <button id="agent-back-to-chat" class="secondary-button" type="button">Back to chat</button>
+              <button id="agent-refresh" class="secondary-button" type="button">Refresh runs</button>
+            </div>
           </div>
           <div class="agent-layout">
             <article class="mind-card agent-create-card">
@@ -289,6 +504,15 @@
               <label><span class="field-label">MONTHLY CLOUD COST-UNIT SAFEGUARD (0 = UNLIMITED)</span><input id="monthly-cost-limit" type="number" min="0" max="100000" step="1" value="0" /></label>
               <button id="save-intelligence-settings" class="primary-button" type="button">Save intelligence settings</button>
             </article>
+            <article class="mind-card agent-model-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">SPECIALISTS</p><h2>Who runs each step</h2></div></div>
+              <p class="settings-note">A goal plan is shared out between specialists. Each one can run on its own model — checking criteria against evidence is worth more than searching a folder, and paying for the strong model on every step is how goals become too expensive to use.</p>
+              <label class="tool-switch"><input id="agent-specialists-enabled" type="checkbox" checked /> Share goal steps out between specialists</label>
+              <p class="settings-note">Turn this off and every step runs as one generalist voice, on the goal's own model, with no pinned models and no per-role limits. That is the control arm: goals run both ways are compared below, under <strong>Were specialists worth it</strong>.</p>
+              <div id="agent-model-pins" class="agent-model-pins"></div>
+              <p class="settings-note">Left on “the goal's own model”, a specialist uses whatever the run was started with. Pinned models come from the provider selected in chat; switch provider to pin one from somewhere else.</p>
+              <button id="save-agent-models" class="primary-button" type="button">Save specialist models</button>
+            </article>
             <article class="mind-card intelligence-model-card">
               <div class="mind-card-heading"><div><p class="eyebrow">MODEL PROFILES</p><h2>Auto preferences</h2></div></div>
               <p class="settings-note">Rate models from 1–5. Cost may be 0 for local models. Disabling Auto never removes manual selection.</p>
@@ -316,6 +540,13 @@
               <div id="failure-pattern-list" class="routing-history"></div>
             </article>
           </div>
+          <article class="mind-card specialist-comparison-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">CONTROL ARM · RECORDED PER RUN</p><h2>Were specialists worth it</h2></div><span id="specialist-verdict-badge" class="model-badge">NO VERDICT</span></div>
+            <p id="specialist-verdict" class="settings-note">Run some goals with specialists on and some with them off. Nothing here is inferred — every figure comes from runs you already finished.</p>
+            <div id="specialist-cohorts" class="specialist-cohorts"></div>
+            <div id="specialist-gaps" class="routing-history"></div>
+            <p id="specialist-method" class="settings-note"></p>
+          </article>
           <article class="mind-card strategy-lab-card">
             <div class="mind-card-heading"><div><p class="eyebrow">BENCHMARK → REVIEW → APPROVE</p><h2>Strategy lab</h2></div><button id="rollback-strategy" class="secondary-button" type="button">Rollback active strategy</button></div>
             <p class="settings-note">A benchmark runs five fixed cases twice (10 model calls). Cloud models may create provider charges. Evolv will never activate a candidate automatically.</p>
@@ -657,6 +888,15 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <!-- The demo drives whichever view it is showing off, which puts its own
+         controls off-screen. This rides above every view so the run can always
+         be seen and stopped. -->
+    <div id="demo-hud" class="demo-hud hidden" role="status" aria-live="polite">
+      <span class="demo-dot" aria-hidden="true"></span>
+      <span id="demo-hud-text">Running…</span>
+      <button id="demo-hud-stop" class="secondary-button" type="button">Stop</button>
     </div>
 
     <dialog id="settings-dialog">

@@ -1,6 +1,6 @@
 # GitHub repository, releases, and automatic updates
 
-The intended repository is `WI7ARD/evolv-personal`. The source repository contains no profile databases, API credentials, account data, logs, exports, old builds, or smoke profiles. Large Whisper, Piper, executable, and DLL assets use Git LFS.
+The intended repository is `WI7ARD/evolv-ai`. The source repository contains no profile databases, API credentials, account data, logs, exports, old builds, or smoke profiles. Large Whisper, Piper, executable, and DLL assets use Git LFS.
 
 ## First publication
 

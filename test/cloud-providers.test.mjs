@@ -12,6 +12,7 @@ import { createProviderService } from "../lib/providers.mjs";
 // can differ per vendor while sharing one server. Every request is recorded so
 // the tests can assert the provider-specific authentication headers.
 const requests = [];
+const attempts = new Map();
 let server;
 let origin;
 
@@ -71,6 +72,30 @@ test.before(async () => {
       return res.end("data: [DONE]\n\n");
     }
 
+    // OpenAI â€” reject optional parameters once so the compatibility retry is
+    // exercised, and expose a model-specific rejection for fallback testing.
+    if (req.url === "/openai/models") {
+      return json(200, { data: [
+        { id: "gpt-compat" }, { id: "gpt-replacement" }, { id: "gpt-transient" },
+        { id: "text-embedding-3-small" }, { id: "gpt-4o-realtime-preview" }
+      ] });
+    }
+    if (req.url === "/openai/responses" && req.method === "POST") {
+      const parsed = JSON.parse(body || "{}");
+      const count = (attempts.get(parsed.model) || 0) + 1;
+      attempts.set(parsed.model, count);
+      if (parsed.model === "gpt-unavailable") {
+        return json(400, { error: { message: "This model has been retired and is not available." } });
+      }
+      if (parsed.model === "gpt-transient" && count === 1) {
+        return json(503, { error: { message: "Temporarily unavailable" } });
+      }
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Reliable OpenAI reply." })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", usage: { input_tokens: 4, output_tokens: 4 } } })}\n\n`);
+      return res.end("data: [DONE]\n\n");
+    }
+
     // Gemini — models list gated by supportedGenerationMethods, generateContent chat.
     if (req.url === "/gemini/models") {
       if (req.headers["x-goog-api-key"] === "revoked-gemini-key") {
@@ -86,12 +111,19 @@ test.before(async () => {
         { name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] }
       ] });
     }
-    if (req.url.startsWith("/gemini/models/") && req.url.includes(":streamGenerateContent") && req.method === "POST") {
+    if (req.url === "/gemini/interactions" && req.method === "POST") {
+      const parsed = JSON.parse(body || "{}");
       res.writeHead(200, { "content-type": "text/event-stream" });
       const sse = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
-      sse({ candidates: [{ content: { parts: [{ text: "Hi from " }] } }] });
-      sse({ candidates: [{ content: { parts: [{ text: "Gemini." }] } }] });
-      sse({ candidates: [{ content: { parts: [{ functionCall: { name: "calculator", args: { expression: "2+2" } } }] } }] });
+      sse({ event_type: "step.delta", step_id: "text_1", delta: { type: "text", text: "Hi from " } });
+      sse({ event_type: "step.delta", step_id: "text_1", delta: { type: "text", text: "Gemini." } });
+      if (parsed.tools?.length) {
+        const step = { type: "function_call", id: "step_calc", call_id: "call_calc", name: "calculator", arguments: { expression: "2+2" } };
+        sse({ event_type: "step.start", index: 1, step: { type: "function_call", id: step.id, name: step.name } });
+        sse({ event_type: "step.delta", index: 1, delta: { type: "arguments", partial_arguments: JSON.stringify(step.arguments) } });
+        sse({ event_type: "step.stop", index: 1, status: "waiting" });
+      }
+      sse({ event_type: "interaction.completed", interaction: { status: "completed", usage: { input_tokens: 3, output_tokens: 3 } } });
       return res.end();
     }
 
@@ -121,6 +153,7 @@ async function withService(run) {
     providerBaseUrls: {
       anthropic: `${origin}/anthropic`,
       openrouter: `${origin}/openrouter`,
+      openai: `${origin}/openai`,
       gemini: `${origin}/gemini`
     }
   });
@@ -156,13 +189,13 @@ test("Anthropic discovery, capabilities, and native message streaming", async ()
       model: "claude-4-sonnet",
       messages: [{ role: "system", content: "Be brief." }, { role: "user", content: "hi" }],
       options: { temperature: 0, maxTokens: 8192 }
-    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk.message));
-    assert.equal(chunks.map((message) => message.content || "").join(""), "Hi from Claude.");
-    assert.ok(chunks.filter((message) => message.content).length >= 2, "text arrives as incremental deltas");
-    assert.equal(chunks.map((message) => message.thinking || "").join(""), "Let me reason.");
-    const toolCall = chunks.find((message) => message.tool_calls)?.tool_calls[0];
-    assert.equal(toolCall.function.name, "calculator");
-    assert.deepEqual(toolCall.function.arguments, { expression: "2+2" }, "tool input reassembled from input_json_delta");
+    }, AbortSignal.timeout(5000), (event) => chunks.push(event));
+    assert.equal(chunks.filter((event) => event.type === "text.delta").map((event) => event.delta).join(""), "Hi from Claude.");
+    assert.ok(chunks.filter((event) => event.type === "text.delta").length >= 2, "text arrives as incremental deltas");
+    assert.equal(chunks.filter((event) => event.type === "reasoning.delta").map((event) => event.delta).join(""), "Let me reason.");
+    const toolCall = chunks.find((event) => event.type === "tool.call");
+    assert.equal(toolCall.name, "calculator");
+    assert.deepEqual(toolCall.arguments, { expression: "2+2" }, "tool input reassembled from input_json_delta");
 
     const chatRequest = lastRequest((url) => url === "/anthropic/messages");
     const chatBody = JSON.parse(chatRequest.body);
@@ -189,16 +222,62 @@ test("OpenRouter discovery reads capability metadata and streams SSE with reason
       model: "anthropic/claude-3.5-sonnet",
       messages: [{ role: "user", content: "hi" }],
       options: { temperature: 0 }
-    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk.message));
-    assert.equal(chunks.map((message) => message.content || "").join(""), "Routed reply.");
-    assert.equal(chunks.map((message) => message.thinking || "").join(""), "Thinking… ");
-    const toolCall = chunks.find((message) => message.tool_calls)?.tool_calls[0];
-    assert.equal(toolCall.function.name, "calculator");
-    assert.equal(toolCall.function.arguments, "{\"expression\":\"2+2\"}");
+    }, AbortSignal.timeout(5000), (event) => chunks.push(event));
+    assert.equal(chunks.filter((event) => event.type === "text.delta").map((event) => event.delta).join(""), "Routed reply.");
+    assert.equal(chunks.filter((event) => event.type === "reasoning.delta").map((event) => event.delta).join(""), "Thinking… ");
+    const toolCall = chunks.find((event) => event.type === "tool.call");
+    assert.equal(toolCall.name, "calculator");
+    assert.deepEqual(toolCall.arguments, { expression: "2+2" });
   });
 });
 
-test("Gemini filters non-chat models and bridges generateContent responses", async () => {
+test("OpenAI uses the Responses API, stateless storage, native tools, and filters non-chat models", async () => {
+  await withService(async (service) => {
+    await service.saveCredentials("openai", { apiKey: "sk-openai-test-key" });
+    const models = await service.models("openai");
+    assert.ok(models.some((model) => model.id === "gpt-compat"));
+    assert.ok(!models.some((model) => /embedding|realtime/i.test(model.id)), "non-chat models are hidden");
+
+    const chunks = [];
+    await service.streamRound("openai", {
+      model: "gpt-compat",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "calculate", description: "Calculate", parameters: { type: "object", properties: {} } } }],
+      format: { type: "object", properties: { answer: { type: "string" } }, required: ["answer"] },
+      options: { temperature: 0.4 }
+    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk));
+    assert.equal(chunks.filter((event) => event.type === "text.delta").map((event) => event.delta).join(""), "Reliable OpenAI reply.");
+    const responseRequests = requests.filter((item) => item.url === "/openai/responses" && JSON.parse(item.body).model === "gpt-compat");
+    assert.equal(responseRequests.length, 1);
+    const request = JSON.parse(responseRequests[0].body);
+    assert.equal(request.store, false);
+    assert.equal(request.tools[0].name, "calculate");
+    assert.equal("temperature" in request, false);
+    assert.equal(request.text.format.type, "json_schema");
+  });
+});
+
+test("provider failures preserve safe detail, classify unavailable models, and retry temporary errors once", async () => {
+  await withService(async (service) => {
+    await service.saveCredentials("openai", { apiKey: "sk-openai-test-key" });
+    await assert.rejects(
+      service.streamRound("openai", {
+        model: "gpt-unavailable", messages: [{ role: "user", content: "hi" }], options: { temperature: 0 }
+      }, AbortSignal.timeout(5000), () => {}),
+      (error) => error.code === "MODEL_UNAVAILABLE" && /retired/i.test(error.message)
+    );
+    assert.equal((await service.alternativeModel("openai", "gpt-unavailable")).id, "gpt-compat");
+
+    const chunks = [];
+    await service.streamRound("openai", {
+      model: "gpt-transient", messages: [{ role: "user", content: "retry" }], options: {}
+    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk));
+    assert.equal(chunks.filter((event) => event.type === "text.delta").map((event) => event.delta).join(""), "Reliable OpenAI reply.");
+    assert.equal(attempts.get("gpt-transient"), 2);
+  });
+});
+
+test("Gemini filters non-chat models and streams native Interactions events", async () => {
   await withService(async (service) => {
     await service.saveCredentials("gemini", { apiKey: "test-gemini-key" });
 
@@ -214,17 +293,38 @@ test("Gemini filters non-chat models and bridges generateContent responses", asy
     await service.streamRound("gemini", {
       model: "gemini-2.5-pro",
       messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "calculator", description: "Calculate", parameters: { type: "object", properties: {} } } }],
       options: { temperature: 0 }
-    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk.message));
-    assert.equal(chunks.map((message) => message.content || "").join(""), "Hi from Gemini.");
-    assert.ok(chunks.filter((message) => message.content).length >= 2, "text arrives as incremental deltas");
-    const toolCall = chunks.find((message) => message.tool_calls)?.tool_calls[0];
-    assert.equal(toolCall.function.name, "calculator");
-    assert.deepEqual(toolCall.function.arguments, { expression: "2+2" });
+    }, AbortSignal.timeout(5000), (event) => chunks.push(event));
+    assert.equal(chunks.filter((event) => event.type === "text.delta").map((event) => event.delta).join(""), "Hi from Gemini.");
+    assert.ok(chunks.filter((event) => event.type === "text.delta").length >= 2, "text arrives as incremental deltas");
+    const toolCall = chunks.find((event) => event.type === "tool.call");
+    assert.equal(toolCall.name, "calculator");
+    assert.deepEqual(toolCall.arguments, { expression: "2+2" });
 
-    const chatRequest = lastRequest((url) => url.includes(":streamGenerateContent"));
-    assert.equal(chatRequest.url, "/gemini/models/gemini-2.5-pro:streamGenerateContent?alt=sse");
-    assert.equal(JSON.parse(chatRequest.body).generationConfig.maxOutputTokens, 4096, "default max tokens applied");
+    const chatRequest = lastRequest((url) => url === "/gemini/interactions");
+    assert.equal(JSON.parse(chatRequest.body).store, false);
+    assert.equal(JSON.parse(chatRequest.body).tools[0].name, "calculator");
+  });
+});
+
+test("Gemini sends tools and structured output through Interactions without legacy schema fallback", async () => {
+  await withService(async (service) => {
+    await service.saveCredentials("gemini", { apiKey: "test-gemini-key" });
+    const chunks = [];
+    await service.streamRound("gemini", {
+      model: "gemini-2.5-pro",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "calculate", description: "Calculate", parameters: { type: "object", properties: {} } } }],
+      format: { type: "object", properties: { answer: { type: "string" } }, required: ["answer"] },
+      options: { temperature: 0.2 }
+    }, AbortSignal.timeout(5000), (chunk) => chunks.push(chunk));
+    assert.equal(chunks.filter((event) => event.type === "text.delta").map((event) => event.delta).join(""), "Hi from Gemini.");
+    assert.equal(chunks.find((event) => event.type === "tool.call").name, "calculator");
+    const interaction = [...requests].reverse().find((item) => item.url === "/gemini/interactions");
+    const request = JSON.parse(interaction.body);
+    assert.equal(request.store, false);
+    assert.equal(request.response_format.mime_type, "application/json");
   });
 });
 
