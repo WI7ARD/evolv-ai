@@ -73,6 +73,22 @@ export async function handleCircuitRoutes(context) {
     }
   }
 
+  // The design as a file something else can build from. Served as a download
+  // rather than as JSON: the point of it is to land in a folder KiCad opens.
+  if (req.method === "GET" && url.pathname === "/api/circuit/export") {
+    const result = circuitService.export({
+      format: url.searchParams.get("format") || "netlist",
+      name: url.searchParams.get("name") || ""
+    });
+    res.writeHead(200, {
+      "content-type": `${result.contentType}; charset=utf-8`,
+      "content-disposition": `attachment; filename="${result.filename}"`,
+      "cache-control": "no-store"
+    });
+    res.end(result.content);
+    return true;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/circuit/conditions") {
     const body = await readBody(req, bodyLimit);
     json(res, 200, circuitService.setConditions(body));

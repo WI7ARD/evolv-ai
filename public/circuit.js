@@ -597,6 +597,36 @@ export function bindCircuitControls() {
       state.toast?.(error.message || "Could not rewind.");
     }
   });
+  // The export routes answer with a file rather than JSON, so this cannot go
+  // through state.api — it fetches the download and hands it to the browser.
+  // Opening the URL directly would work in a browser and not in Electron, where
+  // a navigation away from the page is not what anyone means by "save this".
+  for (const [button, format] of [["#circuit-export", "netlist"], ["#circuit-export-bom", "bom"]]) {
+    $(button)?.addEventListener("click", async () => {
+      if (state.busy) return;
+      state.busy = true;
+      try {
+        const name = state.circuit?.name || "Evolv circuit";
+        const response = await fetch(`/api/circuit/export?format=${format}&name=${encodeURIComponent(name)}`);
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "The export did not work.");
+        const disposition = response.headers.get("content-disposition") || "";
+        const filename = disposition.match(/filename="([^"]+)"/)?.[1] || `circuit.${format === "bom" ? "csv" : "net"}`;
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        state.toast?.(`Saved ${filename}`);
+      } catch (error) {
+        state.toast?.(error.message || "The export did not work.");
+      } finally {
+        state.busy = false;
+      }
+    });
+  }
   $("#circuit-check")?.addEventListener("click", async () => {
     stopLive();
     if (state.busy) return;
