@@ -6,11 +6,12 @@ Stage 6 local hearing intelligence details: [docs/STAGE-6-HEARING-INTELLIGENCE.m
 
 Stage 7 reliability and release details: [docs/STAGE-7-RELIABILITY-RELEASE.md](docs/STAGE-7-RELIABILITY-RELEASE.md)
 
-Evolv is a local-first chat that runs against local Ollama models or cloud
-providers (OpenAI, Anthropic, Gemini, OpenRouter, or any OpenAI-compatible API),
-with model switching, reasoning controls, safe local tools, persistent SQLite
-conversations, feedback, and reversible behavioral upgrades. It runs in the
-browser (`npm start`) or as a hardened Windows desktop app.
+Evolv is a local-first chat that runs against local Ollama models, with OpenAI
+available for when a local model is not enough. It has model switching,
+reasoning controls, safe local tools, persistent SQLite conversations, feedback,
+reversible behavioral upgrades, and two sandboxes — physics and circuits — that
+the assistant can build in and read the results of. It runs in the browser
+(`npm start`) or as a hardened Windows desktop app.
 
 ## Private adaptive profile
 
@@ -133,19 +134,20 @@ add a key for any of:
 | Provider | Notes |
 | --- | --- |
 | Ollama | Local, no key required (default `http://127.0.0.1:11434`) |
-| OpenAI | Chat models via the OpenAI API |
-| Anthropic | Claude models via the Messages API with native token streaming |
-| Google Gemini | Gemini models via the Generative Language API with native token streaming |
-| OpenRouter | Any OpenRouter-hosted model, with capability metadata |
-| Custom | Any OpenAI-compatible endpoint (HTTPS, or HTTP on loopback only) |
+| OpenAI | Chat models via the Responses API, with native tool calling |
+
+Two, deliberately. Evolv used to speak six, and roughly two thirds of the
+provider layer was the seam between their dialects — each one a place to be
+subtly wrong in a way only that provider would notice. Adding a third is a
+decision to be made again, not a table to append to.
 
 API keys are encrypted before they touch disk and are **write-only** — Evolv
 never returns a stored key to the browser or includes one in an export. On the
 desktop app, keys are sealed with the Windows Data Protection API (DPAPI) so
 they can only be decrypted by the same Windows user on the same machine; in the
 browser build they are encrypted with a key held in the server's data directory.
-Custom endpoints are validated to block private, link-local, and loopback
-targets (except explicit `localhost`) and to reject credentials or redirects.
+Outbound provider requests refuse redirects, so a key cannot be forwarded to
+whichever host a redirect names.
 
 Capabilities (tools, vision, thinking) are detected per model and shown as
 badges in the picker, exactly as for local models. All providers stream
