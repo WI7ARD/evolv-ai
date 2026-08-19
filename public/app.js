@@ -1903,7 +1903,6 @@ function renderProviderSettings() {
   if (!elements.providerSettingsList) return;
   elements.providerSettingsList.innerHTML = app.providers.map((provider) => {
     const cloudDisabled = provider.requiresKey && !provider.secretStorageAvailable;
-    const custom = provider.id === "custom";
     const ollama = provider.id === "ollama";
     return `
       <section class="provider-card" data-provider-card="${escapeHtml(provider.id)}">
@@ -1914,13 +1913,8 @@ function renderProviderSettings() {
         ${provider.statusMessage ? `<p class="settings-note">${escapeHtml(provider.statusMessage)}</p>` : ""}
         <div class="provider-card-fields">
           ${provider.requiresKey ? `<label class="wide"><span class="field-label">API KEY</span><input data-provider-key type="password" autocomplete="off" placeholder="${provider.configured ? "Enter a new key to replace the saved key" : "Paste API key"}" ${cloudDisabled ? "disabled" : ""}></label>` : ""}
-          ${(custom || ollama) ? `<label class="wide"><span class="field-label">BASE URL</span><input data-provider-url type="url" value="${escapeHtml(provider.baseUrl || "")}" ${cloudDisabled ? "disabled" : ""}></label>` : ""}
+          ${ollama ? `<label class="wide"><span class="field-label">BASE URL</span><input data-provider-url type="url" value="${escapeHtml(provider.baseUrl || "")}" ${cloudDisabled ? "disabled" : ""}></label>` : ""}
         </div>
-        ${custom ? `<div class="provider-capabilities">
-          <label><input data-provider-capability="tools" type="checkbox" ${provider.capabilities?.tools ? "checked" : ""}> Tools</label>
-          <label><input data-provider-capability="vision" type="checkbox" ${provider.capabilities?.vision ? "checked" : ""}> Vision</label>
-          <label><input data-provider-capability="thinking" type="checkbox" ${provider.capabilities?.thinking ? "checked" : ""}> Reasoning</label>
-        </div>` : ""}
         ${cloudDisabled ? `<p class="settings-note">${escapeHtml(provider.secretStorageDescription)}</p>` : ""}
         <div class="data-actions">
           <button class="secondary-button provider-save" type="button" ${cloudDisabled ? "disabled" : ""}>Save</button>
@@ -1938,13 +1932,11 @@ async function providerAction(button, action) {
   button.disabled = true;
   try {
     if (action === "save") {
-      const capabilities = Object.fromEntries([...card.querySelectorAll("[data-provider-capability]")]
-        .map((input) => [input.dataset.providerCapability, input.checked]));
       const apiKey = card.querySelector("[data-provider-key]")?.value;
       const baseUrl = card.querySelector("[data-provider-url]")?.value;
       await api(`/api/providers/${encodeURIComponent(providerId)}/credentials`, {
         method: "PUT",
-        body: JSON.stringify({ ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}), capabilities })
+        body: JSON.stringify({ ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}) })
       });
       toast(`${providerId} settings saved.`);
     } else if (action === "test") {

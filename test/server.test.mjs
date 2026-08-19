@@ -331,9 +331,9 @@ test("a model pinned to a specialist is validated before it is stored", async ()
     body: JSON.stringify({ agentModels })
   });
 
-  assert.equal((await patch({ critic: "anthropic:claude-sonnet-5", researcher: "ollama:evolv:latest" })).status, 200);
+  assert.equal((await patch({ critic: "openai:gpt-5", researcher: "ollama:evolv:latest" })).status, 200);
   assert.deepEqual((await (await client.fetch("/api/settings")).json()).agentModels,
-    { critic: "anthropic:claude-sonnet-5", researcher: "ollama:evolv:latest" });
+    { critic: "openai:gpt-5", researcher: "ollama:evolv:latest" });
 
   // It is read straight into a request, so an unrecognised provider or a name
   // with no provider at all is refused rather than stored and discovered later.

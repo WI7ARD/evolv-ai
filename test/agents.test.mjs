@@ -142,13 +142,13 @@ test("a model can be pinned to one specialist", () => {
   // worth a stronger model than searching a folder, and paying for the strong
   // one on every step is how people turn goals off.
   const settings = { agentModels: {
-    critic: "anthropic:claude-sonnet-5",
+    critic: "openai:gpt-5",
     researcher: "ollama:evolv:latest",
     writer: "not-a-provider:whatever",
     analyst: ""
   } };
 
-  assert.deepEqual(agentModelOverride(settings, "critic"), { providerId: "anthropic", model: "claude-sonnet-5" });
+  assert.deepEqual(agentModelOverride(settings, "critic"), { providerId: "openai", model: "gpt-5" });
   // Split on the first colon only: model names contain them.
   assert.deepEqual(agentModelOverride(settings, "researcher"), { providerId: "ollama", model: "evolv:latest" });
   assert.equal(agentModelOverride(settings, "writer"), null, "an unknown provider is ignored, not sent");

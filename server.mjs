@@ -10,6 +10,7 @@ import { batchToolCalls, TOOL_BATCH_SIZE } from "./lib/tool-batching.mjs";
 import { createAuthService } from "./lib/auth.mjs";
 import { createAccountStore } from "./lib/accounts.mjs";
 import { createProfileManager } from "./lib/profiles.mjs";
+import { PROVIDER_IDS } from "./lib/providers.mjs";
 import { handleGoalRoutes, streamGoalResume } from "./server/goal-routes.mjs";
 import { handleSandboxRoutes } from "./server/sandbox-routes.mjs";
 import { handlePhysicsRoutes } from "./server/physics-routes.mjs";
@@ -410,7 +411,7 @@ function validateSettingsPatch(value) {
   if (value.model != null && (typeof value.model !== "string" || value.model.length > 200)) {
     throw Object.assign(new Error("Invalid model setting."), { status: 400 });
   }
-  if (value.provider != null && !["ollama", "openai", "anthropic", "gemini", "openrouter", "custom"].includes(value.provider)) {
+  if (value.provider != null && !PROVIDER_IDS.includes(value.provider)) {
     throw Object.assign(new Error("Invalid AI provider setting."), { status: 400 });
   }
   // A model pinned to one specialist, written "provider:model". Bounded here
@@ -423,7 +424,7 @@ function validateSettingsPatch(value) {
       if (typeof pinned !== "string" || pinned.length > 200) throw Object.assign(new Error("An agent model must be a short string."), { status: 400 });
       // Empty clears the pin; anything else has to name a provider Evolv has.
       if (pinned && !agentModelOverride({ agentModels: { [agentId]: pinned } }, agentId)) {
-        throw Object.assign(new Error(`Write an agent model as provider:model, for example anthropic:claude-sonnet-5.`), { status: 400 });
+        throw Object.assign(new Error(`Write an agent model as provider:model, for example openai:gpt-5.`), { status: 400 });
       }
     }
   }

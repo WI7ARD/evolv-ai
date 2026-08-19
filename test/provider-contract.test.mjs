@@ -1,11 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeConversation } from "../lib/message-hygiene.mjs";
-import { normalizeMessagesOpenAi, toAnthropicMessages, toOllamaMessages } from "../lib/providers.mjs";
-import { toGeminiInteractionInput } from "../lib/gemini-interactions.mjs";
-import {
-  inspectAnthropicRequest, inspectGeminiInteractionInput, inspectOllamaRequest, inspectOpenAiRequest, reportRequestProblems
-} from "../lib/provider-contract.mjs";
+import { toOllamaMessages } from "../lib/providers.mjs";
+import { toOpenAiResponsesInput } from "../lib/openai-responses.mjs";
+import { inspectOllamaRequest, inspectOpenAiResponsesInput, reportRequestProblems } from "../lib/provider-contract.mjs";
 import { imageMediaType } from "../lib/images.mjs";
 
 // Six plumbing bugs reached people before this file existed, and every one was
@@ -99,21 +97,17 @@ function refuse(problems, where) {
   assert.deepEqual(problems, [], `${where}: ${problems.join("; ")}`);
 }
 
-const checkOpenAi = (messages, where) => refuse(inspectOpenAiRequest(messages), where);
-const checkAnthropic = (messages, where) => refuse(inspectAnthropicRequest(messages), where);
-const checkGemini = (input, where) => refuse(inspectGeminiInteractionInput(input), where);
+const checkOpenAi = (input, where) => refuse(inspectOpenAiResponsesInput(input), where);
 const checkOllama = (messages, where) => refuse(inspectOllamaRequest(messages), where);
 
-test("every provider's rules hold for two thousand damaged conversations", () => {
+test("both providers' rules hold for two thousand damaged conversations", () => {
   for (let seed = 1; seed <= 2000; seed += 1) {
     const next = random(seed);
     const raw = conversation(next);
     const sanitized = sanitizeConversation(raw);
     const where = `seed ${seed}`;
 
-    checkOpenAi(normalizeMessagesOpenAi(sanitized), `${where} (OpenAI)`);
-    checkAnthropic(toAnthropicMessages(sanitized), `${where} (Anthropic)`);
-    checkGemini(toGeminiInteractionInput(sanitized), `${where} (Gemini)`);
+    checkOpenAi(toOpenAiResponsesInput(sanitized), `${where} (OpenAI)`);
     checkOllama(toOllamaMessages(sanitized), `${where} (Ollama)`);
   }
 });
@@ -127,9 +121,7 @@ test("the rules above can actually fail", () => {
   for (let seed = 1; seed <= 200; seed += 1) {
     const raw = conversation(random(seed));
     try {
-      checkOpenAi(normalizeMessagesOpenAi(raw), "unrepaired");
-      checkAnthropic(toAnthropicMessages(raw), "unrepaired");
-      checkGemini(toGeminiInteractionInput(raw), "unrepaired");
+      checkOpenAi(toOpenAiResponsesInput(raw), "unrepaired");
     } catch {
       rejected += 1;
     }
@@ -154,8 +146,8 @@ test("the images the fuzzer generates actually reach the providers", () => {
   let blocks = 0;
   for (let seed = 1; seed <= 200; seed += 1) {
     const sanitized = sanitizeConversation(conversation(random(seed)));
-    blocks += toAnthropicMessages(sanitized).flatMap((message) => message.content).filter((block) => block.type === "image").length;
-    blocks += toGeminiInteractionInput(sanitized).flatMap((step) => step.content || []).filter((part) => part.type === "image").length;
+    blocks += toOpenAiResponsesInput(sanitized).flatMap((item) => item.content || [])
+      .filter((part) => part.type === "input_image").length;
   }
   assert.ok(blocks > 100, `only ${blocks} images reached a provider across 200 conversations`);
 });
@@ -169,15 +161,16 @@ test("malformed tool arguments do not abort the request", () => {
     { role: "tool", tool_call_id: "c1", tool_name: "read_file", content: "ok" }
   ];
 
-  assert.deepEqual(toAnthropicMessages(messages)[1].content[0].input, {});
+  // Ollama reads arguments as an object, so nonsense becomes an empty one
+  // rather than a SyntaxError that would replace the reply with a stack trace.
+  assert.deepEqual(toOllamaMessages(messages)[1].tool_calls[0].function.arguments, {});
 
-  // Gemini gets no function_call here at all: this call carries no provider
-  // step, so a replay would have to invent a thought_signature and be refused.
-  // What matters for this test is that the nonsense arguments still produce a
-  // request rather than a SyntaxError.
-  const gemini = toGeminiInteractionInput(messages);
-  assert.equal(gemini.some((step) => step.type === "function_call"), false);
-  assert.ok(gemini.length >= 2, "the exchange is still carried, as narration");
+  // OpenAI reads them as a string and is the authority on its own API, so the
+  // string goes as written. What matters here is that a request is produced at
+  // all.
+  const input = toOpenAiResponsesInput(messages);
+  assert.equal(input.find((item) => item.type === "function_call").arguments, "{not json");
+  assert.ok(input.some((item) => item.type === "function_call_output"), "and its answer still travels");
 });
 
 test("an attached image is described as what it actually is", () => {
@@ -196,30 +189,31 @@ test("an attached image is described as what it actually is", () => {
   assert.equal(imageMediaType("not an image at all"), "", "and anything else is refused rather than guessed");
 
   const withImage = [{ role: "user", content: "what is this?", images: [png] }];
-  assert.equal(toAnthropicMessages(withImage)[0].content[1].source.media_type, "image/png");
-  assert.equal(toGeminiInteractionInput(withImage)[0].content[1].mime_type, "image/png");
+  const part = toOpenAiResponsesInput(withImage)[0].content[1];
+  assert.equal(part.type, "input_image");
+  assert.match(part.image_url, /^data:image\/png;base64,/, "declared as what the bytes actually are");
 });
 
 test("a malformed request is named by Evolv before a provider has to refuse it", () => {
   // The runtime half of this file's rules. A shape nobody imagined still
   // reaches the provider — refusing to send would be worse than the bugs this
   // guards against — but Evolv now knows what is wrong with it.
-  const orphaned = toAnthropicMessages([
+  const orphaned = toOpenAiResponsesInput([
     { role: "user", content: "hello" },
     { role: "tool", tool_call_id: "call_that_never_existed", content: "result" }
   ]);
 
-  const problems = inspectAnthropicRequest(orphaned);
+  const problems = inspectOpenAiResponsesInput(orphaned);
   assert.equal(problems.length, 1);
-  assert.match(problems[0], /tool_result before its tool_use/);
+  assert.match(problems[0], /tool result before the call it answers/);
 
   const warnings = [];
-  const summary = reportRequestProblems("Anthropic", problems, (line) => warnings.push(line));
-  assert.match(warnings[0], /Evolv built a request Anthropic is likely to reject/);
-  assert.match(summary, /tool_result/);
+  const summary = reportRequestProblems("OpenAI", problems, (line) => warnings.push(line));
+  assert.match(warnings[0], /Evolv built a request OpenAI is likely to reject/);
+  assert.match(summary, /tool result/);
 
   // And nothing is said when there is nothing wrong.
-  assert.equal(reportRequestProblems("Anthropic", [], () => assert.fail("said something")), "");
+  assert.equal(reportRequestProblems("OpenAI", [], () => assert.fail("said something")), "");
 });
 
 test("a conversation nobody damaged is still delivered in full", () => {
@@ -234,7 +228,8 @@ test("a conversation nobody damaged is still delivered in full", () => {
   ];
 
   assert.deepEqual(sanitizeConversation(healthy), healthy);
-  assert.equal(toAnthropicMessages(healthy).length, 5, "system is carried separately, the rest survive");
-  assert.equal(toGeminiInteractionInput(healthy).length, 5);
-  assert.equal(normalizeMessagesOpenAi(healthy).length, 6);
+  // System travels as `instructions` on the Responses API, so it is carried
+  // separately and the remaining five turns survive intact.
+  assert.equal(toOpenAiResponsesInput(healthy).length, 5);
+  assert.equal(toOllamaMessages(healthy).length, 6);
 });

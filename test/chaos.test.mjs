@@ -7,8 +7,8 @@ import { createDatabase } from "../lib/database.mjs";
 import { describeStorageFailure, isStorageFailure } from "../lib/storage-failure.mjs";
 import { classifyModelFailure } from "../lib/model-health.mjs";
 import { sanitizeConversation } from "../lib/message-hygiene.mjs";
-import { toGeminiInteractionInput } from "../lib/gemini-interactions.mjs";
-import { normalizeMessagesOpenAi } from "../lib/providers.mjs";
+import { toOpenAiResponsesInput } from "../lib/openai-responses.mjs";
+import { toOllamaMessages } from "../lib/providers.mjs";
 import { createToolCheckpoints } from "../lib/tool-checkpoint.mjs";
 
 // Failures that are not Evolv's fault but are Evolv's problem.
@@ -147,7 +147,7 @@ test("one unreadable metadata column does not take down the conversation it is i
 test("a history window that opens mid-tool-exchange is repaired before any provider sees it", () => {
   // The window is cut by message count, so it can begin at a tool result whose
   // call is off the top, or end at a call whose results are off the bottom.
-  // Both are rejected by OpenAI and by Gemini, and the person's only symptom is
+  // Both are rejected by OpenAI, and the person's only symptom is
   // that a long conversation suddenly stops working.
   const cutAtTheTop = sanitizeConversation([
     { role: "tool", tool_call_id: "gone", tool_name: "read_file", content: "orphaned result" },
@@ -164,8 +164,7 @@ test("a history window that opens mid-tool-exchange is repaired before any provi
 
   // And the repaired conversation is accepted by both request builders.
   for (const repaired of [cutAtTheTop, cutAtTheBottom]) {
-    assert.doesNotThrow(() => normalizeMessagesOpenAi(repaired));
-    assert.doesNotThrow(() => toGeminiInteractionInput(repaired));
+    assert.doesNotThrow(() => toOpenAiResponsesInput(repaired));
   }
 });
 
@@ -235,10 +234,12 @@ test("a tool result whose assistant turn vanished is not replayed as an orphan",
     });
 
     const repaired = sanitizeConversation(database.getChatMessages(conversation.id));
-    const openai = normalizeMessagesOpenAi(repaired);
-    assert.equal(openai.some((message) => message.role === "tool" && !message.tool_call_id), false);
-    const gemini = toGeminiInteractionInput(repaired);
-    assert.equal(gemini.some((step) => step.type === "function_result"), false,
-      "a function_result answering nothing is refused by the API in its own right");
+    // Asserted against the shape that actually goes on the wire. This used to
+    // check the Chat Completions shape, which Evolv stopped sending when it
+    // moved to /v1/responses — so it was guarding a request nobody made.
+    const openai = toOpenAiResponsesInput(repaired);
+    assert.equal(openai.some((item) => item.type === "function_call_output" && !item.call_id), false,
+      "a tool result with no call_id is refused by the API in its own right");
+    assert.equal(toOllamaMessages(repaired).some((message) => message.role === "tool" && !message.content), false);
   });
 });

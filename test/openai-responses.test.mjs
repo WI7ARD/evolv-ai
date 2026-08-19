@@ -165,3 +165,22 @@ test("a stream nobody understood is still reported as that", async () => {
     }
   );
 });
+
+test("thinking turned off omits the parameter rather than saying none", () => {
+  // Two ways this sent something OpenAI refuses. `reasoning: { effort: "none" }`
+  // is a key present where the request should carry none — a model that does
+  // not reason rejects the parameter outright rather than reading it as "do
+  // not". And "xhigh" is a level from another vendor's vocabulary.
+  const off = buildOpenAiResponsesRequest({ model: "gpt-5", messages: [{ role: "user", content: "hi" }], think: false });
+  assert.equal("reasoning" in off, false, "off means the key does not travel");
+  assert.equal("reasoning" in buildOpenAiResponsesRequest({ model: "gpt-5", messages: [], think: "none" }), false);
+  assert.equal("reasoning" in buildOpenAiResponsesRequest({ model: "gpt-5", messages: [] }), false);
+
+  // Only the levels OpenAI documents are ever sent, and anything unrecognised
+  // omits rather than guesses: a request without the parameter works, and one
+  // carrying a wrong value does not.
+  assert.deepEqual(buildOpenAiResponsesRequest({ model: "gpt-5", messages: [], think: "high" }).reasoning, { effort: "high" });
+  assert.deepEqual(buildOpenAiResponsesRequest({ model: "gpt-5", messages: [], think: true }).reasoning, { effort: "medium" });
+  assert.deepEqual(buildOpenAiResponsesRequest({ model: "gpt-5", messages: [], think: "xhigh" }).reasoning, { effort: "high" });
+  assert.equal("reasoning" in buildOpenAiResponsesRequest({ model: "gpt-5", messages: [], think: "banana" }), false);
+});

@@ -5,7 +5,7 @@ import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createDatabase } from "../lib/database.mjs";
-import { createProviderService, GEMINI_API_REVISION } from "../lib/providers.mjs";
+import { createProviderService } from "../lib/providers.mjs";
 
 // A tool call, all the way from a provider's wire format to the shape the chat
 // loop executes.
@@ -52,10 +52,9 @@ async function withProviders(run) {
     database,
     secretStore,
     ollamaUrl: "http://127.0.0.1:11434",
-    providerBaseUrls: { openai: `${origin}/openai`, gemini: `${origin}/gemini` }
+    providerBaseUrls: { openai: `${origin}/openai` }
   });
   await service.saveCredentials("openai", { apiKey: "sk-test-key-0000" });
-  await service.saveCredentials("gemini", { apiKey: "gm-test-key-0000" });
 
   try {
     await run({ service, routes, seen });
@@ -108,36 +107,6 @@ test("an OpenAI Responses function call arrives as a runnable tool call", async 
   });
 });
 
-test("a Gemini Interactions function call arrives as a runnable tool call, signature intact", async () => {
-  await withProviders(async ({ service, routes, seen }) => {
-    routes.set("/interactions", (res) => {
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      res.end(sse([
-        { name: "step.start", data: { index: 0, step: { type: "function_call", id: "call_1", name: "calculate" } } },
-        { name: "step.stop", data: { index: 0, step: { type: "function_call", id: "call_1", name: "calculate", arguments: { expression: "2+2" } } } },
-        { name: "step.stop", data: { index: 1, step: { type: "thought", signature: "sig-abc", summary: [{ type: "text", text: "adding" }] } } },
-        { name: "interaction.completed", data: { interaction: { id: "int_1", status: "completed" } } }
-      ]));
-    });
-
-    const chunks = await collect(service, "gemini");
-    const calls = chunks.flatMap((chunk) => chunk.message?.tool_calls || []);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].id, "call_1");
-    assert.equal(calls[0].function.name, "calculate");
-    // The signature rides on a `thought` step in this API, not on the call —
-    // that is a legacy generateContent field — and it has to be kept, because
-    // the next round replays it.
-    const thought = chunks.map((chunk) => chunk.providerState?.geminiStep).find((step) => step?.type === "thought");
-    assert.equal(thought?.signature, "sig-abc", "the signature has to survive the round trip");
-
-    // The revision this adapter is written against is pinned on the request.
-    const chat = seen.find((entry) => entry.url.includes("/interactions"));
-    assert.equal(chat.headers["api-revision"], GEMINI_API_REVISION,
-      "an unpinned API is a promise that someone else's release schedule will not break you");
-  });
-});
-
 test("a provider that changed shape says so instead of returning an empty turn", async () => {
   // This is the failure that hides. An adapter reading events with an if/else
   // chain and no final else discards everything it does not recognise, so a
@@ -158,19 +127,6 @@ test("a provider that changed shape says so instead of returning an empty turn",
       // message rather than only in a log.
       assert.match(error.message, /response\.v2\.item\.finished/);
       assert.equal(error.expose, true, "and it reaches the person, not a reference number");
-      return true;
-    });
-
-    routes.set("/interactions", (res) => {
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      res.end(sse([
-        { name: "interaction.output.delta", data: { text: "hello" } },
-        { name: "interaction.done", data: {} }
-      ]));
-    });
-    await assert.rejects(() => collect(service, "gemini"), (error) => {
-      assert.equal(error.code, "PROVIDER_STREAM_UNRECOGNIZED");
-      assert.match(error.message, /interaction\.output\.delta/);
       return true;
     });
   });

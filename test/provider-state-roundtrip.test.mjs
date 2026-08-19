@@ -5,32 +5,27 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createDatabase } from "../lib/database.mjs";
 import { sanitizeConversation } from "../lib/message-hygiene.mjs";
-import { toGeminiInteractionInput } from "../lib/gemini-interactions.mjs";
+import { toOpenAiResponsesInput } from "../lib/openai-responses.mjs";
 import { toLegacyChunk } from "../lib/ai-event-bridge.mjs";
 import { toolCall, textDelta, finish, providerState } from "../lib/ai-events.mjs";
 
 // A tool call has to come back to the provider exactly as the provider made it.
 //
-// Gemini refuses a replayed call whose signature is missing, and there is no
-// reason to think it is the last field a provider will require echoed. So the
-// adapters keep the provider's own step whole and hand it back, rather than
-// lifting out the fields we happen to know about. This test follows one call
-// the whole way — wire, bridge, chat loop, database, and back out to the next
-// request — because every previous version of this bug lived in one of the
-// joins between those, not inside any of them.
-
-// As Gemini sends it, plus the two fields older Evolv builds bolted on. The
-// Interactions API defines exactly four fields on a function_call step, so the
-// extras are stripped on the way back out — see the last assertion below.
-const STEP = { type: "function_call", id: "fc_1", call_id: "fc_1", name: "list_workspace_files", arguments: { path: "." }, signature: "Cs4BAdHtim9abc==" };
-const STEP_ON_THE_WIRE = { type: "function_call", id: "fc_1", name: "list_workspace_files", arguments: { path: "." } };
+// The Responses API matches a call to its output by call_id and tracks item
+// ids across a turn, and there is no reason to think those are the last fields
+// a provider will require echoed. So the adapter keeps the provider's own item
+// whole and hands it back, rather than lifting out the fields we happen to know
+// about. This test follows one call the whole way — wire, bridge, chat loop,
+// database, and back out to the next request — because every previous version
+// of this bug lived in one of the joins between those, not inside any of them.
+const STEP = { type: "function_call", id: "fc_1", call_id: "fc_1", name: "list_workspace_files", arguments: "{\"path\":\".\"}", status: "completed" };
 
 test("the bridge carries the provider's own step onto the call", () => {
-  const event = toolCall({ id: "fc_1", name: "list_workspace_files", arguments: { path: "." }, providerState: { geminiStep: STEP } });
+  const event = toolCall({ id: "fc_1", name: "list_workspace_files", arguments: { path: "." }, providerState: { openaiItem: STEP } });
   const chunk = toLegacyChunk(event);
 
   assert.equal(chunk.message.tool_calls[0].function.name, "list_workspace_files");
-  assert.deepEqual(chunk.message.tool_calls[0].providerState, { geminiStep: STEP });
+  assert.deepEqual(chunk.message.tool_calls[0].providerState, { openaiItem: STEP });
 });
 
 test("text, reasoning and finish still arrive in the shape the chat loop reads", () => {
@@ -48,7 +43,7 @@ test("the step survives storage and comes back on the next request", async (t) =
   // Exactly what the chat loop stores after normalize().
   database.addMessage({
     conversationId: conversation.id, role: "assistant", content: "", status: "tool-call",
-    metadata: { tool_calls: [{ id: "fc_1", type: "function", providerState: { geminiStep: STEP }, function: { name: "list_workspace_files", arguments: { path: "." } } }] }
+    metadata: { tool_calls: [{ id: "fc_1", type: "function", providerState: { openaiItem: STEP }, function: { name: "list_workspace_files", arguments: { path: "." } } }] }
   });
   database.addMessage({
     conversationId: conversation.id, role: "tool", toolName: "list_workspace_files",
@@ -57,59 +52,47 @@ test("the step survives storage and comes back on the next request", async (t) =
 
   const stored = database.getChatMessages(conversation.id, 80);
   const call = stored.find((message) => message.tool_calls)?.tool_calls[0];
-  assert.deepEqual(call.providerState, { geminiStep: STEP }, "the database kept it");
+  assert.deepEqual(call.providerState, { openaiItem: STEP }, "the database kept it");
 
   const repaired = sanitizeConversation(stored);
-  assert.deepEqual(repaired.find((message) => message.tool_calls).tool_calls[0].providerState, { geminiStep: STEP },
+  assert.deepEqual(repaired.find((message) => message.tool_calls).tool_calls[0].providerState, { openaiItem: STEP },
     "the repair pass rewrites calls to give them ids and must not drop it");
 
-  // And the adapter replays the provider's step rather than rebuilding one.
-  //
-  // This used to assert the step went back "exactly as it arrived, signature
-  // included". Storage keeps it whole, which is what this test is about, but
-  // the wire cannot: the Interactions API defines four fields on a
-  // function_call, and `call_id` and `signature` are not among them. Sending
-  // them is answered with "Request contains an invalid argument" and no clue
-  // which field caused it. The signature travels on a `thought` step instead.
-  const input = toGeminiInteractionInput(repaired);
-  const replayed = input.find((step) => step.type === "function_call");
-  assert.deepEqual(replayed, STEP_ON_THE_WIRE, "only the fields this API defines go out");
+  // And the adapter replays the provider's own item rather than rebuilding one
+  // from the fields Evolv happens to recognise.
+  const input = toOpenAiResponsesInput(repaired);
+  const replayed = input.find((item) => item.type === "function_call");
+  assert.deepEqual(replayed, STEP, "the provider's item goes back exactly as it arrived");
 });
 
-test("a call made elsewhere is narrated, not rebuilt as a call", () => {
-  // This test previously asserted the opposite — that a call with no Gemini
-  // step is "reconstructed from name and arguments, without inventing a
-  // signature" — and that expectation was wrong. Gemini rejects the request
-  // outright:
-  //
-  //   Function call is missing a thought_signature in functionCall parts.
-  //
-  // "Without inventing a signature" is not a safe middle ground, because a
-  // functionCall part with no signature is not a weaker call, it is an invalid
-  // one. A conversation that started on OpenAI or Ollama, or that predates
-  // Evolv keeping provider state at all, has nothing to replay — so the
-  // exchange goes back as context rather than as a call.
-  const input = toGeminiInteractionInput([
+test("a call made elsewhere is still replayed, from what Evolv knows", () => {
+  // A conversation that started on Ollama, or that predates Evolv keeping
+  // provider state at all, has no item to hand back. The Responses API asks
+  // only that a call and its output agree on call_id, so one can be rebuilt
+  // from what is stored — unlike a provider that requires a signature it alone
+  // could have produced, where rebuilding is impossible and the exchange has to
+  // go back as narration instead.
+  const input = toOpenAiResponsesInput([
     { role: "user", content: "list the files" },
     { role: "assistant", content: "", tool_calls: [{ id: "c1", function: { name: "search_memory", arguments: "{}" } }] },
     { role: "tool", tool_call_id: "c1", tool_name: "search_memory", content: "nothing" }
   ]);
 
-  assert.equal(input.some((step) => step.type === "function_call"), false);
-  assert.equal(input.some((step) => step.type === "function_result"), false);
-  const narrated = input.filter((step) => step.type === "user_input")
-    .flatMap((step) => step.content).map((part) => part.text).join("\n");
-  assert.match(narrated, /search_memory/, "the model is still told what it called");
-  assert.match(narrated, /nothing/, "and what came back");
+  const call = input.find((item) => item.type === "function_call");
+  const output = input.find((item) => item.type === "function_call_output");
+  assert.equal(call.name, "search_memory");
+  assert.equal(call.call_id, "c1");
+  assert.equal(output.call_id, "c1", "the pair has to agree or the round ends permanently");
+  assert.equal(output.output, "nothing");
 });
 
 // Reasoning items are the other half of opaque provider state.
 //
-// A tool call is not the only thing a provider expects back untouched. Gemini's
-// thinking steps carry their own signatures, and OpenAI's Responses API tracks
-// item ids across a turn. Both adapters read those from `message.provider_state`
-// — so if the chat loop collects only tool calls, a reasoning-heavy turn is
-// replayed missing exactly the parts the provider is strictest about.
+// A tool call is not the only thing a provider expects back untouched. The
+// Responses API tracks reasoning items and their ids across a turn, and the
+// adapter reads those from `message.provider_state` — so if the chat loop
+// collects only tool calls, a reasoning-heavy turn is replayed missing exactly
+// the parts the provider is strictest about.
 test("a reasoning step is stored and replayed like a tool call", async (t) => {
   const { createDatabase } = await import("../lib/database.mjs");
   const { mkdtemp: make, rm: remove } = await import("node:fs/promises");
@@ -120,28 +103,28 @@ test("a reasoning step is stored and replayed like a tool call", async (t) => {
   const database = createDatabase({ dataDir: root, defaultPrompt: "Test" });
   t.after(async () => { database.close(); await remove(root, { recursive: true, force: true }); });
 
-  const reasoning = { type: "reasoning", id: "r_1", summary: [{ type: "text", text: "thinking" }], signature: "sig-reasoning" };
+  const reasoning = { type: "reasoning", id: "rs_1", summary: [{ type: "summary_text", text: "thinking" }] };
   const conversation = database.createConversation("reasoning");
   database.addMessage({ conversationId: conversation.id, role: "user", content: "why", status: "complete" });
   database.addMessage({
     conversationId: conversation.id, role: "assistant", content: "because", status: "complete",
-    metadata: { provider_state: [{ provider: "gemini", geminiStep: reasoning }] }
+    metadata: { provider_state: [{ provider: "openai", openaiItem: reasoning }] }
   });
 
   const stored = database.getChatMessages(conversation.id, 80);
   const assistant = stored.find((message) => message.role === "assistant");
-  assert.deepEqual(assistant.provider_state, [{ provider: "gemini", geminiStep: reasoning }]);
+  assert.deepEqual(assistant.provider_state, [{ provider: "openai", openaiItem: reasoning }]);
 
-  // And the adapter replays the step rather than flattening it back to text.
-  const input = toGeminiInteractionInput(stored);
-  assert.ok(input.some((step) => step.type === "reasoning" && step.signature === "sig-reasoning"),
-    "the reasoning step goes back with its signature");
+  // And the adapter replays the item rather than flattening it back to text.
+  const input = toOpenAiResponsesInput(stored);
+  assert.ok(input.some((item) => item.type === "reasoning" && item.id === "rs_1"),
+    "the reasoning item goes back with its id");
 });
 
 test("the bridge no longer discards provider state", () => {
   // The state object itself is what the adapters read back; each entry is
-  // self-describing by the key it carries — openaiItem or geminiStep — so a
-  // conversation that changed provider stays unambiguous.
+  // self-describing by the key it carries, so a conversation that moved between
+  // a local model and a cloud one stays unambiguous.
   assert.deepEqual(toLegacyChunk(providerState("openai", { openaiItem: { id: "x" } })),
     { providerState: { openaiItem: { id: "x" } } });
 });

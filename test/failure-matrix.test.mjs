@@ -19,7 +19,7 @@ import { isRetriableStatus, isRetriableError, retryAfterMs, backoffMs, createCir
 // The matrix is the specification: for each failure, was it retried, did it
 // count against the provider, and what is the person told.
 
-const PROVIDERS = ["ollama", "openai", "anthropic", "gemini", "openrouter"];
+const PROVIDERS = ["ollama", "openai"];
 
 // Every failure Evolv can meet, and what should happen. `counts` means it
 // contributes to opening the circuit breaker.
@@ -101,7 +101,7 @@ test("the breaker opens on provider faults and ignores everything else", () => {
   assert.match(refused.reason, /30s/, "and says how long, because a wait nobody can see is worse than an error");
 
   // One provider going down does not take the others with it.
-  assert.equal(breaker.check("anthropic").allowed, true);
+  assert.equal(breaker.check("ollama").allowed, true);
 
   clock += 30_000;
   const probe = breaker.check("openai");
@@ -229,7 +229,7 @@ test("a provider that keeps failing is refused before the timeout, and says for 
     });
     assert.equal(sent, 0, "the refused request never leaves the machine");
     // And it is one provider's problem, not everyone's.
-    assert.equal(service.circuitState().anthropic, undefined);
+    assert.equal(service.circuitState().ollama, undefined);
   });
 });
 
@@ -239,21 +239,6 @@ test("a redirect is refused rather than followed", async () => {
     stubFetch(async () => new Response("", { status: 302, headers: { location: "http://elsewhere.invalid/" } }));
     await assert.rejects(() => service.models("openai", { refresh: true }), (error) => {
       assert.equal(error.code, "PROVIDER_REDIRECT");
-      return true;
-    });
-  });
-});
-
-test("Gemini reporting a dead key as 400 is still read as a dead key", async () => {
-  // Gemini answers a revoked key with 400 and the reason in the body, where
-  // every other provider answers 401. Missing this told people their request
-  // was malformed when their key had expired.
-  await withService(async (service, stubFetch) => {
-    stubFetch(async () => new Response(JSON.stringify({
-      error: { message: "API key not valid. Please pass a valid API key.", details: [{ reason: "API_KEY_INVALID" }] }
-    }), { status: 400, headers: { "content-type": "application/json" } }));
-    await assert.rejects(() => service.models("gemini", { refresh: true }), (error) => {
-      assert.equal(error.code, "PROVIDER_AUTH_FAILED");
       return true;
     });
   });

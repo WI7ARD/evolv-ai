@@ -4,7 +4,7 @@ import path from "node:path";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createDatabase } from "../lib/database.mjs";
-import { normalizeMessagesOpenAi } from "../lib/providers.mjs";
+import { toOpenAiResponsesInput } from "../lib/openai-responses.mjs";
 
 // OpenAI answers `tool_calls: []` with:
 //   Invalid 'messages[6].tool_calls': empty array. Expected an array with
@@ -25,16 +25,22 @@ async function withDatabase(run) {
   }
 }
 
-test("an assistant turn that called no tools sends no tool_calls field", () => {
-  const [none, empty, real] = normalizeMessagesOpenAi([
+test("an assistant turn that called no tools emits no function_call item", () => {
+  // The Responses API carries a call as its own item rather than as a field on
+  // the message, so the failure this guards against changes shape but not
+  // nature: an empty tool_calls array must produce no item at all, and a real
+  // call must still produce one.
+  const input = toOpenAiResponsesInput([
     { role: "assistant", content: "just an answer" },
     { role: "assistant", content: "also just an answer", tool_calls: [] },
     { role: "assistant", content: "", tool_calls: [{ id: "call_1", function: { name: "read", arguments: "{}" } }] }
   ]);
 
-  assert.equal("tool_calls" in none, false);
-  assert.equal("tool_calls" in empty, false, "an empty array must be dropped, not passed through");
-  assert.equal(real.tool_calls.length, 1, "and a real call still goes");
+  const calls = input.filter((item) => item.type === "function_call");
+  assert.equal(calls.length, 1, "one real call, and nothing from the empty array");
+  assert.equal(calls[0].call_id, "call_1");
+  assert.equal(calls[0].name, "read");
+  assert.equal(typeof calls[0].arguments, "string", "arguments go as a JSON string");
 });
 
 test("history already carrying an empty array is repaired on the way out", async () => {
@@ -55,7 +61,7 @@ test("history already carrying an empty array is repaired on the way out", async
     assert.equal("tool_calls" in assistant, false);
 
     // And the whole request, as the provider would see it.
-    const request = normalizeMessagesOpenAi(database.getChatMessages(conversation.id));
+    const request = toOpenAiResponsesInput(database.getChatMessages(conversation.id));
     assert.equal(request.some((message) => Array.isArray(message.tool_calls) && message.tool_calls.length === 0), false);
   });
 });

@@ -17,7 +17,7 @@ test.before(async () => {
       res.end(JSON.stringify({ data: [{ id: "mock-chat", name: "Mock Chat" }] }));
       return;
     }
-    // OpenAI speaks the Responses API. openrouter and custom stay on
+    // OpenAI speaks the Responses API.
     // chat-completions, which is what they actually implement.
     if (req.url === "/v1/responses" && req.method === "POST") {
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -74,58 +74,6 @@ test("provider credentials are encrypted at rest and never exported", async () =
   await rm(directory, { recursive: true, force: true });
 });
 
-test("custom providers reject private non-loopback endpoints", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "evolv-provider-url-"));
-  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "provider.db"), defaultPrompt: "test" });
-  const service = createProviderService({
-    database,
-    secretStore: { available: true, description: "test", encrypt: async (value) => value, decrypt: async (value) => value },
-    ollamaUrl: "http://127.0.0.1:11434"
-  });
-  await assert.rejects(
-    service.saveCredentials("custom", { apiKey: "12345678", baseUrl: "http://192.168.1.5/v1" }),
-    (error) => error.code === "INVALID_BASE_URL" || error.code === "PRIVATE_ENDPOINT"
-  );
-  database.close();
-  await rm(directory, { recursive: true, force: true });
-});
-
-test("a custom endpoint that later resolves privately is refused before the key is sent", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "evolv-provider-rebind-"));
-  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "provider.db"), defaultPrompt: "test" });
-  // The first lookup is the save-time check and answers with a public address.
-  // Every later lookup rebinds to loopback, which is what a DNS rebinding
-  // attack against the stored endpoint looks like.
-  let lookups = 0;
-  const lookup = async () => {
-    lookups += 1;
-    return [{ address: lookups === 1 ? "93.184.216.34" : "127.0.0.1", family: 4 }];
-  };
-  let fetched = false;
-  const service = createProviderService({
-    database,
-    secretStore: { available: true, description: "test", encrypt: async (value) => value, decrypt: async (value) => value },
-    ollamaUrl: "http://127.0.0.1:11434",
-    lookup
-  });
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (...args) => { fetched = true; return originalFetch(...args); };
-  try {
-    await service.saveCredentials("custom", { apiKey: "12345678", baseUrl: "https://models.example/v1" });
-    assert.equal(lookups, 1);
-    await assert.rejects(service.models("custom"), (error) => error.code === "PRIVATE_ENDPOINT");
-    assert.ok(lookups > 1, "the stored endpoint must be re-resolved at connect time");
-    assert.equal(fetched, false, "no request may leave the machine once the endpoint resolves privately");
-  } finally {
-    globalThis.fetch = originalFetch;
-    database.close();
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-// A provider's model list is not a chat menu. Offering a model that cannot
-// chat has exactly one outcome: the user picks it and the provider answers 404,
-// with nothing in the message to explain why.
 test("models that cannot chat never reach the model picker", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "evolv-chatonly-"));
   const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "p.db"), defaultPrompt: "test" });
@@ -156,42 +104,6 @@ test("models that cannot chat never reach the model picker", async () => {
   for (const rejected of ["dall-e-3", "whisper-1", "tts-1", "text-embedding-3-small", "davinci-002", "gpt-4o-realtime-preview"]) {
     assert.ok(!offered.includes(rejected), `${rejected} cannot chat and must not be offered`);
   }
-
-  } finally {
-    catalogue.closeAllConnections();
-    await new Promise((resolve) => catalogue.close(resolve));
-    database.close();
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test("Gemini hides models that cannot hold a conversation", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "evolv-gemini-"));
-  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "p.db"), defaultPrompt: "test" });
-  const secretStore = { available: true, description: "t", async encrypt(v) { return v; }, async decrypt(v) { return v; } };
-
-  const catalogue = http.createServer((req, res) => {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ models: [
-      // Google lists gemini-2.5-pro as generateContent-only yet streaming works,
-      // so the listing is trusted and only genuinely non-conversational
-      // families are excluded by name.
-      { name: "models/gemini-2.5-flash", supportedGenerationMethods: ["generateContent"] },
-      { name: "models/imagen-3.0-generate-002", supportedGenerationMethods: ["generateContent"] },
-      { name: "models/veo-3.0-generate-preview", supportedGenerationMethods: ["generateContent"] },
-      { name: "models/gemini-2.5-flash-preview-tts", supportedGenerationMethods: ["generateContent"] },
-      { name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] }
-    ] }));
-  });
-  await new Promise((resolve) => catalogue.listen(0, "127.0.0.1", resolve));
-  const url = `http://127.0.0.1:${catalogue.address().port}/v1beta`;
-
-  const service = createProviderService({ database, secretStore, ollamaUrl: "http://127.0.0.1:11434", providerBaseUrls: { gemini: url } });
-  try {
-  await service.saveCredentials("gemini", { apiKey: "test-key-value" });
-  const offered = (await service.models("gemini")).map((model) => model.id);
-
-  assert.deepEqual(offered, ["gemini-2.5-flash"]);
 
   } finally {
     catalogue.closeAllConnections();
