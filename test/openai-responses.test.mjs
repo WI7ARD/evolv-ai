@@ -64,3 +64,104 @@ test("OpenAI stream emits canonical deltas and preserves raw output items for st
   assert.deepEqual(replay[0], item, "provider output item is replayed byte-for-shape instead of reconstructed");
   assert.deepEqual(replay[1], { type: "function_call_output", call_id: "call_1", output: "4" });
 });
+
+// The incident this file did not cover.
+//
+// A user asked the time, OpenAI answered with an `error` step, and Evolv
+// reported: "OpenAI sent 4 stream events and Evolv understood none of them […]
+// The provider's API has most likely changed shape." It had not. OpenAI had
+// said exactly what was wrong, and lib/sse.mjs deleted the sentence — its
+// try/catch was written to survive a truncated frame and caught the adapter's
+// own throw as well. The real reason was destroyed one frame before anything
+// could report it, and the fabricated diagnosis sent the investigation at the
+// provider instead of at the parser.
+const named = (events) => new Response(
+  events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+  { status: 200, headers: { "content-type": "text/event-stream" } }
+);
+
+test("a provider-reported failure reaches the caller in the provider's own words", async () => {
+  const seen = [];
+  await assert.rejects(
+    () => streamOpenAiResponses({
+      payload: { model: "gpt-4", messages: [{ role: "user", content: "whats the date and time" }] },
+      request: async () => named([
+        { type: "response.created", response: { id: "resp_1" } },
+        { type: "response.in_progress", response: { id: "resp_1" } },
+        { type: "error", error: { code: "model_not_found", message: "The model gpt-4 does not exist or you do not have access to it." } },
+        { type: "response.failed", response: { error: { message: "The model gpt-4 does not exist or you do not have access to it." } } }
+      ]),
+      onEvent: (event) => seen.push(event.type)
+    }),
+    (error) => {
+      assert.equal(error.code, "PROVIDER_STREAM_ERROR");
+      assert.match(error.message, /does not exist or you do not have access/);
+      // The failure this replaces. Reporting an API shape change when the API
+      // told us precisely what was wrong is worse than reporting nothing.
+      assert.doesNotMatch(error.message, /understood none of them/);
+      assert.doesNotMatch(error.message, /changed shape/);
+      assert.equal(error.expose, true, "the person has to be allowed to read it");
+      return true;
+    }
+  );
+  assert.deepEqual(seen, [], "nothing is emitted from a failed response");
+});
+
+test("response.failed alone is enough, and its message is used", async () => {
+  // The two arrive together in practice, but either may arrive alone.
+  await assert.rejects(
+    () => streamOpenAiResponses({
+      payload: { model: "gpt-5", messages: [] },
+      request: async () => named([
+        { type: "response.created", response: { id: "r" } },
+        { type: "response.failed", response: { error: { message: "Rate limit reached for gpt-5." } } }
+      ]),
+      onEvent: () => {}
+    }),
+    (error) => {
+      assert.equal(error.code, "PROVIDER_STREAM_ERROR");
+      assert.match(error.message, /Rate limit reached/);
+      return true;
+    }
+  );
+});
+
+test("one malformed frame is still survived, which is what the guard was for", async () => {
+  // The narrowing must not turn a truncated frame into a dead turn. The catch
+  // still exists; it just covers JSON.parse and nothing else.
+  const warnings = [];
+  const body = [
+    `data: {"type":"response.output_text.delta","delta":"Hello"}\n\n`,
+    `data: {"type":"response.output_text.delta","delta":\n\n`,
+    `data: {"type":"response.output_text.delta","delta":" world"}\n\n`,
+    `data: {"type":"response.completed","response":{"status":"completed"}}\n\n`
+  ].join("");
+  const text = [];
+  await streamOpenAiResponses({
+    payload: { model: "gpt-5", messages: [] },
+    request: async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    onEvent: (event) => { if (event.type === "text.delta") text.push(event.delta); },
+    warn: (message) => warnings.push(message)
+  });
+  assert.equal(text.join(""), "Hello world", "the good frames still arrive");
+});
+
+test("a stream nobody understood is still reported as that", async () => {
+  // The witness earns its keep when the events really are unrecognisable. What
+  // it must not do is speak for a stream that reported a specific failure.
+  await assert.rejects(
+    () => streamOpenAiResponses({
+      payload: { model: "gpt-5", messages: [] },
+      request: async () => named([
+        { type: "response.v2.item.finished", item: {} },
+        { type: "response.v2.done", response: {} }
+      ]),
+      onEvent: () => {}
+    }),
+    (error) => {
+      assert.equal(error.code, "PROVIDER_STREAM_UNRECOGNIZED");
+      assert.match(error.message, /understood none of them/);
+      return true;
+    }
+  );
+});
