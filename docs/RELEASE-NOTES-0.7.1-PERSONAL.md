@@ -1,6 +1,34 @@
 # Evolv Personal 0.7.1
 
-One fix, and it is about disk rather than about anything you can see in the app.
+Two fixes. The first will matter to anyone whose account stopped opening.
+
+## Existing accounts open again
+
+Evolv keeps a ledger of the schema changes it has applied to your database, with
+a checksum of each one, and refuses to open a database whose recorded schema no
+longer matches the code. That check is worth having: it is how you find out that
+a build and a database disagree *before* something writes to the wrong shape.
+
+It fired for real. The circuits table — added when the circuit sandbox shipped —
+was appended to the end of an existing migration rather than being added as its
+own. That rewrote schema every existing database had already run, so every
+account created before that point was refused, while a newly created account
+worked perfectly. The failure looked like "my data is gone". It never was: the
+database was untouched and merely refused at the door.
+
+The circuits table now has its own migration, which restores the altered one to
+exactly the text it shipped with. Accounts created before the mistake open
+again. Accounts created *during* it — which recorded the altered checksum and
+would now have been refused for the mirror-image reason — are recognised and
+corrected on the next start. Both keep every conversation.
+
+Two things stop it recurring. A test now pins the checksum of every migration
+that has ever shipped, so editing one fails in seconds on the build machine
+rather than silently on someone's disk months later. And if the check ever does
+fire again, it now says what happened and that the data is intact, instead of
+an error code and a reference number.
+
+## Updating no longer costs disk you never get back
 
 ## Updating no longer costs disk you never get back
 
