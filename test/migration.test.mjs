@@ -211,9 +211,12 @@ test("a profile written while the circuits edit was live is healed, not refused"
   // would now be refused instead. Both populations exist in the wild, so the
   // ledger has to know this one version legitimately had two texts.
   const root = await mkdtemp(path.join(tmpdir(), "evolv-healed-"));
-  t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const database = createDatabase({ dataDir: root, dbPath: path.join(root, "p.db"), defaultPrompt: "test" });
-  t.after(() => database.close());
+  // Closed before the directory goes, in one hook, like every other test here.
+  // Node runs after-hooks in registration order rather than reverse, so two
+  // hooks the other way round delete the file while SQLite still holds it —
+  // which POSIX allows and Windows answers with EBUSY.
+  t.after(async () => { database.close(); await rm(root, { recursive: true, force: true }); });
 
   database.raw.prepare("INSERT INTO conversations(id,title,created_at,updated_at) VALUES (?,?,?,?)")
     .run("c1", "months of conversations", "now", "now");
