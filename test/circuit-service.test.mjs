@@ -286,6 +286,24 @@ test("every part in the catalogue has a symbol to draw it with", async () => {
   }
 });
 
+test("every request the page sends carries a body fetch can actually send", async () => {
+  // api() in app.js spreads its options straight into fetch, so a body has to
+  // be a string already. Passing an object sends the literal text
+  // "[object Object]", the server answers "Invalid JSON body", and every
+  // control that posts anything silently does nothing.
+  //
+  // All five of the circuit page's controls were written that way, and none of
+  // the tests noticed because they drive the routes directly. This is what a
+  // test of the page rather than the server looks like.
+  const script = await readFile(new URL("../public/circuit.js", import.meta.url), "utf8");
+  const bodies = [...script.matchAll(/body:\s*([^,\n]+)/g)].map((match) => match[1].trim());
+  assert.ok(bodies.length >= 4, "the page should be sending some bodies");
+  for (const body of bodies) {
+    assert.ok(body.startsWith("JSON.stringify") || body.startsWith('"') || body.startsWith("`"),
+      `body must be serialised before fetch sees it, found: ${body}`);
+  }
+});
+
 test("the page draws and computes nothing", async () => {
   // The solver lives in the server. A page doing its own arithmetic would give
   // a second answer to every question, with no way to tell which one a model

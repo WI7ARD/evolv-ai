@@ -1088,3 +1088,8 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .circuit-trace svg { display: block; width: 100%; height: 110px; }
 .circuit-trace-line { fill: none; stroke: #7fd4ff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .circuit-trace-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; font-family: var(--mono, monospace); margin-top: 4px; }
+.circuit-device { fill: #ffd479; font-size: 9px; text-anchor: middle; opacity: .85; }
+.circuit-glow { filter: blur(2px); }
+.circuit-rotor { stroke: #ffd479; stroke-width: 2; stroke-linecap: round; }
+.circuit-stalled { fill: none; stroke: #ff4466; stroke-width: 2; stroke-dasharray: 4 3; }
+.circuit-sounding { fill: none; stroke: #7fd4ff; stroke-width: 1; opacity: .5; }

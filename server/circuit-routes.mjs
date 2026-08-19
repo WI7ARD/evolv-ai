@@ -62,7 +62,7 @@ export async function handleCircuitRoutes(context) {
   if (url.pathname === "/api/circuit/probes") {
     if (req.method === "POST") {
       const body = await readBody(req, bodyLimit);
-      json(res, 200, circuitService.probe(body.target));
+      json(res, 200, circuitService.probe(body.target, body.measure));
       return true;
     }
     if (req.method === "DELETE") {

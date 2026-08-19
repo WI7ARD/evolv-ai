@@ -1,7 +1,7 @@
 import { initAgentWorkspace, refreshAgentWorkspace } from "./agent-workspace.js";
 import { initSandboxWorkspace, refreshSandboxes } from "./sandbox.js";
 import { initPhysics, refreshPhysics, suspendPhysics } from "./physics.js";
-import { initCircuit, refreshCircuit, bindCircuitControls } from "./circuit.js";
+import { initCircuit, refreshCircuit, bindCircuitControls, suspendCircuit } from "./circuit.js";
 import { initLab, refreshLab, suspendLab } from "./lab.js";
 import { initDemo } from "./demo.js";
 
@@ -3230,6 +3230,7 @@ function switchView(view) {
   if (view === "agent") refreshAgentWorkspace().catch((error) => toast(error.message, "error"));
   if (view === "sandbox") refreshSandboxes().catch((error) => toast(error.message, "error"));
   if (view === "circuit") refreshCircuit().catch((error) => toast(error.message, "error"));
+  else suspendCircuit();
   if (view === "physics") refreshPhysics().catch((error) => toast(error.message, "error"));
   // The simulation clock must not keep running for a view nobody is looking at.
   else suspendPhysics();

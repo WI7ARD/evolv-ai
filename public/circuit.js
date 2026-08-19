@@ -42,7 +42,19 @@ const SYMBOLS = {
   gate: "M14 4 L14 36 L46 20 Z M0 12 L14 12 M0 28 L14 28 M50 20 L60 20 M46 20 m0 0 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0",
   flipflop: "M10 2 L50 2 L50 38 L10 38 Z M0 10 L10 10 M0 20 L10 20 M50 12 L60 12 M50 28 L60 28 M10 26 L18 20 L10 14",
   timer555: "M10 2 L50 2 L50 38 L10 38 Z M0 8 L10 8 M0 20 L10 20 M0 32 L10 32 M50 20 L60 20 M22 14 L38 14 M22 20 L38 20 M22 26 L38 26",
-  mcupin: "M14 6 L46 6 L46 34 L14 34 Z M46 20 L60 20 M20 6 L20 0 M28 6 L28 0 M36 6 L36 0 M20 34 L20 40 M28 34 L28 40"
+  mcupin: "M14 6 L46 6 L46 34 L14 34 Z M46 20 L60 20 M20 6 L20 0 M28 6 L28 0 M36 6 L36 0 M20 34 L20 40 M28 34 L28 40",
+  // Outputs. The motor is the circled M every schematic uses; the rotor line
+  // inside it is drawn separately so it can turn.
+  motor: "M0 20 L12 20 M48 20 L60 20 M30 20 m-18 0 a18 18 0 1 0 36 0 a18 18 0 1 0 -36 0",
+  servo: "M0 20 L10 20 M10 8 L38 8 L38 32 L10 32 Z M38 20 L44 20 M44 20 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0",
+  buzzer: "M0 20 L14 20 M14 10 L14 30 M14 20 L30 8 L30 32 Z M38 12 a10 10 0 0 1 0 16 M44 8 a16 16 0 0 1 0 24 M30 20 L60 20",
+  rgbled: "M0 20 L22 20 M22 8 L22 32 L40 20 Z M40 8 L40 32 M40 20 L60 20 M44 4 L52 -4 M50 8 L58 0 M12 8 L12 32",
+  sevenseg: "M8 2 L52 2 L52 38 L8 38 Z M16 8 L44 8 M16 20 L44 20 M16 32 L44 32 M16 8 L16 20 M16 20 L16 32 M44 8 L44 20 M44 20 L44 32"
+};
+
+// Colours an LED actually glows, so a lit green LED is green.
+const LED_COLOURS = {
+  red: "#ff4d4d", green: "#4dff88", yellow: "#ffd24d", blue: "#4db8ff", white: "#eaf4ff"
 };
 
 function escapeHtml(value) {
@@ -85,15 +97,18 @@ function renderSchematic(frame) {
   const symbols = frame.symbols.map((symbol) => {
     const path = SYMBOLS[symbol.symbol] || SYMBOLS.resistor;
     const current = frame.currents?.[symbol.id];
+    const device = frame.devices?.[symbol.id];
     // Symbols are authored in a 60×40 box; the layout allots 60×40 too, so the
     // only transform needed is the move.
     return `<g class="circuit-symbol${state.selected === symbol.id ? " is-selected" : ""}" data-id="${escapeHtml(symbol.id)}"
       transform="translate(${symbol.x} ${symbol.y})">
       <rect class="circuit-hit" x="-4" y="-4" width="68" height="48" />
+      ${renderDevice(symbol, device)}
       <path class="circuit-glyph" d="${path}" />
       <text class="circuit-ref" x="30" y="-8">${escapeHtml(symbol.id)}</text>
       <text class="circuit-value" x="30" y="52">${escapeHtml(symbol.label)}</text>
       ${current !== undefined ? `<text class="circuit-current" x="30" y="64">${escapeHtml(amps(current))}</text>` : ""}
+      ${device ? `<text class="circuit-device" x="30" y="76">${escapeHtml(deviceCaption(symbol.kind, device))}</text>` : ""}
     </g>`;
   }).join("");
 
@@ -112,6 +127,17 @@ function renderSchematic(frame) {
   return `<svg class="circuit-canvas" viewBox="0 0 ${frame.width + 60} ${frame.height + 40}" role="img"
     aria-label="Circuit schematic with ${frame.symbols.length} parts">${wires}${dots}${symbols}${labels}</svg>`;
 }
+
+// What each kind of probe is measuring, and in what. A motor's speed shown in
+// amps read "5310A", which is not a small formatting slip — it is a number
+// nobody could reconcile with anything.
+const TRACE_UNITS = {
+  net: volts,
+  part: amps,
+  speed: (value) => `${Math.round(Number(value) || 0)} rpm`,
+  angle: (value) => `${(Number(value) || 0).toFixed(1)}°`
+};
+const TRACE_LABELS = { net: "voltage", part: "current", speed: "speed", angle: "angle" };
 
 function seconds(value) {
   const number = Number(value);
@@ -157,9 +183,9 @@ function renderTraces(frame) {
       const y = height - (((value - low) / (high - low)) * height);
       return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
     }).join(" ");
-    const unit = trace.kind === "net" ? volts : amps;
+    const unit = TRACE_UNITS[trace.kind] || amps;
     return `<figure class="circuit-trace">
-      <figcaption>${escapeHtml(trace.target)} <span>${escapeHtml(trace.kind === "net" ? "voltage" : "current")}</span></figcaption>
+      <figcaption>${escapeHtml(trace.target)} <span>${escapeHtml(TRACE_LABELS[trace.kind] || "current")}</span></figcaption>
       <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img"
         aria-label="${escapeHtml(trace.target)} from ${escapeHtml(unit(low))} to ${escapeHtml(unit(high))}">
         <path class="circuit-trace-line" d="${path}" />
@@ -171,6 +197,51 @@ function renderTraces(frame) {
       </div>
     </figure>`;
   }).join("");
+}
+
+// What an output is doing, drawn on top of its own symbol.
+//
+// The glow behind a lit LED, the rotor line in a spinning motor, the arm on a
+// servo. None of this is computed here — brightness, rpm and angle all arrive
+// from the server with the rest of the frame; this only decides where to put
+// them.
+function renderDevice(symbol, device) {
+  if (!device) return "";
+  if (symbol.kind === "led" || symbol.kind === "rgbled") {
+    if (!device.lit) return "";
+    const colour = LED_COLOURS[device.colour] || LED_COLOURS.red;
+    // Radius as well as opacity, because a dim LED is small and faint on a
+    // bench and only faint on a screen that scales one of the two.
+    return `<circle class="circuit-glow" cx="31" cy="20" r="${(8 + (device.lit * 14)).toFixed(1)}"
+      fill="${colour}" opacity="${(device.lit * 0.55).toFixed(3)}" />`;
+  }
+  if (symbol.kind === "motor") {
+    // The rotor line, turned to where the shaft actually is. Turns come back
+    // from the solver as a running total, so this is the real angle rather than
+    // an animation loop that happens to look busy.
+    const angle = ((device.turns || 0) * 360) % 360;
+    return `<g transform="rotate(${angle.toFixed(2)} 30 20)">
+      <line class="circuit-rotor" x1="30" y1="20" x2="30" y2="6" />
+    </g>${device.stalled ? `<circle class="circuit-stalled" cx="30" cy="20" r="19" />` : ""}`;
+  }
+  if (symbol.kind === "servo") {
+    // Zero degrees points left, 180 right, which is how a servo horn reads.
+    return `<g transform="rotate(${(device.angle - 90).toFixed(1)} 44 20)">
+      <line class="circuit-rotor" x1="44" y1="20" x2="44" y2="4" />
+    </g>`;
+  }
+  if (symbol.kind === "buzzer" && device.frequency > 0) {
+    return `<circle class="circuit-sounding" cx="30" cy="20" r="18" />`;
+  }
+  return "";
+}
+
+function deviceCaption(kind, device) {
+  if (kind === "motor") return device.stalled ? `stalled · ${amps(device.amps)}` : `${device.rpm} rpm`;
+  if (kind === "servo") return `${device.angle}°`;
+  if (kind === "buzzer") return device.frequency ? `${device.frequency}Hz ${device.note}` : "silent";
+  if (kind === "led" || kind === "rgbled") return device.lit ? `${Math.round(device.lit * 100)}% lit` : "dark";
+  return "";
 }
 
 function renderFindings(findings = []) {
@@ -236,7 +307,8 @@ function draw() {
   const clock = $("#circuit-time");
   if (clock) {
     const elapsed = state.frame?.elapsedSeconds || 0;
-    clock.textContent = elapsed > 0 ? `t = ${seconds(elapsed)}` : "not run yet";
+    const rate = liveRunning() && liveRate < 0.9 ? ` · ${liveRate.toFixed(2)}× real time` : "";
+    clock.textContent = elapsed > 0 ? `t = ${seconds(elapsed)}${rate}` : "not run yet";
   }
   const reading = $("#circuit-reading");
   if (reading) {
@@ -260,7 +332,7 @@ async function act(action, parameters = {}) {
   if (state.busy) return;
   state.busy = true;
   try {
-    await state.api("/api/circuit/actions", { method: "POST", body: { action, ...parameters } });
+    await state.api("/api/circuit/actions", { method: "POST", body: JSON.stringify({ action, ...parameters }) });
     await refreshCircuit();
   } catch (error) {
     state.toast?.(error.message || "That did not work.");
@@ -273,7 +345,7 @@ async function runFor(secondsToRun) {
   if (state.busy) return;
   state.busy = true;
   try {
-    const result = await state.api("/api/circuit/run", { method: "POST", body: { seconds: secondsToRun } });
+    const result = await state.api("/api/circuit/run", { method: "POST", body: JSON.stringify({ seconds: secondsToRun }) });
     if (result.ran === false) state.toast?.("The circuit could not be run — see the findings below.");
     await refreshCircuit();
   } catch (error) {
@@ -281,6 +353,79 @@ async function runFor(secondsToRun) {
   } finally {
     state.busy = false;
   }
+}
+
+// Live: advance the simulation against the wall clock so an LED actually blinks
+// and a motor actually turns.
+//
+// A bounded ticker calling the same run path everything else uses, never a
+// second simulator — two simulators disagree, and the one on screen would be
+// the one people believe. Each tick asks for the wall time that has genuinely
+// passed, so a slow machine runs the circuit slowly rather than skipping.
+let liveTimer = null;
+let liveLast = 0;
+// Bumped whenever live stops. A run already in flight when you press Stop still
+// comes back, and without this its result was applied afterwards — the clock
+// jumping a quarter of a second after you asked it to stop, which reads as the
+// button not working.
+let liveGeneration = 0;
+
+export function liveRunning() {
+  return liveTimer !== null;
+}
+
+function stopLive() {
+  if (liveTimer !== null) clearTimeout(liveTimer);
+  liveTimer = null;
+  liveGeneration += 1;
+  const button = $("#circuit-live");
+  if (button) {
+    button.textContent = "Live";
+    button.setAttribute("aria-pressed", "false");
+  }
+}
+
+async function liveTick() {
+  if (liveTimer === null) return;
+  const generation = liveGeneration;
+  const now = Date.now();
+  // A tick asks for the wall time that has genuinely passed, capped so a
+  // backgrounded tab does not come back and demand ten seconds of simulation in
+  // one go. The cap is small on purpose: a circuit with a fast timestep takes
+  // longer to simulate than to happen, and asking for more than can be
+  // delivered just makes each tick slower without making it more real.
+  const elapsed = Math.min(0.05, Math.max(0.005, (now - liveLast) / 1000));
+  liveLast = now;
+  const started = Date.now();
+  try {
+    const result = await state.api("/api/circuit/run", { method: "POST", body: JSON.stringify({ seconds: elapsed }) });
+    if (generation !== liveGeneration) return;
+    if (result.ran === false) {
+      stopLive();
+      state.toast?.("The circuit could not be run — see the findings below.");
+      return;
+    }
+    // How much of real time this is actually managing. A circuit whose timestep
+    // is microseconds cannot run at the speed of the world, and saying "0.3×
+    // real time" is honest where an unlabelled clock silently is not.
+    const took = (Date.now() - started) / 1000;
+    liveRate = took > 0 ? elapsed / took : 1;
+    await refreshCircuit();
+  } catch (error) {
+    if (generation !== liveGeneration) return;
+    stopLive();
+    state.toast?.(error.message || "The live run stopped.");
+    return;
+  }
+  if (liveTimer !== null && generation === liveGeneration) liveTimer = setTimeout(liveTick, 30);
+}
+
+let liveRate = 1;
+
+export function suspendCircuit() {
+  // The simulation must not keep running for a view nobody is looking at — the
+  // same rule the physics sandbox follows.
+  stopLive();
 }
 
 export function bindCircuitControls() {
@@ -293,9 +438,23 @@ export function bindCircuitControls() {
     const asked = Number($("#circuit-seconds")?.value);
     runFor(Number.isFinite(asked) && asked > 0 ? asked : 0.1);
   });
+  $("#circuit-live")?.addEventListener("click", () => {
+    if (liveTimer !== null) {
+      stopLive();
+      return;
+    }
+    liveLast = Date.now();
+    const button = $("#circuit-live");
+    if (button) {
+      button.textContent = "Stop";
+      button.setAttribute("aria-pressed", "true");
+    }
+    liveTimer = setTimeout(liveTick, 60);
+  });
   $("#circuit-rewind")?.addEventListener("click", async () => {
+    stopLive();
     try {
-      await state.api("/api/circuit/rewind", { method: "POST", body: {} });
+      await state.api("/api/circuit/rewind", { method: "POST", body: "{}" });
       await refreshCircuit();
     } catch (error) {
       state.toast?.(error.message || "Could not rewind.");
@@ -304,8 +463,9 @@ export function bindCircuitControls() {
   $("#circuit-probe-add")?.addEventListener("click", async () => {
     const target = $("#circuit-probe-target")?.value?.trim();
     if (!target) return;
+    const measure = $("#circuit-probe-measure")?.value || "";
     try {
-      await state.api("/api/circuit/probes", { method: "POST", body: { target } });
+      await state.api("/api/circuit/probes", { method: "POST", body: JSON.stringify({ target, measure }) });
       $("#circuit-probe-target").value = "";
       await refreshCircuit();
     } catch (error) {

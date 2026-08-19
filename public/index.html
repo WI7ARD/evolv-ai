@@ -356,6 +356,12 @@
                 <span>Watch</span>
                 <input id="circuit-probe-target" type="text" placeholder="OUT or R1" size="10" />
               </label>
+              <label class="sr-only" for="circuit-probe-measure">What to measure</label>
+              <select id="circuit-probe-measure">
+                <option value="">voltage or current</option>
+                <option value="speed">motor speed</option>
+                <option value="angle">servo angle</option>
+              </select>
               <button id="circuit-probe-add" class="secondary-button" type="button">Add probe</button>
               <label class="physics-field">
                 <span>Run for</span>
@@ -363,6 +369,7 @@
                 <span>s</span>
               </label>
               <button id="circuit-run" class="primary-button" type="button">Run</button>
+              <button id="circuit-live" class="secondary-button" type="button" aria-pressed="false" title="Advance the circuit against the clock so you can watch it happen">Live</button>
               <button id="circuit-rewind" class="secondary-button" type="button" title="Back to the instant before the run started, keeping the circuit as built">Rewind</button>
               <span id="circuit-time" class="settings-note" aria-live="polite"></span>
             </div>
