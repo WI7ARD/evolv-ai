@@ -74,9 +74,13 @@ export function selectRelease(payload, currentVersion, platform = "win32") {
     available,
     version,
     name: String(payload.name || `Evolv ${version}`).slice(0, 160),
+    // What the download will cost, from the release rather than from a header
+    // partway through it. Known before anything is written, which is the only
+    // moment refusing to start is still free.
+    downloadBytes: Number(zip?.size) || 0,
     notes: String(payload.body || "").slice(0, 8_000),
     pageUrl: String(payload.html_url || ""),
-    zip: zip ? { name: names.package, url: zip.browser_download_url } : null,
+    zip: zip ? { name: names.package, url: zip.browser_download_url, size: Number(zip.size) || 0 } : null,
     checksum: checksum ? { name: checksumName, url: checksum.browser_download_url } : null,
     // Absent only means a full download; the update still works.
     blocks: blocks?.browser_download_url ? { name: names.blocks, url: blocks.browser_download_url } : null
@@ -98,6 +102,52 @@ function validateUpdateUrl(value, { api = false } = {}) {
     throw new Error("The update host is not trusted.");
   }
   return url;
+}
+
+// How much room is left where the update will be written.
+//
+// Returned rather than assumed, because the whole reason this exists is people
+// running out of it. `statfs` is not on every platform Node runs on; when it is
+// missing the answer is "unknown", and an unknown does not block an update — it
+// only stops the check being able to warn first.
+async function availableBytes(directory) {
+  try {
+    const stats = await fs.statfs(directory);
+    return Number(stats.bavail) * Number(stats.bsize);
+  } catch {
+    return null;
+  }
+}
+
+// What a directory holds, following it all the way down. Used to say how much
+// the updater is sitting on, which is a number nobody can find out otherwise.
+async function directorySize(directory) {
+  let total = 0;
+  let entries;
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      total += await directorySize(full);
+      continue;
+    }
+    try {
+      total += (await fs.stat(full)).size;
+    } catch { /* it went away underneath us, which is fine */ }
+  }
+  return total;
+}
+
+export function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} bytes`;
 }
 
 async function sha256File(filename) {
@@ -140,6 +190,83 @@ export class DesktopUpdateService {
     this.error = "";
   }
 
+  get updatesRoot() {
+    return path.join(this.userDataPath, "updates");
+  }
+
+  // What the updater is sitting on, and which versions it belongs to.
+  //
+  // Nothing else can answer this. The folder lives under userData, which on
+  // Windows is a path inside AppData that nobody browses to by accident, so
+  // several hundred megabytes of finished downloads can sit there for months
+  // looking, from outside, like the app is simply large.
+  async holdings() {
+    let entries = [];
+    try {
+      entries = await fs.readdir(this.updatesRoot, { withFileTypes: true });
+    } catch {
+      return { bytes: 0, versions: [] };
+    }
+    const versions = [];
+    let bytes = 0;
+    for (const entry of entries) {
+      const full = path.join(this.updatesRoot, entry.name);
+      const size = entry.isDirectory() ? await directorySize(full) : await fs.stat(full).then((stat) => stat.size).catch(() => 0);
+      bytes += size;
+      if (entry.isDirectory() && VERSION_PATTERN.test(entry.name)) versions.push({ version: entry.name, bytes: size });
+    }
+    return { bytes, versions: versions.sort((left, right) => compareVersions(right.version, left.version)) };
+  }
+
+  // Throw away every staged update except the ones named.
+  //
+  // A finished update has no further use for the package it came from: the
+  // files are in the install directory now. Keeping it was not a decision, it
+  // was an omission — nothing ever deleted anything, so every update a person
+  // ever installed was still on their disk, one full copy each.
+  async reclaim({ keep = [] } = {}) {
+    const before = await this.holdings();
+    const kept = new Set(keep.filter(Boolean).map((version) => normalizeVersion(version)));
+    let entries = [];
+    try {
+      entries = await fs.readdir(this.updatesRoot, { withFileTypes: true });
+    } catch {
+      return { freedBytes: 0, heldBytes: 0 };
+    }
+    for (const entry of entries) {
+      // The apply script is tiny and is rewritten each time; leaving it costs
+      // nothing and deleting it mid-update would be the one way to break an
+      // install that is already under way.
+      if (entry.name === "apply-evolv-update.ps1") continue;
+      if (entry.isDirectory() && kept.has(entry.name)) continue;
+      await fs.rm(path.join(this.updatesRoot, entry.name), { recursive: true, force: true });
+    }
+    const after = await this.holdings();
+    return { freedBytes: Math.max(0, before.bytes - after.bytes), heldBytes: after.bytes };
+  }
+
+  // Called once the app has started, which is proof the version now installed
+  // works — and therefore that everything staged to produce it is spent.
+  //
+  // The same reasoning main.mjs already applied to the previous AppImage on
+  // Linux, applied to the two things Windows leaves behind: the downloaded
+  // package, and the copy of the old install the swap script renamed aside.
+  async cleanupAfterStart() {
+    const freed = await this.reclaim({ keep: [] });
+    let previousInstall = 0;
+    if (this.platform === "win32") {
+      const previous = `${this.installDir}.previous`;
+      previousInstall = await directorySize(previous);
+      if (previousInstall > 0) await fs.rm(previous, { recursive: true, force: true }).catch(() => {});
+    }
+    if (this.platform === "linux" && this.appImagePath) {
+      const previous = `${this.appImagePath}.previous`;
+      previousInstall = await fs.stat(previous).then((stat) => stat.size).catch(() => 0);
+      if (previousInstall > 0) await fs.rm(previous, { force: true }).catch(() => {});
+    }
+    return { freedBytes: freed.freedBytes + previousInstall, heldBytes: freed.heldBytes };
+  }
+
   supported() {
     if (this.platform === "win32") return true;
     // Linux updates replace the running AppImage. Anything else was installed
@@ -147,9 +274,13 @@ export class DesktopUpdateService {
     return this.platform === "linux" && Boolean(this.appImagePath);
   }
 
-  status() {
+  status(holdings = null) {
     return {
       supported: this.supported(),
+      // How much disk the updater is holding, when the caller has looked it up.
+      // Null rather than zero when it has not, because "nothing" and "not
+      // measured" are different things to put in front of someone.
+      heldBytes: holdings ? holdings.bytes : null,
       // How much of the download the block map saved, once one is planned.
       savings: this.savings,
       currentVersion: this.currentVersion,
@@ -265,6 +396,30 @@ export class DesktopUpdateService {
     this.staged = { sourceDir: "", zipPath: target, packagePath: target, version: this.release.version, expected };
   }
 
+  // Refuse before filling the disk rather than partway through it.
+  //
+  // A download that runs out of room halfway leaves the disk full *and* the
+  // update unfinished, which is the worst of both and is how someone ends up
+  // with no space and no idea why. The package is unpacked as well as
+  // downloaded, so the room needed is several times the file: about two and a
+  // half for the unpacked tree, plus the package itself while it is verified.
+  async requireRoom(directory) {
+    const download = Number(this.release?.zip?.size) || 0;
+    if (!download) return null;
+    const needed = Math.round(download * 3.5);
+    const free = await availableBytes(directory);
+    // Unknown is not a refusal. A platform whose free space cannot be read is
+    // not a reason to stop someone updating.
+    if (free === null) return null;
+    if (free < needed) {
+      throw new Error(
+        `Not enough room to update: ${formatBytes(needed)} is needed and ${formatBytes(free)} is free. ` +
+        `The update unpacks to about ${formatBytes(download * 2.5)} on top of the ${formatBytes(download)} download.`
+      );
+    }
+    return { needed, free };
+  }
+
   async download() {
     if (!this.supported()) throw new Error("Automatic installation is not available on this platform.");
     if (!this.release?.available) await this.check();
@@ -274,8 +429,12 @@ export class DesktopUpdateService {
     this.phase = "downloading";
     this.error = "";
     try {
-      const updateRoot = path.join(this.userDataPath, "updates", this.release.version);
+      // Anything left from an earlier update is spent, and clearing it first
+      // may be the very thing that makes room for this one.
+      await this.reclaim({ keep: [this.release.version] });
+      const updateRoot = path.join(this.updatesRoot, this.release.version);
       await fs.mkdir(updateRoot, { recursive: true });
+      await this.requireRoom(updateRoot);
       const expected = await this.expectedChecksum();
       if (this.platform === "linux") {
         await this.stageAppImage(updateRoot, expected);
@@ -318,7 +477,12 @@ export class DesktopUpdateService {
         const actualFileHash = await sha256File(path.join(sourceDir, ...relative.split("/")));
         if (actualFileHash !== expectedFileHash.toLowerCase()) throw new Error(`The staged ${relative} failed integrity verification.`);
       }
-      this.staged = { sourceDir, zipPath, version: this.release.version, expected };
+      // The package has done its job: the files are unpacked and every one of
+      // them has been checked against the published manifest. Holding a second
+      // compressed copy of what is already sitting beside it, until the install
+      // happens and forever after, is what filled people's disks.
+      await fs.rm(zipPath, { force: true }).catch(() => {});
+      this.staged = { sourceDir, zipPath: "", version: this.release.version, expected };
       this.phase = "ready";
       return this.status();
     } catch (error) {

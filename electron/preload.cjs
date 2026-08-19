@@ -31,5 +31,6 @@ contextBridge.exposeInMainWorld("evolvDesktopApp", Object.freeze({
   updateStatus: () => ipcRenderer.invoke("update:status"),
   checkForUpdates: () => ipcRenderer.invoke("update:check"),
   downloadUpdate: () => ipcRenderer.invoke("update:download"),
-  installUpdate: () => ipcRenderer.invoke("update:install")
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  reclaimUpdateSpace: () => ipcRenderer.invoke("update:reclaim")
 }));

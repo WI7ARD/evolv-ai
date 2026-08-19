@@ -1068,9 +1068,10 @@
           <div class="data-actions">
             <button id="desktop-update-check" class="secondary-button" type="button">Check for updates</button>
             <button id="desktop-update-install" class="primary-button hidden" type="button">Download &amp; install</button>
+            <button id="desktop-update-reclaim" class="secondary-button" type="button" hidden title="Delete the packages finished updates were unpacked from. The installed app is not touched.">Free up space</button>
           </div>
         </section>
-        <p class="settings-note">Updates come only from the configured Evolv GitHub release, require a matching SHA-256 file, and restart the desktop app after verification.</p>
+        <p class="settings-note">Updates come only from the configured Evolv GitHub release, require a matching SHA-256 file, and restart the desktop app after verification. The package an update was unpacked from is deleted once it is installed, so updating does not accumulate on disk.</p>
         <div class="settings-divider"></div>
         <span class="field-label">DATA</span>
         <div class="data-actions">

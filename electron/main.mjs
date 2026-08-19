@@ -112,7 +112,14 @@ function registerAppBridge() {
   });
   ipcMain.handle("update:status", async (event) => {
     trustedVoiceRequest(event);
-    return updateService.status();
+    return updateService.status(await updateService.holdings());
+  });
+  // Getting the space back without waiting for the next update, which is the
+  // only thing to do when the disk is already full.
+  ipcMain.handle("update:reclaim", async (event) => {
+    trustedVoiceRequest(event);
+    const freed = await updateService.reclaim();
+    return { ...updateService.status(await updateService.holdings()), freedBytes: freed.freedBytes };
   });
   ipcMain.handle("update:check", async (event) => {
     trustedVoiceRequest(event);
@@ -141,13 +148,20 @@ async function createWindow() {
     userDataPath: app.getPath("userData"),
     executablePath: process.execPath
   });
-  // A Linux update keeps the previous AppImage beside the new one so a failed
-  // update can be undone by renaming one file. Reaching this point is proof the
-  // new one starts, which is when those 300 MB stop being insurance.
-  if (process.env.APPIMAGE) {
-    fsPromises.rm(`${process.env.APPIMAGE}.previous`, { force: true })
-      .catch((error) => desktopLogger?.warn?.("Could not remove the previous AppImage", { error: error.message }));
-  }
+  // Starting is proof the installed version works, and therefore that
+  // everything staged to produce it is spent: the package it was unpacked
+  // from, and the copy of the old install kept in case this moment never came.
+  //
+  // This used to remove only the previous AppImage on Linux. Windows kept every
+  // package it had ever downloaded, one per version, in a folder under AppData
+  // that nobody browses to — so an app somebody had updated five times was
+  // sitting on a gigabyte of finished downloads, and looked from outside like
+  // it was simply large.
+  updateService.cleanupAfterStart()
+    .then((freed) => {
+      if (freed.freedBytes > 0) desktopLogger?.info?.("Reclaimed space from finished updates", { bytes: freed.freedBytes });
+    })
+    .catch((error) => desktopLogger?.warn?.("Could not clear finished updates", { error: error.message }));
   vaultHost = new DesktopVaultHost({
     dialog,
     shell,

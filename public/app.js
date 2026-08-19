@@ -113,7 +113,8 @@ const elements = {
   desktopUpdateStatus: $("#desktop-update-status"),
   desktopUpdateNotes: $("#desktop-update-notes"),
   desktopUpdateCheck: $("#desktop-update-check"),
-  desktopUpdateInstall: $("#desktop-update-install")
+  desktopUpdateInstall: $("#desktop-update-install"),
+  desktopUpdateReclaim: $("#desktop-update-reclaim")
 };
 
 const defaultSettings = {
@@ -1244,6 +1245,23 @@ function renderDesktopUpdateStatus(status) {
   } else {
     elements.desktopUpdateStatus.textContent = `Automatic updates use ${status.repository}.`;
   }
+
+  // What the updater is holding, and a way to get it back.
+  //
+  // This is the only place it can be found. The packages live under AppData,
+  // where nobody browses by accident, so several hundred megabytes of finished
+  // downloads sit there looking — from outside — like the app is simply large.
+  //
+  // Only touched when the figure was actually measured. A check answers without
+  // looking at the disk, and null means "not measured" rather than "nothing" —
+  // reading it as zero would make the button vanish every time someone pressed
+  // Check, which looks like the space went away with it.
+  const reclaim = elements.desktopUpdateReclaim;
+  if (reclaim && status.heldBytes !== null && status.heldBytes !== undefined) {
+    const held = Number(status.heldBytes) || 0;
+    reclaim.hidden = held < 1024 * 1024;
+    reclaim.textContent = `Free up ${formatBytes(held)}`;
+  }
 }
 
 async function refreshDesktopUpdateStatus({ check = false, silent = false } = {}) {
@@ -1267,6 +1285,16 @@ async function refreshDesktopUpdateStatus({ check = false, silent = false } = {}
 
 function initializeDesktopUpdates() {
   refreshDesktopUpdateStatus({ silent: true });
+  elements.desktopUpdateReclaim?.addEventListener("click", async () => {
+    if (!window.evolvDesktopApp?.reclaimUpdateSpace) return;
+    try {
+      const status = await window.evolvDesktopApp.reclaimUpdateSpace();
+      renderDesktopUpdateStatus(status);
+      toast(status.freedBytes > 0 ? `Freed ${formatBytes(status.freedBytes)}.` : "There was nothing left to clear.");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  });
   if (!window.evolvDesktopApp?.checkForUpdates) return;
   const lastCheck = Number(localStorage.getItem("evolv:last-update-check") || 0);
   if (Date.now() - lastCheck < 6 * 60 * 60 * 1000) return;

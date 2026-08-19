@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { compareVersions, DEFAULT_UPDATE_REPOSITORY, DesktopUpdateService, normalizeVersion, selectRelease } from "../electron/update-service.mjs";
+import { compareVersions, DEFAULT_UPDATE_REPOSITORY, DesktopUpdateService, formatBytes, normalizeVersion, selectRelease } from "../electron/update-service.mjs";
 
 test("the updater checks the repository that actually publishes the releases", async () => {
   // These had drifted apart: the updater checked WI7ARD/evolv-personal while
@@ -250,4 +250,141 @@ test("the renderer exposes clear update controls without receiving filesystem ac
   assert.match(preload, /updateStatus: \(\) => ipcRenderer\.invoke\("update:status"\)/);
   assert.match(main, /ipcMain\.handle\("update:install"/);
   assert.doesNotMatch(preload, /userDataPath|executablePath|InstallDirectory/);
+});
+
+
+// Updating should not cost disk that is never given back.
+//
+// It did. Every Windows update wrote a full package into userData/updates and
+// nothing ever deleted one, so a person who had updated five times was sitting
+// on five finished downloads — in a folder under AppData that nobody browses to
+// by accident, which is why it read as "the app is just enormous" rather than
+// as a leak.
+
+const fakeUpdates = async (root, versions) => {
+  for (const [version, bytes] of Object.entries(versions)) {
+    const directory = path.join(root, "updates", version);
+    await fs.mkdir(path.join(directory, "staged"), { recursive: true });
+    await fs.writeFile(path.join(directory, `Evolv-win32-x64-${version}.zip`), randomBytes(bytes));
+    await fs.writeFile(path.join(directory, "staged", "Evolv.exe"), randomBytes(bytes));
+  }
+};
+
+const service = (root, options = {}) => new DesktopUpdateService({
+  currentVersion: "0.7.0",
+  userDataPath: root,
+  executablePath: path.join(root, "install", "Evolv.exe"),
+  platform: "win32",
+  ...options
+});
+
+test("the updater can say how much disk it is holding, and give it back", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolv-updates-"));
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+  await fakeUpdates(root, { "0.6.1": 40_000, "0.6.2": 50_000, "0.7.0": 60_000 });
+
+  const updater = service(root);
+  const before = await updater.holdings();
+  assert.ok(before.bytes >= 300_000, `expected all six files counted, got ${before.bytes}`);
+  assert.deepEqual(before.versions.map((entry) => entry.version), ["0.7.0", "0.6.2", "0.6.1"],
+    "newest first, so the list reads the way a person would ask the question");
+
+  const freed = await updater.reclaim();
+  assert.ok(freed.freedBytes >= 300_000, `expected the space back, freed ${freed.freedBytes}`);
+  assert.equal(freed.heldBytes, 0);
+  assert.deepEqual((await updater.holdings()).versions, []);
+});
+
+test("reclaiming keeps the update that is being installed right now", async (t) => {
+  // Deleting the package mid-install would break the very thing it was clearing
+  // space for.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolv-updates-keep-"));
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+  await fakeUpdates(root, { "0.6.1": 20_000, "0.7.1": 30_000 });
+  await fs.writeFile(path.join(root, "updates", "apply-evolv-update.ps1"), "# the swap script");
+
+  const updater = service(root);
+  await updater.reclaim({ keep: ["0.7.1"] });
+  const held = await updater.holdings();
+  assert.deepEqual(held.versions.map((entry) => entry.version), ["0.7.1"]);
+  // And the script that performs the swap survives, because an install already
+  // under way is running it.
+  await fs.access(path.join(root, "updates", "apply-evolv-update.ps1"));
+});
+
+test("starting up clears what the last update left behind", async (t) => {
+  // Reaching this point is proof the installed version works, which is exactly
+  // when the package it came from and the copy of the old install stop being
+  // insurance. main.mjs already reasoned this way about the previous AppImage
+  // on Linux; Windows kept everything.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolv-updates-boot-"));
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+  await fakeUpdates(root, { "0.6.9": 25_000, "0.7.0": 25_000 });
+  const installDir = path.join(root, "install");
+  await fs.mkdir(path.join(`${installDir}.previous`, "resources"), { recursive: true });
+  await fs.writeFile(path.join(`${installDir}.previous`, "Evolv.exe"), randomBytes(70_000));
+
+  const updater = service(root);
+  const freed = await updater.cleanupAfterStart();
+  assert.ok(freed.freedBytes >= 170_000, `expected packages and the old install back, got ${freed.freedBytes}`);
+  assert.equal(freed.heldBytes, 0);
+  await assert.rejects(() => fs.access(`${installDir}.previous`), "the old install is gone");
+});
+
+test("an update is refused before it fills the disk, not partway through", async (t) => {
+  // Running out of room halfway leaves the disk full *and* the update
+  // unfinished, which is the worst of both — and is how someone ends up with no
+  // space and no idea what took it.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolv-updates-room-"));
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+
+  const updater = service(root);
+  updater.release = { version: "0.7.1", zip: { size: 200 * 1024 ** 2 } };
+  // Pretend the disk has 100 MB left against a 200 MB download that unpacks.
+  const originalStatfs = fs.statfs;
+  t.after(() => { fs.statfs = originalStatfs; });
+  fs.statfs = async () => ({ bavail: 100, bsize: 1024 ** 2 });
+  await assert.rejects(() => updater.requireRoom(root), (error) => {
+    assert.match(error.message, /Not enough room/);
+    // The figures, not just the verdict: what is needed, what is free, and why
+    // it is more than the download.
+    assert.match(error.message, /700 MB is needed/);
+    assert.match(error.message, /100 MB is free/);
+    assert.match(error.message, /unpacks to about 500 MB/);
+    return true;
+  });
+
+  // With room, it says nothing and gets out of the way.
+  fs.statfs = async () => ({ bavail: 4_000, bsize: 1024 ** 2 });
+  assert.ok(await updater.requireRoom(root));
+
+  // And a platform that cannot answer is not a reason to stop someone updating.
+  fs.statfs = async () => { throw new Error("statfs is not supported here"); };
+  assert.equal(await updater.requireRoom(root), null);
+});
+
+test("sizes are written the way a person would say them", () => {
+  assert.equal(formatBytes(250 * 1024 ** 2), "250 MB");
+  assert.equal(formatBytes(1.5 * 1024 ** 3), "1.5 GB");
+  assert.equal(formatBytes(4096), "4 KB");
+  assert.equal(formatBytes(0), "0 bytes");
+});
+
+test("the space it is holding is only claimed when it was actually looked up", async (t) => {
+  // status() answers without touching the disk, because check() and download()
+  // call it constantly and walking a folder each time would be silly. So the
+  // figure is null rather than zero when nobody measured — the two mean
+  // different things, and the page reading one as the other would hide the
+  // button every time someone pressed Check.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "evolv-updates-held-"));
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+  await fakeUpdates(root, { "0.6.4": 30_000 });
+
+  const updater = service(root);
+  assert.equal(updater.status().heldBytes, null, "not measured is not the same as nothing");
+  const measured = updater.status(await updater.holdings());
+  assert.ok(measured.heldBytes >= 60_000, `expected a real figure, got ${measured.heldBytes}`);
+
+  const page = await fs.readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(page, /status\.heldBytes !== null/, "the page has to tell the two apart");
 });
