@@ -259,6 +259,33 @@ test("every control the renderer binds exists in the page", async () => {
   }
 });
 
+test("every part in the catalogue gets a real reference designator", async () => {
+  // The six chips were added to the catalogue and not to the designator table,
+  // so a 555 came out labelled "undefined1" — on the schematic, in the parts
+  // table, and in the bill of materials. Every test passed; it took looking at
+  // the screen. A part with no designator cannot be ordered or found on a board.
+  const { PART_KINDS } = await import("../lib/circuit/parts.mjs");
+  const service = new CircuitService();
+  for (const kind of PART_KINDS) {
+    const added = service.apply("add", { kind });
+    assert.doesNotMatch(added.id, /undefined/, `${kind} has no designator`);
+    assert.match(added.id, /^[A-Z]+[0-9]+$/, `${kind} produced the id ${added.id}`);
+  }
+});
+
+test("every part in the catalogue has a symbol to draw it with", async () => {
+  // A part the solver understands and the renderer cannot draw falls back to a
+  // resistor, which is not a missing feature but a silent lie about what is on
+  // the page — and the sort of thing nobody notices until they are reading a
+  // schematic that says the wrong thing.
+  const { PART_KINDS } = await import("../lib/circuit/parts.mjs");
+  const script = await readFile(new URL("../public/circuit.js", import.meta.url), "utf8");
+  const drawn = new Set([...script.matchAll(/^ {2}([a-z0-9]+): "M/gm)].map((match) => match[1]));
+  for (const kind of PART_KINDS) {
+    assert.ok(drawn.has(kind), `${kind} has no symbol; it would be drawn as a resistor`);
+  }
+});
+
 test("the page draws and computes nothing", async () => {
   // The solver lives in the server. A page doing its own arithmetic would give
   // a second answer to every question, with no way to tell which one a model

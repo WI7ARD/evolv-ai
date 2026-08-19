@@ -33,7 +33,16 @@ const SYMBOLS = {
   diode: "M0 20 L22 20 M22 8 L22 32 L40 20 Z M40 8 L40 32 M40 20 L60 20",
   led: "M0 20 L22 20 M22 8 L22 32 L40 20 Z M40 8 L40 32 M40 20 L60 20 M44 4 L52 -4 M50 8 L58 0",
   switch: "M0 20 L18 20 M18 20 L40 8 M42 20 L60 20 M18 20 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M42 20 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0",
-  potentiometer: "M0 20 L10 20 L14 10 L22 30 L30 10 L38 30 L46 10 L50 20 L60 20 M30 40 L30 30 M26 32 L30 26 L34 32"
+  potentiometer: "M0 20 L10 20 L14 10 L22 30 L30 10 L38 30 L46 10 L50 20 L60 20 M30 40 L30 30 M26 32 L30 26 L34 32",
+  // The chips. A triangle for anything that amplifies or buffers, a box for
+  // anything with state — which is the convention every schematic follows and
+  // the reason you can read one at a glance without labels.
+  opamp: "M14 4 L14 36 L46 20 Z M0 12 L14 12 M0 28 L14 28 M46 20 L60 20 M30 8 L30 4 M30 36 L30 32",
+  regulator: "M8 8 L52 8 L52 32 L8 32 Z M0 20 L8 20 M52 20 L60 20 M30 32 L30 40",
+  gate: "M14 4 L14 36 L46 20 Z M0 12 L14 12 M0 28 L14 28 M50 20 L60 20 M46 20 m0 0 a4 4 0 1 0 8 0 a4 4 0 1 0 -8 0",
+  flipflop: "M10 2 L50 2 L50 38 L10 38 Z M0 10 L10 10 M0 20 L10 20 M50 12 L60 12 M50 28 L60 28 M10 26 L18 20 L10 14",
+  timer555: "M10 2 L50 2 L50 38 L10 38 Z M0 8 L10 8 M0 20 L10 20 M0 32 L10 32 M50 20 L60 20 M22 14 L38 14 M22 20 L38 20 M22 26 L38 26",
+  mcupin: "M14 6 L46 6 L46 34 L14 34 Z M46 20 L60 20 M20 6 L20 0 M28 6 L28 0 M36 6 L36 0 M20 34 L20 40 M28 34 L28 40"
 };
 
 function escapeHtml(value) {
