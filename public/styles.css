@@ -1093,3 +1093,10 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .circuit-rotor { stroke: #ffd479; stroke-width: 2; stroke-linecap: round; }
 .circuit-stalled { fill: none; stroke: #ff4466; stroke-width: 2; stroke-dasharray: 4 3; }
 .circuit-sounding { fill: none; stroke: #7fd4ff; stroke-width: 1; opacity: .5; }
+.circuit-mcu { margin-top: 16px; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.circuit-mcu-head { display: flex; gap: 12px; align-items: baseline; color: var(--muted); font-size: 12px; }
+.circuit-mcu-head strong { color: var(--text, inherit); font-size: 14px; }
+.circuit-mcu-error { color: #ff8095; font-size: 13px; margin: 8px 0 0; }
+.circuit-serial { margin: 12px 0 0; padding: 10px 12px; max-height: 180px; overflow: auto;
+  background: rgba(0, 0, 0, .25); border-radius: 8px; font-family: var(--mono, monospace); font-size: 12px;
+  line-height: 1.5; color: #b8e6c8; white-space: pre; }

@@ -49,6 +49,7 @@ const SYMBOLS = {
   servo: "M0 20 L10 20 M10 8 L38 8 L38 32 L10 32 Z M38 20 L44 20 M44 20 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0",
   buzzer: "M0 20 L14 20 M14 10 L14 30 M14 20 L30 8 L30 32 Z M38 12 a10 10 0 0 1 0 16 M44 8 a16 16 0 0 1 0 24 M30 20 L60 20",
   rgbled: "M0 20 L22 20 M22 8 L22 32 L40 20 Z M40 8 L40 32 M40 20 L60 20 M44 4 L52 -4 M50 8 L58 0 M12 8 L12 32",
+  mcu: "M10 0 L50 0 L50 40 L10 40 Z M10 6 L4 6 M10 14 L4 14 M10 22 L4 22 M10 30 L4 30 M50 6 L56 6 M50 14 L56 14 M50 22 L56 22 M50 30 L56 30 M18 8 L18 14 M22 8 L22 14",
   sevenseg: "M8 2 L52 2 L52 38 L8 38 Z M16 8 L44 8 M16 20 L44 20 M16 32 L44 32 M16 8 L16 20 M16 20 L16 32 M44 8 L44 20 M44 20 L44 32"
 };
 
@@ -244,6 +245,49 @@ function deviceCaption(kind, device) {
   return "";
 }
 
+// What a microcontroller is doing: its legs, and what it said.
+//
+// The pin table is limited to the pins this chip is actually wired to. A
+// twelve-row table where nine rows read "input, 0.000V, not connected" buries
+// the three that matter, and the interesting question is never what an unwired
+// pin is up to.
+//
+// The printed output is the other half. A print statement is how anyone debugs
+// firmware, and it is worth nothing if it goes somewhere you cannot see — so it
+// is shown with the simulated time each line was printed at, which is a thing a
+// real serial monitor cannot tell you.
+function renderMcus(frame, circuit) {
+  const chips = Object.entries(frame?.mcus || {});
+  if (!chips.length) return "";
+  return chips.map(([id, chip]) => {
+    const wired = circuit?.parts?.find((part) => part.id === id)?.pins || {};
+    const legs = Object.entries(chip.pins)
+      .filter(([name]) => wired[name] && name !== "vcc" && name !== "gnd");
+    const output = chip.output || [];
+    return `<section class="circuit-mcu">
+      <header class="circuit-mcu-head">
+        <strong>${escapeHtml(id)}</strong>
+        <span>${(chip.clockHz / 1e6).toFixed(0)}MHz</span>
+        <span>${chip.iterations.toLocaleString()} loop${chip.iterations === 1 ? "" : "s"}</span>
+      </header>
+      ${chip.error ? `<p class="circuit-mcu-error">${escapeHtml(chip.error.message)}${
+        chip.error.line ? ` (line ${chip.error.line})` : ""}</p>` : ""}
+      ${legs.length ? `<table class="circuit-parts">
+        <thead><tr><th>Pin</th><th>Wired to</th><th>Mode</th><th>Driving</th><th>Reads</th></tr></thead>
+        <tbody>${legs.map(([name, pin]) => `<tr>
+          <td>${escapeHtml(name)}</td>
+          <td>${escapeHtml(wired[name])}</td>
+          <td>${escapeHtml(pin.mode)}</td>
+          <td>${escapeHtml(pin.driving || "—")}</td>
+          <td>${pin.volts.toFixed(3)}V</td>
+        </tr>`).join("")}</tbody>
+      </table>` : ""}
+      ${output.length ? `<pre class="circuit-serial">${output.map((entry) =>
+        `${escapeHtml(seconds(entry.at).padStart(9))}  ${escapeHtml(entry.line)}`).join("\n")}</pre>` : ""}
+    </section>`;
+  }).join("");
+}
+
 function renderFindings(findings = []) {
   if (!findings.length) return "";
   return `<ul class="circuit-findings">${findings.map((finding) => `
@@ -298,6 +342,8 @@ function draw() {
   if (canvas) canvas.innerHTML = renderSchematic(state.frame);
   const findings = $("#circuit-findings");
   if (findings) findings.innerHTML = renderFindings(state.circuit?.findings);
+  const mcus = $("#circuit-mcus");
+  if (mcus) mcus.innerHTML = renderMcus(state.frame, state.circuit);
   const parts = $("#circuit-parts");
   if (parts) parts.innerHTML = renderParts(state.circuit);
   const bom = $("#circuit-bom");

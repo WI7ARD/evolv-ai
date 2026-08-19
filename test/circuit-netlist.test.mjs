@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { solveNetlist, billOfMaterials, buildIndex, isGroundName } from "../lib/circuit/netlist.mjs";
 import { nearestE12, formatOhms, formatAmps, formatFarads, partRatings, PART_KINDS } from "../lib/circuit/parts.mjs";
+import { runTransient } from "../lib/circuit/transient.mjs";
+import { createMcus } from "../lib/circuit/mcu.mjs";
 
 const GROUND = { id: "GND1", kind: "ground", values: {}, pins: { pin: "GND" } };
 const supply = (volts = 5) => ({ id: "BT1", kind: "supply", values: { volts, resistance: 0.05 }, pins: { positive: "VCC", negative: "GND" } });
@@ -211,4 +213,51 @@ test("every part in the catalogue can actually be simulated", () => {
     if (kind === "ground") continue;
     assert.ok(partRatings(kind, {}) !== undefined, `${kind} must answer about its ratings`);
   }
+});
+
+test("a chip's current comes off the supply, not out of nowhere", () => {
+  // Kirchhoff at the supply terminal, which is the invariant that was broken.
+  //
+  // Every driven output used to be stamped as a source referenced to ground.
+  // The voltages that produced were right, so nothing complained: a 74HC gate
+  // lit an LED at exactly the current a bench would measure. But the current
+  // was created at the pin instead of taken off the rail, so the supply
+  // reported delivering none of it. On a battery-powered board the supply
+  // reading is the whole point — it is what sizes the cell and what the
+  // regulator has to hold up — and a sandbox that under-reports it would let
+  // someone design a board that dies in a morning.
+  const led = [
+    { id: "R1", kind: "resistor", values: { ohms: 330 }, pins: { a: "OUT", b: "N1" } },
+    { id: "D1", kind: "led", values: { colour: "red" }, pins: { anode: "N1", cathode: "GND" } }
+  ];
+
+  // A logic gate holding its output high.
+  const gate = solveNetlist([
+    supply(5),
+    { id: "U1", kind: "gate", values: { function: "nand" }, pins: { a: "GND", b: "GND", out: "OUT", vcc: "VCC", gnd: "GND" } },
+    ...led, GROUND
+  ]);
+  assert.ok(gate.solved, JSON.stringify(gate.findings));
+  assert.ok(gate.currents.D1 > 0.005, `the LED should be lit, drew ${gate.currents.D1}`);
+  assert.ok(Math.abs(gate.currents.BT1 - gate.currents.D1) < 1e-4,
+    `the supply must deliver what the gate is sourcing: ${gate.currents.BT1} vs ${gate.currents.D1}`);
+
+  // And a microcontroller, which additionally draws to be switched on at all.
+  const parts = [
+    supply(5),
+    { id: "U1", kind: "mcu", values: { activeAmps: 0.012 }, pins: { d0: "OUT", vcc: "VCC", gnd: "GND" } },
+    ...led, GROUND
+  ];
+  const mcus = createMcus(parts, new Map([["U1",
+    "function setup(){ pinMode(0, 1); digitalWrite(0, 1); }\nfunction loop(){ delay(10); }"]]));
+  const board = runTransient(parts, { seconds: 0.02, dt: 2e-4, mcus });
+  assert.ok(board.ran, JSON.stringify(board.findings));
+  const drawn = board.currents;
+  assert.ok(drawn.D1 > 0.005, `the LED should be lit, drew ${drawn.D1}`);
+  // Twelve milliamps to be awake, plus whatever the pin is sourcing, and the
+  // supply delivers the sum of the two.
+  assert.ok(Math.abs(drawn.U1 - (0.012 + drawn.D1)) < 3e-4,
+    `the chip should report its own draw plus the pin's: ${drawn.U1} vs ${0.012 + drawn.D1}`);
+  assert.ok(Math.abs(drawn.BT1 - drawn.U1) < 3e-4,
+    `and the supply must deliver all of it: ${drawn.BT1} vs ${drawn.U1}`);
 });

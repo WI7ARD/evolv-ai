@@ -59,6 +59,20 @@ export async function handleCircuitRoutes(context) {
     return true;
   }
 
+  const firmwareMatch = url.pathname.match(/^\/api\/circuit\/firmware\/([^/]+)$/);
+  if (firmwareMatch) {
+    const id = decodeURIComponent(firmwareMatch[1]);
+    if (req.method === "GET") {
+      json(res, 200, circuitService.readFirmware(id));
+      return true;
+    }
+    if (req.method === "PUT" || req.method === "POST") {
+      const body = await readBody(req, bodyLimit);
+      json(res, 200, circuitService.writeFirmware(id, body.source));
+      return true;
+    }
+  }
+
   if (url.pathname === "/api/circuit/probes") {
     if (req.method === "POST") {
       const body = await readBody(req, bodyLimit);
