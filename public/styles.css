@@ -1054,3 +1054,30 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .world-canvas { display: block; width: 100%; height: 300px; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; margin: 14px 0 10px; }
 .world-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
 .world-skills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+
+/* The circuit sandbox.
+   A schematic is line art: one stroke colour, no fills, and enough contrast
+   that a photograph of the screen is still readable — which is what someone
+   building from it will actually do. */
+.circuit-schematic { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; padding: 8px; }
+.circuit-canvas { display: block; width: 100%; height: auto; min-width: 320px; }
+.circuit-empty { color: var(--muted); text-align: center; padding: 32px 12px; margin: 0; }
+.circuit-wire { fill: none; stroke: #7fd4ff; stroke-width: 1.5; stroke-linecap: square; }
+.circuit-wire.is-dangling { stroke: #ff8098; stroke-dasharray: 3 3; }
+.circuit-junction { fill: #7fd4ff; }
+.circuit-glyph { fill: none; stroke: #e8f4ff; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.circuit-hit { fill: transparent; cursor: pointer; }
+.circuit-symbol.is-selected .circuit-glyph { stroke: #ffd479; }
+.circuit-symbol.is-selected .circuit-hit { fill: rgba(255, 212, 121, .08); }
+.circuit-ref { fill: #ffd479; font-size: 11px; text-anchor: middle; font-family: var(--mono, monospace); }
+.circuit-value { fill: #9fb3c8; font-size: 10px; text-anchor: middle; }
+.circuit-current { fill: #7fd4ff; font-size: 10px; text-anchor: middle; }
+.circuit-net { fill: #9fe8b0; font-size: 10px; font-family: var(--mono, monospace); text-anchor: middle; dominant-baseline: text-after-edge; }
+.circuit-findings { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.circuit-finding { border-left: 3px solid #ff4466; padding: 8px 12px; background: rgba(255, 68, 102, .07); border-radius: 0 6px 6px 0; font-size: 13px; }
+.circuit-finding strong { display: block; color: #ff8098; font-family: var(--mono, monospace); margin-bottom: 2px; }
+.circuit-parts, .circuit-bom { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.circuit-parts th, .circuit-bom th { text-align: left; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--line); padding: 6px 8px; }
+.circuit-parts td, .circuit-bom td { padding: 6px 8px; border-bottom: 1px solid rgba(255, 255, 255, .04); }
+.circuit-bom-block { margin-top: 16px; }
+.circuit-bom-block summary { cursor: pointer; color: var(--muted); }

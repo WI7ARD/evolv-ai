@@ -115,6 +115,63 @@ test("the schematic is the same picture every time", () => {
     "the order parts were added must not change where they are drawn");
 });
 
+test("every net gets a label, however the circuit happens to lay out", () => {
+  // This went wrong once and was invisible until the layout got better. Labels
+  // used to be inferred by the renderer from vertical wire spines, so the moment
+  // a series loop laid out as a single left-to-right row — which is exactly what
+  // it should look like — two of the three nets had no vertical extent, no
+  // spine, and silently no label. The anchors belong to the layout, which knows.
+  const frame = ledCircuit(new CircuitService()).frame();
+  const labelled = new Set(frame.labels.map((label) => label.net));
+  assert.deepEqual([...labelled].sort(), ["GND", "N1", "VCC"]);
+  for (const label of frame.labels) {
+    assert.ok(Number.isFinite(label.x) && Number.isFinite(label.y), `${label.net} needs a place to be written`);
+  }
+});
+
+test("wires never run through a symbol", () => {
+  // The first version put each net's spine at the average of its pins' x
+  // positions, which lands inside a column as often as not — so a wire ran
+  // straight through the LED it was connecting to. Only running the app showed
+  // it; the arithmetic looked reasonable on paper.
+  const frame = ledCircuit(new CircuitService()).frame();
+  for (const wire of frame.wires.filter((item) => item.spine)) {
+    const x = wire.points[0][0];
+    const [top, bottom] = [wire.points[0][1], wire.points[1][1]];
+    for (const symbol of frame.symbols) {
+      const horizontallyInside = x > symbol.x && x < symbol.x + symbol.width;
+      const verticallyOverlapping = bottom > symbol.y && top < symbol.y + symbol.height;
+      assert.ok(!(horizontallyInside && verticallyOverlapping),
+        `wire on ${wire.net} passes through ${symbol.id}`);
+    }
+  }
+});
+
+test("two nets never share a channel across the same rows", () => {
+  // Three nets snapped to one gutter once, and their labels printed on top of
+  // each other as "NVC2.5G6V" — three readings interleaved into nonsense.
+  const frame = ledCircuit(new CircuitService()).frame();
+  const spines = frame.wires.filter((wire) => wire.spine);
+  for (const [index, wire] of spines.entries()) {
+    for (const other of spines.slice(index + 1)) {
+      if (wire.points[0][0] !== other.points[0][0]) continue;
+      const overlap = wire.points[1][1] > other.points[0][1] && wire.points[0][1] < other.points[1][1];
+      assert.ok(!overlap, `${wire.net} and ${other.net} share a channel across the same rows`);
+    }
+  }
+});
+
+test("a series loop reads left to right, not as a vertical pile", () => {
+  // Ranking followed ground, which touches almost everything, so every part
+  // came out one step from the supply and stacked into a single column. A
+  // supply, a resistor and an LED in series is a line.
+  const frame = ledCircuit(new CircuitService()).frame();
+  const byId = Object.fromEntries(frame.symbols.map((symbol) => [symbol.id, symbol]));
+  assert.ok(byId.PS1.x < byId.R1.x, "the supply comes before the resistor");
+  assert.ok(byId.R1.x < byId.D1.x, "and the resistor before the LED it feeds");
+  assert.ok(frame.width > frame.height, "so the drawing is wider than it is tall");
+});
+
 test("the frame carries geometry and the numbers, and the page computes neither", () => {
   const frame = ledCircuit(new CircuitService()).frame();
   assert.ok(frame.symbols.length === 4 && frame.wires.length > 0);

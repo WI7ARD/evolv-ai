@@ -10,6 +10,7 @@
     <link rel="modulepreload" href="/sandbox.js?v=0.6.3" />
     <link rel="modulepreload" href="/world.js?v=0.6.3" />
     <link rel="modulepreload" href="/physics.js?v=0.6.3" />
+    <link rel="modulepreload" href="/circuit.js?v=0.7.0" />
     <link rel="modulepreload" href="/lab.js?v=0.6.3" />
     <link rel="modulepreload" href="/demo.js?v=0.6.3" />
   </head>
@@ -202,7 +203,7 @@
                   <button id="voice-toggle" class="tool-button" type="button" aria-label="Toggle spoken replies" title="Spoken replies">◖</button>
                   <button id="gesture-button" class="tool-button" type="button" aria-label="Open hand gestures" title="Hand gestures">✋</button>
                 </div>
-                <span id="composer-hint">Enter to send · Shift+Enter for a new line · /agent · /sandbox · /physics · /lab · /demo</span>
+                <span id="composer-hint">Enter to send · Shift+Enter for a new line · /agent · /sandbox · /physics · /circuit · /lab · /demo</span>
                 <span id="voice-listen-status" class="voice-listen-status hidden" aria-live="polite">Hold the microphone button to talk</span>
                 <button id="stop-button" class="stop-button hidden" type="button">Stop</button>
                 <button id="send-button" class="send-button" type="submit" aria-label="Send">↑</button>
@@ -315,6 +316,45 @@
           <p class="settings-note">Each panel reads itself aloud.</p>
         </section>
 
+        <section id="circuit-view" class="view panel-view agent-view">
+          <div class="panel-header">
+            <div><p class="eyebrow">SANDBOX</p><h1>Circuit</h1><p>A schematic you could build on a bench from real parts. Describe what you want — "an LED on 5V" — and Evolv wires it, solves it, and says what would actually happen, including which part burns out. Started with <code>/circuit</code>.</p></div>
+            <div class="panel-header-actions">
+              <button id="circuit-back-to-chat" class="secondary-button" type="button">Back to chat</button>
+            </div>
+          </div>
+          <article class="mind-card">
+            <div class="physics-controls">
+              <label class="physics-field">
+                <span>Add a part</span>
+                <select id="circuit-kind">
+                  <option value="resistor">Resistor</option>
+                  <option value="capacitor">Capacitor</option>
+                  <option value="inductor">Inductor</option>
+                  <option value="led">LED</option>
+                  <option value="diode">Diode</option>
+                  <option value="switch">Switch</option>
+                  <option value="potentiometer">Potentiometer</option>
+                  <option value="supply">Power supply</option>
+                  <option value="battery">Battery</option>
+                  <option value="ground">Ground</option>
+                </select>
+              </label>
+              <button id="circuit-add" class="primary-button" type="button">Add</button>
+              <button id="circuit-refresh" class="secondary-button" type="button">Refresh</button>
+              <button id="circuit-clear" class="secondary-button physics-danger" type="button">Clear</button>
+              <span id="circuit-status" class="settings-note" aria-live="polite"></span>
+            </div>
+            <div id="circuit-schematic" class="circuit-schematic"></div>
+            <div id="circuit-findings"></div>
+            <p class="settings-note">Voltages are shown at each net, currents beside each part. Everything here is solved on this computer.</p>
+            <div id="circuit-parts"></div>
+            <details class="circuit-bom-block">
+              <summary>Bill of materials</summary>
+              <div id="circuit-bom"></div>
+            </details>
+          </article>
+        </section>
         <section id="physics-view" class="view panel-view agent-view">
           <div class="panel-header">
             <div><p class="eyebrow">SANDBOX</p><h1>Physics</h1><p>A small world with gravity. Drop objects in, press Run, and watch. Evolv can build here and see what happened — ask it to try something. Started with <code>/physics</code>.</p></div>

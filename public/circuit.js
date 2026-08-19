@@ -65,7 +65,6 @@ function renderSchematic(frame) {
   if (!frame?.symbols?.length) {
     return `<p class="circuit-empty">Nothing here yet. Ask for a circuit — "an LED on 5V" — or add a part from the toolbar.</p>`;
   }
-  const scale = 60 / 60;
   const wires = frame.wires.map((wire) => {
     const points = wire.points.map(([x, y]) => `${x},${y}`).join(" ");
     const classes = ["circuit-wire", wire.dangling ? "is-dangling" : "", wire.spine ? "is-spine" : ""].filter(Boolean).join(" ");
@@ -80,7 +79,7 @@ function renderSchematic(frame) {
     // Symbols are authored in a 60×40 box; the layout allots 60×40 too, so the
     // only transform needed is the move.
     return `<g class="circuit-symbol${state.selected === symbol.id ? " is-selected" : ""}" data-id="${escapeHtml(symbol.id)}"
-      transform="translate(${symbol.x - 0} ${symbol.y - 10}) scale(${scale})">
+      transform="translate(${symbol.x} ${symbol.y})">
       <rect class="circuit-hit" x="-4" y="-4" width="68" height="48" />
       <path class="circuit-glyph" d="${path}" />
       <text class="circuit-ref" x="30" y="-8">${escapeHtml(symbol.id)}</text>
@@ -90,14 +89,16 @@ function renderSchematic(frame) {
   }).join("");
 
   // Net voltages, written once per net at the top of its spine.
-  const labels = frame.solved
-    ? frame.wires.filter((wire) => wire.spine).map((wire) => {
-      const [x, y] = wire.points[0];
-      const value = frame.nets?.[wire.net];
-      if (value === undefined) return "";
-      return `<text class="circuit-net" x="${x + 6}" y="${y - 6}">${escapeHtml(wire.net)} ${escapeHtml(volts(value))}</text>`;
-    }).join("")
-    : "";
+  // Anchors come from the layout, which knows whether a net has a channel of
+  // its own. A label on a vertical channel is turned on its side, because laid
+  // flat it is as wide as three symbols and lands on whichever one shares its
+  // row.
+  const labels = (frame.labels || []).map((label) => {
+    const value = frame.nets?.[label.net];
+    const caption = frame.solved && value !== undefined ? `${label.net} ${volts(value)}` : label.net;
+    const turn = label.vertical ? ` transform="rotate(-90 ${label.x} ${label.y})"` : "";
+    return `<text class="circuit-net" x="${label.x}" y="${label.y}"${turn}>${escapeHtml(caption)}</text>`;
+  }).join("");
 
   return `<svg class="circuit-canvas" viewBox="0 0 ${frame.width + 60} ${frame.height + 40}" role="img"
     aria-label="Circuit schematic with ${frame.symbols.length} parts">${wires}${dots}${symbols}${labels}</svg>`;

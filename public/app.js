@@ -1,6 +1,7 @@
 import { initAgentWorkspace, refreshAgentWorkspace } from "./agent-workspace.js";
 import { initSandboxWorkspace, refreshSandboxes } from "./sandbox.js";
 import { initPhysics, refreshPhysics, suspendPhysics } from "./physics.js";
+import { initCircuit, refreshCircuit, bindCircuitControls } from "./circuit.js";
 import { initLab, refreshLab, suspendLab } from "./lab.js";
 import { initDemo } from "./demo.js";
 
@@ -1139,6 +1140,9 @@ async function init() {
   initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
   initSandboxWorkspace({ api, toast, project: activeProject });
   initPhysics({ api, toast });
+  initCircuit({ api, toast });
+  bindCircuitControls();
+  $("#circuit-back-to-chat")?.addEventListener("click", () => switchView("chat"));
   initLab({ api, toast, project: activeProject });
   initDemo({ api, toast, sendMessage, switchView });
   $("#demo-back-to-chat")?.addEventListener("click", () => {
@@ -2206,6 +2210,7 @@ const COMPOSER_COMMANDS = [
   { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal },
   { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox },
   { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") },
+  { name: "/circuit", description: "Open the circuit sandbox", run: () => switchView("circuit") },
   { name: "/lab", description: "Open the lab display", run: () => switchView("lab") },
   { name: "/demo", description: "Watch Evolv run a narrated experiment", run: () => switchView("demo") }
 ];
@@ -3224,6 +3229,7 @@ function switchView(view) {
   if (view === "projects") refreshProjects().catch((error) => toast(error.message, "error"));
   if (view === "agent") refreshAgentWorkspace().catch((error) => toast(error.message, "error"));
   if (view === "sandbox") refreshSandboxes().catch((error) => toast(error.message, "error"));
+  if (view === "circuit") refreshCircuit().catch((error) => toast(error.message, "error"));
   if (view === "physics") refreshPhysics().catch((error) => toast(error.message, "error"));
   // The simulation clock must not keep running for a view nobody is looking at.
   else suspendPhysics();
