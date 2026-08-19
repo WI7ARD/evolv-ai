@@ -415,10 +415,15 @@ test("exposes bounded tool configuration", async () => {
     "propose_sandbox_promotion", "propose_web_research", "propose_workspace_create", "propose_workspace_edit"
   ]);
   // Sandbox tools run without approval because they cannot reach the real
-  // project; the approval belongs to promoting the result. The physics tools
-  // are here for the same reason turned up further: their world is memory, so
-  // there is nothing to promote and nothing to undo.
+  // project; the approval belongs to promoting the result. The physics and
+  // circuit tools are here for the same reason turned up further: their world
+  // is memory, so there is nothing to promote and nothing to undo.
+  //
+  // Listed by name on purpose. This is a permission surface, and a tool that
+  // quietly joined the automatic tier would be exactly the change nobody
+  // notices — so adding one has to be a deliberate edit here.
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "sandbox").map((tool) => tool.name).sort(), [
+    "circuit_adjust", "circuit_build", "circuit_wire",
     "open_sandbox", "physics_adjust", "physics_build", "physics_connect", "physics_run",
     "sandbox_validate", "sandbox_write_file"
   ]);

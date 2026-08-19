@@ -13,6 +13,7 @@ import { createProfileManager } from "./lib/profiles.mjs";
 import { handleGoalRoutes, streamGoalResume } from "./server/goal-routes.mjs";
 import { handleSandboxRoutes } from "./server/sandbox-routes.mjs";
 import { handlePhysicsRoutes } from "./server/physics-routes.mjs";
+import { handleCircuitRoutes } from "./server/circuit-routes.mjs";
 import { handleHudRoutes } from "./server/hud-routes.mjs";
 import { createUnavailableSecretStore } from "./lib/secrets.mjs";
 import { createOllamaClient } from "./lib/ollama-client.mjs";
@@ -237,6 +238,12 @@ const sandboxService = new Proxy({}, {
   get(_target, property) {
     const value = scopedResource("sandboxService")[property];
     return typeof value === "function" ? value.bind(scopedResource("sandboxService")) : value;
+  }
+});
+const circuitService = new Proxy({}, {
+  get(target, property) {
+    const value = scopedResource("circuitService")[property];
+    return typeof value === "function" ? value.bind(scopedResource("circuitService")) : value;
   }
 });
 const physicsService = new Proxy({}, {
@@ -2821,6 +2828,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (await handleSandboxRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, sandboxService })) return;
     if (await handlePhysicsRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, physicsService, database })) return;
+    if (await handleCircuitRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, circuitService, database })) return;
     if (await handleHudRoutes({ req, res, url, json, toolRegistry, projectService })) return;
     if (await handleGoalRoutes({
       req, res, url, authenticated, readBody, bodyLimit: SMALL_BODY, json, goalRunner, agentRuntime, vaultService,
