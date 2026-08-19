@@ -345,9 +345,25 @@
               <button id="circuit-clear" class="secondary-button physics-danger" type="button">Clear</button>
               <span id="circuit-status" class="settings-note" aria-live="polite"></span>
             </div>
+            <div class="physics-controls">
+              <label class="physics-field">
+                <span>Watch</span>
+                <input id="circuit-probe-target" type="text" placeholder="OUT or R1" size="10" />
+              </label>
+              <button id="circuit-probe-add" class="secondary-button" type="button">Add probe</button>
+              <label class="physics-field">
+                <span>Run for</span>
+                <input id="circuit-seconds" type="number" value="0.1" min="0.000001" step="0.01" size="6" />
+                <span>s</span>
+              </label>
+              <button id="circuit-run" class="primary-button" type="button">Run</button>
+              <button id="circuit-rewind" class="secondary-button" type="button" title="Back to the instant before the run started, keeping the circuit as built">Rewind</button>
+              <span id="circuit-time" class="settings-note" aria-live="polite"></span>
+            </div>
             <div id="circuit-schematic" class="circuit-schematic"></div>
             <div id="circuit-findings"></div>
-            <p class="settings-note">Voltages are shown at each net, currents beside each part. Everything here is solved on this computer.</p>
+            <p id="circuit-reading" class="settings-note">Voltages are shown at each net, currents beside each part, once the circuit has settled. Everything here is solved on this computer.</p>
+            <div id="circuit-traces" class="circuit-traces"></div>
             <div id="circuit-parts"></div>
             <details class="circuit-bom-block">
               <summary>Bill of materials</summary>

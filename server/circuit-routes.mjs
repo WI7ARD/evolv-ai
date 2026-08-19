@@ -44,6 +44,33 @@ export async function handleCircuitRoutes(context) {
     return true;
   }
 
+  // Running gets its own route rather than going through /actions, which
+  // returns full perception. A run answers with traces, which are the point of
+  // it, and rebuilding the bill of materials alongside them is work nobody
+  // reads.
+  if (req.method === "POST" && url.pathname === "/api/circuit/run") {
+    const body = await readBody(req, bodyLimit);
+    json(res, 200, circuitService.run(body));
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/circuit/rewind") {
+    json(res, 200, { circuit: circuitService.rewind() });
+    return true;
+  }
+
+  if (url.pathname === "/api/circuit/probes") {
+    if (req.method === "POST") {
+      const body = await readBody(req, bodyLimit);
+      json(res, 200, circuitService.probe(body.target));
+      return true;
+    }
+    if (req.method === "DELETE") {
+      json(res, 200, circuitService.unprobe(url.searchParams.get("target")));
+      return true;
+    }
+  }
+
   if (req.method === "DELETE" && url.pathname === "/api/circuit") {
     json(res, 200, circuitService.clear());
     return true;

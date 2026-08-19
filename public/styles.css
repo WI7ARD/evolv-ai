@@ -1081,3 +1081,10 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .circuit-parts td, .circuit-bom td { padding: 6px 8px; border-bottom: 1px solid rgba(255, 255, 255, .04); }
 .circuit-bom-block { margin-top: 16px; }
 .circuit-bom-block summary { cursor: pointer; color: var(--muted); }
+.circuit-traces { display: grid; gap: 12px; margin-top: 16px; }
+.circuit-trace { margin: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #0d1013; }
+.circuit-trace figcaption { color: #ffd479; font-family: var(--mono, monospace); font-size: 12px; margin-bottom: 4px; }
+.circuit-trace figcaption span { color: var(--muted); font-family: inherit; }
+.circuit-trace svg { display: block; width: 100%; height: 110px; }
+.circuit-trace-line { fill: none; stroke: #7fd4ff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.circuit-trace-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; font-family: var(--mono, monospace); margin-top: 4px; }

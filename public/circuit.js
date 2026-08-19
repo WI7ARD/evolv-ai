@@ -104,6 +104,66 @@ function renderSchematic(frame) {
     aria-label="Circuit schematic with ${frame.symbols.length} parts">${wires}${dots}${symbols}${labels}</svg>`;
 }
 
+function seconds(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  const size = Math.abs(number);
+  if (size === 0) return "0s";
+  if (size < 1e-6) return `${Number((number * 1e9).toPrecision(3))}ns`;
+  if (size < 1e-3) return `${Number((number * 1e6).toPrecision(3))}µs`;
+  if (size < 1) return `${Number((number * 1e3).toPrecision(3))}ms`;
+  return `${Number(number.toPrecision(3))}s`;
+}
+
+// The traces, as one plot per probe.
+//
+// One plot each rather than all of them on shared axes: a net at 5V and a
+// current at 13mA on the same scale means the current is a flat line on the
+// axis, which is worse than not drawing it. Each keeps its own range and says
+// what that range is.
+function renderTraces(frame) {
+  const traces = frame?.traces || [];
+  if (!traces.length) {
+    return `<p class="settings-note">No probes yet. Watch a net or a part — <code>circuit_probe</code>, or ask for it — then run.</p>`;
+  }
+  const width = 640;
+  const height = 120;
+  return traces.map((trace) => {
+    const points = trace.points || [];
+    if (points.length < 2) {
+      return `<figure class="circuit-trace"><figcaption>${escapeHtml(trace.target)} — nothing recorded yet</figcaption></figure>`;
+    }
+    const times = points.map(([time]) => time);
+    const values = points.map(([, value]) => value);
+    const startTime = Math.min(...times);
+    const endTime = Math.max(...times);
+    let low = Math.min(...values);
+    let high = Math.max(...values);
+    // A flat trace has no range to scale to, so give it one and centre it —
+    // otherwise every point divides by zero and the line disappears.
+    if (high - low < 1e-15) { high += 1; low -= 1; }
+    const span = endTime - startTime || 1;
+    const path = points.map(([time, value], index) => {
+      const x = ((time - startTime) / span) * width;
+      const y = height - (((value - low) / (high - low)) * height);
+      return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+    }).join(" ");
+    const unit = trace.kind === "net" ? volts : amps;
+    return `<figure class="circuit-trace">
+      <figcaption>${escapeHtml(trace.target)} <span>${escapeHtml(trace.kind === "net" ? "voltage" : "current")}</span></figcaption>
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img"
+        aria-label="${escapeHtml(trace.target)} from ${escapeHtml(unit(low))} to ${escapeHtml(unit(high))}">
+        <path class="circuit-trace-line" d="${path}" />
+      </svg>
+      <div class="circuit-trace-scale">
+        <span>${escapeHtml(unit(high))}</span>
+        <span>${escapeHtml(seconds(startTime))} → ${escapeHtml(seconds(endTime))}</span>
+        <span>${escapeHtml(unit(low))}</span>
+      </div>
+    </figure>`;
+  }).join("");
+}
+
 function renderFindings(findings = []) {
   if (!findings.length) return "";
   return `<ul class="circuit-findings">${findings.map((finding) => `
@@ -162,6 +222,22 @@ function draw() {
   if (parts) parts.innerHTML = renderParts(state.circuit);
   const bom = $("#circuit-bom");
   if (bom) bom.innerHTML = renderBom(state.circuit);
+  const traces = $("#circuit-traces");
+  if (traces) traces.innerHTML = renderTraces(state.frame);
+  const clock = $("#circuit-time");
+  if (clock) {
+    const elapsed = state.frame?.elapsedSeconds || 0;
+    clock.textContent = elapsed > 0 ? `t = ${seconds(elapsed)}` : "not run yet";
+  }
+  const reading = $("#circuit-reading");
+  if (reading) {
+    // The drawing shows either a moment in a run or the state the circuit
+    // settles to. Those are different claims, and a schematic that does not say
+    // which is inviting the wrong one to be read off it.
+    reading.textContent = state.frame?.reading === "instant"
+      ? `Voltages and currents are at t = ${seconds(state.frame.elapsedSeconds)}. Everything here is solved on this computer.`
+      : "Voltages are shown at each net, currents beside each part, once the circuit has settled. Everything here is solved on this computer.";
+  }
   const status = $("#circuit-status");
   if (status) {
     const counts = state.circuit?.counts;
@@ -184,12 +260,49 @@ async function act(action, parameters = {}) {
   }
 }
 
+async function runFor(secondsToRun) {
+  if (state.busy) return;
+  state.busy = true;
+  try {
+    const result = await state.api("/api/circuit/run", { method: "POST", body: { seconds: secondsToRun } });
+    if (result.ran === false) state.toast?.("The circuit could not be run — see the findings below.");
+    await refreshCircuit();
+  } catch (error) {
+    state.toast?.(error.message || "The run did not finish.");
+  } finally {
+    state.busy = false;
+  }
+}
+
 export function bindCircuitControls() {
   $("#circuit-add")?.addEventListener("click", async () => {
     const kind = $("#circuit-kind")?.value || "resistor";
     await act("add", { kind });
   });
   $("#circuit-clear")?.addEventListener("click", () => act("clear"));
+  $("#circuit-run")?.addEventListener("click", () => {
+    const asked = Number($("#circuit-seconds")?.value);
+    runFor(Number.isFinite(asked) && asked > 0 ? asked : 0.1);
+  });
+  $("#circuit-rewind")?.addEventListener("click", async () => {
+    try {
+      await state.api("/api/circuit/rewind", { method: "POST", body: {} });
+      await refreshCircuit();
+    } catch (error) {
+      state.toast?.(error.message || "Could not rewind.");
+    }
+  });
+  $("#circuit-probe-add")?.addEventListener("click", async () => {
+    const target = $("#circuit-probe-target")?.value?.trim();
+    if (!target) return;
+    try {
+      await state.api("/api/circuit/probes", { method: "POST", body: { target } });
+      $("#circuit-probe-target").value = "";
+      await refreshCircuit();
+    } catch (error) {
+      state.toast?.(error.message || "Could not add that probe.");
+    }
+  });
   $("#circuit-refresh")?.addEventListener("click", refreshCircuit);
   // Selecting a part in the drawing highlights its row, and the reverse.
   $("#circuit-schematic")?.addEventListener("click", (event) => {
@@ -199,4 +312,4 @@ export function bindCircuitControls() {
   });
 }
 
-export { renderSchematic, volts, amps };
+export { renderSchematic, renderTraces, volts, amps, seconds };
