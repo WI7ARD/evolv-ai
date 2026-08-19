@@ -339,3 +339,62 @@ test("what a chip is doing is on the page, and the page still computes nothing",
   assert.equal(chip.pins.d0.mode, "output");
   assert.ok(chip.pins.d0.volts > 0 || chip.pins.d0.driving === "low");
 });
+
+test("what is written outside a function is a real variable, and it persists", () => {
+  // The gap this closes was invisible for a whole stage because the test above
+  // — "the parser accepts the shapes the tool description promises" — only
+  // parses. Top-level `var` parsed and then did nothing: globals were never
+  // initialised, so reading one was an error and *writing* one quietly made a
+  // local that vanished at the end of the call. A counter therefore incremented
+  // perfectly and read zero every time round the loop.
+  //
+  // Counting something is most of what firmware for a sensor board is, so this
+  // is the difference between a language that documents a feature and one that
+  // has it.
+  const chip = new Mcu({ id: "U1", values: {} });
+  chip.load(`
+    var count = 0;
+    var step = 2;
+    var doubled = step * 2;
+    function loop() {
+      count = count + step;
+      if (count == 8) { print("reached", count, "doubled", doubled); }
+    }
+  `);
+  chip.observe((pin) => (pin === "vcc" ? 5 : 0));
+  for (let step = 0; step < 200 && !chip.error; step += 1) chip.advance(1e-4);
+  assert.equal(chip.error, null, chip.error?.message);
+  const lines = chip.view().output.map((entry) => entry.line);
+  assert.deepEqual(lines, ["reached 8 doubled 4"], JSON.stringify(lines));
+
+  // The periodic report every logging sketch is built around, which needs a
+  // global to remember when it last spoke.
+  const logger = new Mcu({ id: "U1", values: {} });
+  logger.load(`
+    var last = 0;
+    function loop() { if (millis() - last >= 50) { last = millis(); print("tick", last); } }
+  `);
+  logger.observe((pin) => (pin === "vcc" ? 5 : 0));
+  for (let step = 0; step < 300 && !logger.error; step += 1) logger.advance(1e-3);
+  assert.equal(logger.error, null, logger.error?.message);
+  const ticks = logger.view().output.map((entry) => entry.line);
+  assert.ok(ticks.length >= 4, `expected repeated reports, got ${JSON.stringify(ticks)}`);
+  assert.deepEqual(ticks.slice(0, 4), ["tick 50", "tick 100", "tick 150", "tick 200"]);
+});
+
+test("assigning to a name nothing declared is refused, not quietly invented", () => {
+  // The other half of the same bug. A write to an undeclared name used to make
+  // a local, so it looked like it worked — which is worse than an error,
+  // because the value was right for the rest of the function and gone
+  // afterwards. Reading an undeclared name was already refused; this is the
+  // same mistake from the other side, and is usually a missing var or a typo in
+  // a name that does exist.
+  const chip = new Mcu({ id: "U1", values: {} });
+  chip.load("var count = 0;\nfunction loop() { conut = count + 1; }");
+  chip.observe((pin) => (pin === "vcc" ? 5 : 0));
+  for (let step = 0; step < 10 && !chip.error; step += 1) chip.advance(1e-4);
+  assert.ok(chip.error, "a typo in a variable name should be reported");
+  assert.equal(chip.error.code, "FIRMWARE_UNDECLARED_ASSIGN");
+  assert.match(chip.error.message, /conut has not been declared/);
+  assert.match(chip.error.message, /var conut/, "and says what to write instead");
+});

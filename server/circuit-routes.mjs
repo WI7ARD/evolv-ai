@@ -73,6 +73,12 @@ export async function handleCircuitRoutes(context) {
     }
   }
 
+  if (req.method === "POST" && url.pathname === "/api/circuit/conditions") {
+    const body = await readBody(req, bodyLimit);
+    json(res, 200, circuitService.setConditions(body));
+    return true;
+  }
+
   // Expectations: state them, take them back, and check them all.
   if (url.pathname === "/api/circuit/expectations") {
     if (req.method === "POST") {

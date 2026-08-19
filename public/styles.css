@@ -1115,3 +1115,9 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .circuit-check.is-fail .circuit-check-mark { color: #ff8095; }
 .circuit-check-body { display: grid; gap: 2px; }
 .circuit-check-body span { color: var(--muted); }
+.circuit-sensor { fill: #8fd0ff; font-size: 9px; text-anchor: middle; opacity: .9; }
+.circuit-world { margin-top: 16px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.circuit-world-line { margin: 0; font-size: 13px; color: var(--muted); }
+.circuit-world-readings { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px;
+  font-family: var(--mono, monospace); font-size: 12px; color: #8fd0ff; }
+.circuit-world-readings strong { color: var(--muted); font-weight: 500; margin-right: 4px; }

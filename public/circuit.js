@@ -50,7 +50,15 @@ const SYMBOLS = {
   buzzer: "M0 20 L14 20 M14 10 L14 30 M14 20 L30 8 L30 32 Z M38 12 a10 10 0 0 1 0 16 M44 8 a16 16 0 0 1 0 24 M30 20 L60 20",
   rgbled: "M0 20 L22 20 M22 8 L22 32 L40 20 Z M40 8 L40 32 M40 20 L60 20 M44 4 L52 -4 M50 8 L58 0 M12 8 L12 32",
   mcu: "M10 0 L50 0 L50 40 L10 40 Z M10 6 L4 6 M10 14 L4 14 M10 22 L4 22 M10 30 L4 30 M50 6 L56 6 M50 14 L56 14 M50 22 L56 22 M50 30 L56 30 M18 8 L18 14 M22 8 L22 14",
-  sevenseg: "M8 2 L52 2 L52 38 L8 38 Z M16 8 L44 8 M16 20 L44 20 M16 32 L44 32 M16 8 L16 20 M16 20 L16 32 M44 8 L44 20 M44 20 L44 32"
+  sevenseg: "M8 2 L52 2 L52 38 L8 38 Z M16 8 L44 8 M16 20 L44 20 M16 32 L44 32 M16 8 L16 20 M16 20 L16 32 M44 8 L44 20 M44 20 L44 32",
+  // The sensors. A thermistor and a light sensor are resistor bodies with the
+  // standard slash through them — the mark every schematic uses for "this value
+  // depends on something" — with the letter for what it depends on. The two
+  // that are chips are boxes, like every other chip.
+  thermistor: "M0 20 L10 20 L10 12 L50 12 L50 28 L10 28 L10 20 M50 20 L60 20 M12 34 L48 6 M14 6 L22 6 M18 6 L18 2 M18 2 L26 2",
+  ldr: "M0 20 L10 20 L10 12 L50 12 L50 28 L10 28 L10 20 M50 20 L60 20 M22 4 L30 -2 M28 8 L36 2 M22 4 L26 6 M28 8 L32 10",
+  hall: "M14 4 L46 4 L46 36 L14 36 Z M0 20 L14 20 M46 20 L60 20 M30 36 L30 40 M22 14 L22 26 M38 14 L38 26 M22 20 L38 20",
+  accelerometer: "M12 4 L48 4 L48 36 L12 36 Z M48 12 L60 12 M48 20 L60 20 M48 28 L60 28 M0 20 L12 20 M30 12 L30 28 M22 20 L38 20 M30 12 L26 17 M30 12 L34 17"
 };
 
 // Colours an LED actually glows, so a lit green LED is green.
@@ -99,6 +107,10 @@ function renderSchematic(frame) {
     const path = SYMBOLS[symbol.symbol] || SYMBOLS.resistor;
     const current = frame.currents?.[symbol.id];
     const device = frame.devices?.[symbol.id];
+    // What a sensor is reading — the quantity, not the voltage it made from it.
+    // A thermistor labelled "3.23V" is a part you have to do arithmetic on to
+    // understand; one labelled "12°C" is a thermometer.
+    const sensor = frame.sensors?.[symbol.id];
     // Symbols are authored in a 60×40 box; the layout allots 60×40 too, so the
     // only transform needed is the move.
     return `<g class="circuit-symbol${state.selected === symbol.id ? " is-selected" : ""}" data-id="${escapeHtml(symbol.id)}"
@@ -107,9 +119,10 @@ function renderSchematic(frame) {
       ${renderDevice(symbol, device)}
       <path class="circuit-glyph" d="${path}" />
       <text class="circuit-ref" x="30" y="-8">${escapeHtml(symbol.id)}</text>
-      <text class="circuit-value" x="30" y="52">${escapeHtml(symbol.label)}</text>
+      <text class="circuit-value" x="30" y="52">${escapeHtml(shorten(symbol.label))}</text>
       ${current !== undefined ? `<text class="circuit-current" x="30" y="64">${escapeHtml(amps(current))}</text>` : ""}
       ${device ? `<text class="circuit-device" x="30" y="76">${escapeHtml(deviceCaption(symbol.kind, device))}</text>` : ""}
+      ${sensor ? `<text class="circuit-sensor" x="30" y="76">${escapeHtml(sensor.reading)}</text>` : ""}
     </g>`;
   }).join("");
 
@@ -144,6 +157,17 @@ const TRACE_UNITS = {
   lit: (value) => `${Math.round((Number(value) || 0) * 100)}%`
 };
 const TRACE_LABELS = { net: "voltage", part: "current", speed: "speed", angle: "angle", lit: "brightness" };
+
+// A part's caption sits in a 60px box and the text is centred in it, so a long
+// description does not overflow tidily — it runs into whatever is drawn beside
+// it. "hall wheel sensor, 2096mm wheel" and the thermistor next to it merged
+// into one unreadable line, which reads as a rendering fault rather than as a
+// long name. The full description is still in the parts table below, where
+// there is room for it.
+function shorten(text, limit = 26) {
+  const value = String(text ?? "");
+  return value.length <= limit ? value : `${value.slice(0, limit - 1).trimEnd()}…`;
+}
 
 function seconds(value) {
   const number = Number(value);
@@ -256,6 +280,22 @@ function deviceCaption(kind, device) {
   if (kind === "buzzer") return device.frequency ? `${device.frequency}Hz ${device.note}` : "silent";
   if (kind === "led" || kind === "rgbled") return device.lit ? `${Math.round(device.lit * 100)}% lit` : "dark";
   return "";
+}
+
+// What the world is doing to the sensors.
+//
+// Shown only when there is a sensor to care, because a line reading "still, at
+// room temperature" above a circuit with no sensor in it is noise about
+// something that cannot matter.
+function renderConditions(frame) {
+  if (!Object.keys(frame?.sensors || {}).length) return "";
+  const now = frame.conditions?.now || {};
+  const readings = Object.entries(frame.sensors)
+    .map(([id, sensor]) => `<span><strong>${escapeHtml(id)}</strong> ${escapeHtml(sensor.reading)}</span>`).join("");
+  return `<section class="circuit-world">
+    <p class="circuit-world-line">Conditions: ${escapeHtml(frame.conditions?.description || "still, at room temperature")}</p>
+    <div class="circuit-world-readings">${readings}</div>
+  </section>`;
 }
 
 // Whether the circuit does what it was supposed to.
@@ -390,6 +430,8 @@ function draw() {
   if (findings) findings.innerHTML = renderFindings(state.circuit?.findings);
   const mcus = $("#circuit-mcus");
   if (mcus) mcus.innerHTML = renderMcus(state.frame, state.circuit);
+  const world = $("#circuit-world");
+  if (world) world.innerHTML = renderConditions(state.frame);
   const checks = $("#circuit-checks");
   if (checks) checks.innerHTML = renderChecks(state.checks) || renderExpectations(state.circuit, state.checks);
   const parts = $("#circuit-parts");
