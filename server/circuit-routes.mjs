@@ -73,6 +73,25 @@ export async function handleCircuitRoutes(context) {
     }
   }
 
+  // Expectations: state them, take them back, and check them all.
+  if (url.pathname === "/api/circuit/expectations") {
+    if (req.method === "POST") {
+      const body = await readBody(req, bodyLimit);
+      json(res, 200, circuitService.expect(body));
+      return true;
+    }
+    if (req.method === "DELETE") {
+      json(res, 200, circuitService.unexpect(url.searchParams.get("id")));
+      return true;
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/circuit/check") {
+    const body = await readBody(req, bodyLimit);
+    json(res, 200, circuitService.check(body));
+    return true;
+  }
+
   if (url.pathname === "/api/circuit/probes") {
     if (req.method === "POST") {
       const body = await readBody(req, bodyLimit);

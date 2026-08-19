@@ -193,7 +193,18 @@ test("the HTTP surface is a window onto the same circuit", async () => {
     req: { method },
     res: {},
     url: new URL(`http://local${pathname}`),
-    readBody: async () => body,
+    // Called the way the server calls it, arguments and all.
+    //
+    // This used to be `async () => body`, which accepted anything — and two
+    // routes were written as readBody(bodyLimit), missing the request
+    // entirely. They threw on the first real request and the tests never
+    // noticed, because a stub that ignores its arguments cannot tell a right
+    // call from a wrong one.
+    readBody: async (request, limit) => {
+      assert.equal(request?.method, method, "readBody takes the request first");
+      assert.equal(typeof limit, "number", "and the body limit second");
+      return body;
+    },
     bodyLimit: 1_000_000,
     json,
     circuitService,

@@ -423,7 +423,7 @@ test("exposes bounded tool configuration", async () => {
   // quietly joined the automatic tier would be exactly the change nobody
   // notices — so adding one has to be a deliberate edit here.
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "sandbox").map((tool) => tool.name).sort(), [
-    "circuit_adjust", "circuit_build", "circuit_firmware", "circuit_probe", "circuit_run", "circuit_wire",
+    "circuit_adjust", "circuit_build", "circuit_check", "circuit_expect", "circuit_firmware", "circuit_probe", "circuit_run", "circuit_wire",
     "open_sandbox", "physics_adjust", "physics_build", "physics_connect", "physics_run",
     "sandbox_validate", "sandbox_write_file"
   ]);

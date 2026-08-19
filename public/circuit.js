@@ -11,7 +11,7 @@
 
 const $ = (selector) => document.querySelector(selector);
 
-const state = { api: null, toast: null, frame: null, circuit: null, busy: false, selected: "" };
+const state = { api: null, toast: null, frame: null, circuit: null, checks: null, busy: false, selected: "" };
 
 export function initCircuit({ api, toast }) {
   state.api = api;
@@ -136,9 +136,14 @@ const TRACE_UNITS = {
   net: volts,
   part: amps,
   speed: (value) => `${Math.round(Number(value) || 0)} rpm`,
-  angle: (value) => `${(Number(value) || 0).toFixed(1)}°`
+  angle: (value) => `${(Number(value) || 0).toFixed(1)}°`,
+  // Brightness runs 0 to 1. Left out of this table it fell through to amps and
+  // a two-thirds-lit LED was labelled "660mA" — thirty times its rating, on a
+  // part drawing 7.94mA two plots further down. Exactly the fault the comment
+  // above describes, made again.
+  lit: (value) => `${Math.round((Number(value) || 0) * 100)}%`
 };
-const TRACE_LABELS = { net: "voltage", part: "current", speed: "speed", angle: "angle" };
+const TRACE_LABELS = { net: "voltage", part: "current", speed: "speed", angle: "angle", lit: "brightness" };
 
 function seconds(value) {
   const number = Number(value);
@@ -193,7 +198,15 @@ function renderTraces(frame) {
       </svg>
       <div class="circuit-trace-scale">
         <span>${escapeHtml(unit(high))}</span>
-        <span>${escapeHtml(seconds(startTime))} → ${escapeHtml(seconds(endTime))}</span>
+        <span>${escapeHtml(seconds(startTime))} → ${escapeHtml(seconds(endTime))}${
+          // Every trace is drawn full height, so a rail rippling by a fraction
+          // of a millivolt looks exactly like a pin switching five volts. The
+          // shape is honest and the axis was not: both ends read "5V" while the
+          // line swung top to bottom, which reads as a supply collapsing.
+          // Saying the swing is the difference between a plot you can trust and
+          // one you have to already know the answer to read.
+          unit(high) === unit(low) ? ` · swing ${escapeHtml(unit(high - low))}` : ""
+        }</span>
         <span>${escapeHtml(unit(low))}</span>
       </div>
     </figure>`;
@@ -243,6 +256,39 @@ function deviceCaption(kind, device) {
   if (kind === "buzzer") return device.frequency ? `${device.frequency}Hz ${device.note}` : "silent";
   if (kind === "led" || kind === "rgbled") return device.lit ? `${Math.round(device.lit * 100)}% lit` : "dark";
   return "";
+}
+
+// Whether the circuit does what it was supposed to.
+//
+// The measured figure is on every line, passing or failing. A green tick with
+// no number is a claim to be taken on trust; "peaked at 7.94mA, under the
+// 20mA limit" is the reading itself, and it is the same amount of space.
+function renderChecks(checks) {
+  if (!checks?.results?.length) return "";
+  return `<section class="circuit-checks">
+    <p class="circuit-checks-summary is-${checks.failed ? "bad" : "good"}">${escapeHtml(checks.summary)}</p>
+    <ul>${checks.results.map((result) => `<li class="circuit-check is-${result.pass ? "pass" : "fail"}">
+      <span class="circuit-check-mark">${result.pass ? "held" : "failed"}</span>
+      <span class="circuit-check-body">
+        <strong>${escapeHtml(result.statement)}</strong>
+        <span>${escapeHtml(result.detail)}</span>
+      </span>
+    </li>`).join("")}</ul>
+  </section>`;
+}
+
+// What has been asked of the circuit but not yet checked, so a requirement
+// written down is visible before anyone presses Check rather than only after.
+function renderExpectations(circuit, checks) {
+  const expectations = circuit?.expectations || [];
+  if (!expectations.length || checks?.results?.length) return "";
+  return `<section class="circuit-checks">
+    <p class="circuit-checks-summary">${expectations.length} expectation${expectations.length === 1 ? "" : "s"}, not yet checked.</p>
+    <ul>${expectations.map((expectation) => `<li class="circuit-check">
+      <span class="circuit-check-mark">${escapeHtml(expectation.id)}</span>
+      <span class="circuit-check-body"><strong>${escapeHtml(expectation.statement)}</strong></span>
+    </li>`).join("")}</ul>
+  </section>`;
 }
 
 // What a microcontroller is doing: its legs, and what it said.
@@ -344,6 +390,8 @@ function draw() {
   if (findings) findings.innerHTML = renderFindings(state.circuit?.findings);
   const mcus = $("#circuit-mcus");
   if (mcus) mcus.innerHTML = renderMcus(state.frame, state.circuit);
+  const checks = $("#circuit-checks");
+  if (checks) checks.innerHTML = renderChecks(state.checks) || renderExpectations(state.circuit, state.checks);
   const parts = $("#circuit-parts");
   if (parts) parts.innerHTML = renderParts(state.circuit);
   const bom = $("#circuit-bom");
@@ -501,9 +549,23 @@ export function bindCircuitControls() {
     stopLive();
     try {
       await state.api("/api/circuit/rewind", { method: "POST", body: "{}" });
+      state.checks = null;
       await refreshCircuit();
     } catch (error) {
       state.toast?.(error.message || "Could not rewind.");
+    }
+  });
+  $("#circuit-check")?.addEventListener("click", async () => {
+    stopLive();
+    if (state.busy) return;
+    state.busy = true;
+    try {
+      state.checks = await state.api("/api/circuit/check", { method: "POST", body: "{}" });
+      await refreshCircuit();
+    } catch (error) {
+      state.toast?.(error.message || "Nothing has been expected of this circuit yet.");
+    } finally {
+      state.busy = false;
     }
   });
   $("#circuit-probe-add")?.addEventListener("click", async () => {
