@@ -187,7 +187,8 @@ test("every shipped migration keeps the checksum it shipped with", async () => {
     [15, "sandbox", "26f2eb85bad976b19ce242fb4543e7d00b4cce1479d530fed47ec67f336c64f0"],
     [16, "physics-scenes", "cdf33ed6d8d0bc2b74aa0fd2d7602ff9d4c60c59ddc0f62eee7324c538af344f"],
     [17, "model-health", "351ce56abe1a819577b8a18e5f2f097991a38512e39d7cbca59b55937165bb0a"],
-    [18, "circuits", "5c4646d3e0948b89c3c45e4a446d553d4fed2e25cf4a0167195a7969400279bd"]
+    [18, "circuits", "5c4646d3e0948b89c3c45e4a446d553d4fed2e25cf4a0167195a7969400279bd"],
+    [19, "token-usage", "d6b1603d8627b4b2d5df2a14182c8a53829212829907a57e6a4fff3120ee81b8"]
   ];
 
   for (const [version, name, checksum] of shipped) {

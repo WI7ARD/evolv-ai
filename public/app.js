@@ -1693,6 +1693,67 @@ async function refreshIntelligence({ refreshModels = false } = {}) {
   // copy of who the specialists are, free to drift from the one that runs.
   await renderAgentModelPins().catch(() => {});
   await renderSpecialistComparison().catch(() => {});
+  await renderSpend().catch(() => {});
+}
+
+// What has actually been spent, from the provider's own token counts.
+//
+// The figures Evolv showed before this were a character count divided by four
+// and "one cost unit per cloud request" — which charged a two-line question and
+// a forty-tool agent run the same. The tokens here are exact because the
+// provider reported them; the money is an estimate from list prices, and every
+// place it appears says so rather than implying Evolv can read a bill.
+function formatSpend(micros) {
+  const dollars = (Number(micros) || 0) / 1_000_000;
+  if (dollars === 0) return "$0.00";
+  if (dollars < 0.01) return `$${dollars.toFixed(4)}`;
+  if (dollars < 1) return `$${dollars.toFixed(3)}`;
+  return `$${dollars.toFixed(2)}`;
+}
+
+function formatTokenCount(count) {
+  const tokens = Math.max(0, Math.round(Number(count) || 0));
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(2)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
+}
+
+async function renderSpend() {
+  const card = $("#spend-breakdown");
+  if (!card) return;
+  const spend = await api("/api/spend");
+  const month = spend.thisMonth || {};
+  const total = $("#spend-month");
+  if (total) total.textContent = formatSpend(month.estimatedMicros);
+  const detail = $("#spend-month-detail");
+  if (detail) {
+    detail.textContent = month.turns
+      ? `estimated over ${formatTokenCount(month.totalTokens)} tokens`
+      : "nothing sent to a cloud model yet";
+  }
+
+  if (!spend.byModel?.length) {
+    card.innerHTML = `<p class="settings-note">Nothing has been sent to a cloud model this month. Local models cost nothing and are not counted here.</p>`;
+    return;
+  }
+  // Three different things, said three different ways. A local model is free,
+  // and that is a fact. A cloud model with no published rate here costs an
+  // unknown amount, which is not the same as nothing. Everything else has an
+  // estimate. Rendering all three as "—", or all three as a number, would make
+  // one of them a lie.
+  card.innerHTML = `<table class="circuit-parts">
+    <thead><tr><th>Model</th><th>Turns</th><th>In</th><th>Out</th><th>Estimated</th></tr></thead>
+    <tbody>${spend.byModel.map((row) => `<tr>
+      <td>${escapeHtml(row.modelId)}</td>
+      <td>${row.turns}</td>
+      <td>${formatTokenCount(row.inputTokens)}</td>
+      <td>${formatTokenCount(row.outputTokens)}</td>
+      <td>${row.providerId === "ollama" ? "local, free"
+        : row.unpriced ? "—" : escapeHtml(formatSpend(row.estimatedMicros))}</td>
+    </tr>`).join("")}</tbody>
+  </table>
+  ${month.unpriced ? `<p class="settings-note">${month.unpriced} turn${month.unpriced === 1 ? "" : "s"} used a model with no published rate here, so the estimate above is lower than the real total.</p>` : ""}
+  <p class="settings-note">List prices as of ${escapeHtml(spend.pricesUpdated)}. All time: ${escapeHtml(formatSpend(spend.allTime?.estimatedMicros))} over ${formatTokenCount(spend.allTime?.totalTokens)} tokens.</p>`;
 }
 
 const COHORT_ROWS = [

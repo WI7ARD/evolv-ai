@@ -11,6 +11,7 @@ import { createAuthService } from "./lib/auth.mjs";
 import { createAccountStore } from "./lib/accounts.mjs";
 import { createProfileManager } from "./lib/profiles.mjs";
 import { PROVIDER_IDS } from "./lib/providers.mjs";
+import { readUsage, estimateMicros, PRICES_UPDATED } from "./lib/token-spend.mjs";
 import { handleGoalRoutes, streamGoalResume } from "./server/goal-routes.mjs";
 import { handleSandboxRoutes } from "./server/sandbox-routes.mjs";
 import { handlePhysicsRoutes } from "./server/physics-routes.mjs";
@@ -1731,6 +1732,10 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
       });
       let content = "";
       let thinking = "";
+      // What the provider says this round used. Kept rather than dropped: the
+      // token counts are the only exact figures in the whole accounting, and
+      // the alternative in use was characters divided by four.
+      let roundUsage = null;
       const toolCalls = [];
       // The provider's own account of this turn — reasoning items with their
       // signatures, response item ids. Opaque here; only the adapter that
@@ -1781,7 +1786,18 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
         if (chunk.message?.content) emitFiltered(thinkFilter.feed(chunk.message.content));
         if (chunk.message?.tool_calls?.length) toolCalls.push(...chunk.message.tool_calls);
         if (chunk.providerState) providerStates.push(chunk.providerState);
+        if (chunk.usage) roundUsage = chunk.usage;
       });
+      // Recorded per round, not per turn: a tool loop re-sends the whole
+      // conversation every round, so the rounds are where the input tokens
+      // actually go and a per-turn figure would hide most of the cost.
+      if (roundUsage) {
+        const tokens = readUsage(roundUsage);
+        database.recordTokenUsage({
+          conversationId, messageId: activeAssistantId, providerId, modelId: selectedModel,
+          ...tokens, estimatedMicros: estimateMicros(providerId, selectedModel, tokens)
+        });
+      }
       agentRuntime.recordEffect(agentRunId, agentStepId, "after", "model.stream", {
         round, contentCharacters: content.length, thinkingCharacters: thinking.length, toolCalls: toolCalls.length
       });
@@ -2652,6 +2668,25 @@ const server = http.createServer(async (req, res) => {
       }
     }
     if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, safeState(await loadState()));
+    // What has been spent, and on what.
+    //
+    // Tokens are the provider's own counts and are exact. The money is an
+    // estimate from published list prices — Evolv cannot see an account's
+    // actual billing — and every field that carries it says so by name.
+    if (req.method === "GET" && url.pathname === "/api/spend") {
+      const month = /^\d{4}-\d{2}$/.test(url.searchParams.get("month") || "")
+        ? url.searchParams.get("month") : new Date().toISOString().slice(0, 7);
+      const conversationId = url.searchParams.get("conversationId") || null;
+      return json(res, 200, {
+        month,
+        pricesUpdated: PRICES_UPDATED,
+        estimated: true,
+        thisMonth: database.tokenSpend({ month }),
+        allTime: database.tokenSpend({}),
+        byModel: database.tokenSpendByModel(month),
+        ...(conversationId ? { conversation: database.tokenSpend({ conversationId }) } : {})
+      });
+    }
     if (req.method === "GET" && url.pathname === "/api/settings") return json(res, 200, database.getSettings());
     if (req.method === "PATCH" && url.pathname === "/api/settings") {
       return json(res, 200, database.patchSettings(validateSettingsPatch(await readBody(req, SMALL_BODY))));
