@@ -70,7 +70,7 @@ test("the netlist parses as the s-expression KiCad's format is", () => {
   assert.deepEqual(section(tree, "version"), ["version", "E"]);
 
   const design = section(tree, "design");
-  assert.deepEqual(section(design, "tool"), ["tool", "Evolv circuit sandbox"]);
+  assert.deepEqual(section(design, "tool"), ["tool", "Evolv Circuit"]);
   assert.deepEqual(section(design, "source"), ["source", "Blinker.kicad_sch"]);
 
   const components = section(tree, "components").slice(1);

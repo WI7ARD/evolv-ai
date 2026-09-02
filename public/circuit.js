@@ -1,4 +1,4 @@
-// The circuit sandbox, drawn.
+// Evolv Circuit, drawn.
 //
 // This file computes nothing. Every voltage, current and finding on the page
 // came from the server, which is where the solver lives — the same discipline
@@ -474,8 +474,15 @@ function spendOf(micros) {
 function renderMeasurements(board) {
   const measurements = board?.measurements || [];
   if (!measurements.length) return "";
+  // Said once, above the list, rather than on every row. Each of these compares
+  // a real reading against the last check, and if that check no longer
+  // describes the board then neither does the percentage beside it.
+  const stale = board?.lastCheck?.stale
+    ? `<p class="circuit-checks-summary is-stale">These are compared against the last check, and the design has changed since. Check again to compare against what the board is now.</p>`
+    : "";
   return `<section class="board-measurements">
     <h3>Off the real board</h3>
+    ${stale}
     <ul>${measurements.map((entry) => `<li class="board-measurement is-${entry.agreement}">
       <span class="board-measurement-mark">${escapeHtml(entry.subject)} ${escapeHtml(entry.measure)}</span>
       <span class="board-measurement-body">
@@ -560,12 +567,16 @@ function draw() {
   if (world) world.innerHTML = renderConditions(state.frame);
   const checks = $("#circuit-checks");
   if (checks) {
-    // A check run in this tab first, then the one the board remembers, then the
-    // expectations nobody has checked yet. Without the middle one the page said
-    // "2 expectations, not yet checked" directly beneath a timeline reading
-    // "All 2 expectations met" — both true, one of them only about this tab.
-    checks.innerHTML = renderChecks(state.checks)
-      || renderChecks(state.board?.lastCheck, state.board?.lastCheck?.stale)
+    // The board's own record first, then a check run in this tab, then the
+    // expectations nobody has checked yet.
+    //
+    // The board's comes first because it is the only one that knows whether the
+    // design has moved since. Preferring this tab's showed "All 1 expectation
+    // met" in green beside a timeline saying that verdict was out of date — and
+    // when a board is open the two are the same check anyway, since every check
+    // is recorded as it runs.
+    checks.innerHTML = renderChecks(state.board?.lastCheck, state.board?.lastCheck?.stale)
+      || renderChecks(state.checks)
       || renderExpectations(state.circuit, state.checks);
   }
   const parts = $("#circuit-parts");

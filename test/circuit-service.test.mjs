@@ -355,8 +355,8 @@ test("the verdict on screen comes from the board when this tab has not run a che
   // about checks run since the tab opened. Two panels on one screen disagreeing
   // is worse than either being absent.
   const script = await readFile(new URL("../public/circuit.js", import.meta.url), "utf8");
-  assert.match(script, /renderChecks\(state\.checks\)\s*\n\s*\|\| renderChecks\(state\.board\?\.lastCheck/,
-    "the recorded verdict has to be the fallback, ahead of the unchecked list");
+  assert.match(script, /renderChecks\(state\.board\?\.lastCheck, state\.board\?\.lastCheck\?\.stale\)\s*\n\s*\|\| renderChecks\(state\.checks\)/,
+    "the board's record comes first: it is the only one that knows the design has moved since");
   // And it has to be read before the first paint, not after it.
   assert.match(script, /state\.api\("\/api\/circuit"\),\s*\n\s*readBoard\(\)/,
     "the board is read alongside the circuit, so the first draw already knows about it");

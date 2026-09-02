@@ -1,4 +1,4 @@
-// Circuit sandbox HTTP surface.
+// Evolv Circuit: the HTTP surface of the bench.
 //
 // Modelled on server/physics-routes.mjs, and for the same reasons. The circuit
 // lives in the server, so these routes are a window onto it rather than a second
@@ -15,7 +15,7 @@ export async function handleCircuitRoutes(context) {
   const { req, res, url, readBody, bodyLimit, json, circuitService, bench } = context;
   if (!url.pathname.startsWith("/api/circuit")) return false;
   if (!circuitService || !bench) {
-    throw Object.assign(new Error("The circuit sandbox is unavailable in this build."), {
+    throw Object.assign(new Error("Evolv Circuit is unavailable in this build."), {
       status: 503, code: "CAPABILITY_UNAVAILABLE"
     });
   }

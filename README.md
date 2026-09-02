@@ -9,9 +9,43 @@ Stage 7 reliability and release details: [docs/STAGE-7-RELIABILITY-RELEASE.md](d
 Evolv is a local-first chat that runs against local Ollama models, with OpenAI
 available for when a local model is not enough. It has model switching,
 reasoning controls, safe local tools, persistent SQLite conversations, feedback,
-reversible behavioral upgrades, and two sandboxes — physics and circuits — that
-the assistant can build in and read the results of. It runs in the browser
-(`npm start`) or as a hardened Windows desktop app.
+reversible behavioral upgrades, and a physics sandbox the assistant can build in
+and read the results of. It runs in the browser (`npm start`) or as a hardened
+Windows desktop app.
+
+## Evolv Circuit
+
+The other half is a hardware bench. **Evolv Circuit** takes a board from a
+sentence to something you can order the parts for, and keeps the whole of it as
+one object.
+
+A board carries its design, its firmware, what it is supposed to do, and the
+record of everything that has happened to it — nine stages from the sentence
+that started it to a reading off the finished thing:
+
+**intent → design → simulate → program → specify → verify → export → build →
+measure**
+
+The schematic is solved by modified nodal analysis with Newton–Raphson, the
+same method SPICE uses, so a red LED behind 220Ω on 5V lands at 2.1V and 13mA
+because that is where the maths puts it. Firmware runs in an interpreter that
+charges clock cycles, so `delay()` costs real time. Expectations are stated
+against the device rather than the code — *this LED reaches half brightness*,
+*this rail never draws more than 30mA* — and checked with the figure that was
+measured. Export produces a KiCad netlist and a bill of materials.
+
+Two properties make it a bench rather than a drawing tool. Every stage records
+itself as it happens, so a history never depends on anyone remembering to save
+it. And each record names the design it judged, so a check or an export whose
+circuit has changed underneath it reads as out of date rather than done — and
+says which part moved.
+
+The last stage is the one that closes the loop: type in what a meter said on
+the real board, and it is shown next to what the solver predicted. It is the
+only reading in Evolv that did not come from the simulation, so it is the only
+one that can prove the simulation wrong.
+
+Open it with `/circuit`.
 
 ## Private adaptive profile
 

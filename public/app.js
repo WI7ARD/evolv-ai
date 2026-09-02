@@ -2291,7 +2291,7 @@ const COMPOSER_COMMANDS = [
   { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal },
   { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox },
   { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") },
-  { name: "/circuit", description: "Open the circuit sandbox", run: () => switchView("circuit") },
+  { name: "/circuit", description: "Open Evolv Circuit, the board bench", run: () => switchView("circuit") },
   { name: "/lab", description: "Open the lab display", run: () => switchView("lab") },
   { name: "/demo", description: "Watch Evolv run a narrated experiment", run: () => switchView("demo") }
 ];
