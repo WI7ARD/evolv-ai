@@ -188,7 +188,8 @@ test("every shipped migration keeps the checksum it shipped with", async () => {
     [16, "physics-scenes", "cdf33ed6d8d0bc2b74aa0fd2d7602ff9d4c60c59ddc0f62eee7324c538af344f"],
     [17, "model-health", "351ce56abe1a819577b8a18e5f2f097991a38512e39d7cbca59b55937165bb0a"],
     [18, "circuits", "5c4646d3e0948b89c3c45e4a446d553d4fed2e25cf4a0167195a7969400279bd"],
-    [19, "token-usage", "d6b1603d8627b4b2d5df2a14182c8a53829212829907a57e6a4fff3120ee81b8"]
+    [19, "token-usage", "d6b1603d8627b4b2d5df2a14182c8a53829212829907a57e6a4fff3120ee81b8"],
+    [20, "boards", "78e54ec75da9033acdbbe442f067354c6a1ae83e55c8f2759ff4b25fcf45473f"]
   ];
 
   for (const [version, name, checksum] of shipped) {
@@ -236,4 +237,32 @@ test("a profile written while the circuits edit was live is healed, not refused"
   const tampered = PROFILE_MIGRATIONS.map((entry) =>
     (entry.version === 14 ? { ...entry, sql: `${entry.sql}\n-- edited` } : entry));
   assert.throws(() => runMigrations(database.raw, tampered), (error) => error.code === "MIGRATION_CHECKSUM_MISMATCH");
+});
+
+test("a circuit saved before boards existed comes back as a board", async (t) => {
+  // Migration 20 does not only create tables — it carries every saved circuit
+  // across. Leaving them behind would have been the quiet kind of data loss:
+  // nothing errors, the list is simply empty, and the work is still in the file
+  // where nobody looks. So the carry-forward is asserted rather than assumed.
+  const root = await mkdtemp(path.join(tmpdir(), "evolv-boards-migration-"));
+  const database = createDatabase({ dataDir: root, dbPath: path.join(root, "p.db"), defaultPrompt: "test" });
+  t.after(async () => { database.close(); await rm(root, { recursive: true, force: true }); });
+
+  // Wind the profile back to the state a 0.7.1 install was in: circuits, and no
+  // boards.
+  database.raw.exec("DROP TABLE board_measurements; DROP TABLE boards;");
+  database.raw.prepare("DELETE FROM schema_migrations WHERE version = 20").run();
+  database.raw.prepare(`
+    INSERT INTO circuits(id, name, snapshot_json, part_count, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run("old-1", "Bike telemetry", JSON.stringify({ version: 1, components: [{ id: "R1", kind: "resistor" }] }), 1, "2026-01-01", "2026-01-02");
+
+  assert.equal(runMigrations(database.raw).find((entry) => entry.version === 20).status, "applied");
+
+  const board = database.getBoard("old-1");
+  assert.ok(board, "the saved circuit is still there, as a board");
+  assert.equal(board.name, "Bike telemetry");
+  assert.equal(board.createdAt, "2026-01-01", "and keeps the date it was made, not the date it was migrated");
+  assert.deepEqual(board.snapshot.components, [{ id: "R1", kind: "resistor" }]);
+  assert.deepEqual(board.stages, {}, "with no history, because it has none — not a fabricated one");
 });

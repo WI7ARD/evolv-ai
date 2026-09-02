@@ -7,6 +7,11 @@ import {
 import { PART_KINDS, PARTS } from "../lib/circuit/parts.mjs";
 import { CircuitService } from "../lib/circuit.mjs";
 import { handleCircuitRoutes } from "../server/circuit-routes.mjs";
+import { BenchService } from "../lib/bench.mjs";
+import { createDatabase } from "../lib/database.mjs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 // This export has not been opened in KiCad — there is none in this environment —
 // so these tests check the two things that can be checked without it: that the
@@ -189,6 +194,10 @@ test("the export is reachable as a download, and the page asks for one", async (
   // Served as a file rather than as JSON, because the point of it is to land in
   // a folder KiCad opens.
   const circuitService = board();
+  const directory = await mkdtemp(path.join(tmpdir(), "evolv-kicad-"));
+  const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "k.db"), defaultPrompt: "test" });
+  const bench = new BenchService({ database, circuitService });
+  const saved = bench.save({ name: "Bike telemetry", intent: "Log speed once a second" });
   const written = { head: null, body: "" };
   await handleCircuitRoutes({
     req: { method: "GET" },
@@ -201,7 +210,7 @@ test("the export is reachable as a download, and the page asks for one", async (
     bodyLimit: 1_000_000,
     json: () => { throw new Error("an export must not answer with JSON"); },
     circuitService,
-    database: null
+    bench
   });
   assert.equal(written.head.status, 200);
   assert.match(written.head.headers["content-disposition"], /attachment; filename="Bike-telemetry\.net"/);
@@ -214,10 +223,25 @@ test("the export is reachable as a download, and the page asks for one", async (
     url: new URL("http://local/api/circuit/export?format=bom"),
     readBody: async () => ({}), bodyLimit: 1_000_000,
     json: () => { throw new Error("an export must not answer with JSON"); },
-    circuitService, database: null
+    circuitService, bench
   });
   assert.match(bom.head.headers["content-type"], /text\/csv/);
   assert.match(bom.body, /^Reference,Quantity/);
+
+  // Exporting wrote itself into the board's history. Nobody pressed a second
+  // button to make that happen, which is the only way a history stays complete.
+  const exported = bench.get(saved.id).stages.find((stage) => stage.id === "export");
+  assert.equal(exported.state, "done");
+  assert.equal(exported.headline, "Bike-telemetry-bom.csv");
+
+  // And it goes stale the moment the design it described changes.
+  circuitService.apply("add", { kind: "resistor", ohms: 470, pins: { a: "VCC", b: "GND" } });
+  const stale = bench.get(saved.id).stages.find((stage) => stage.id === "export");
+  assert.equal(stale.state, "stale");
+  assert.deepEqual(stale.changed, ["components"]);
+
+  database.close();
+  await rm(directory, { recursive: true, force: true });
 
   // And the page has something to press, which goes through that route.
   const script = await readFile(new URL("../public/circuit.js", import.meta.url), "utf8");

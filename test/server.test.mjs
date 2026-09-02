@@ -409,7 +409,7 @@ test("exposes bounded tool configuration", async () => {
   const payload = await response.json();
   assert.ok(payload.tools.some((tool) => tool.name === "calculate"));
   assert.ok(payload.tools.every((tool) => tool.contractVersion === 1 && tool.inputSchema?.type === "object" && tool.outputSchema));
-  assert.ok(payload.tools.every((tool) => ["read", "network-read", "sandbox", "approval-write"].includes(tool.risk)));
+  assert.ok(payload.tools.every((tool) => ["read", "network-read", "sandbox", "record", "approval-write"].includes(tool.risk)));
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "approval-write").map((tool) => tool.name).sort(), [
     "propose_engineering_check", "propose_obsidian_archive", "propose_obsidian_create", "propose_obsidian_edit", "propose_obsidian_move",
     "propose_sandbox_promotion", "propose_web_research", "propose_workspace_create", "propose_workspace_edit"
@@ -418,6 +418,13 @@ test("exposes bounded tool configuration", async () => {
   // project; the approval belongs to promoting the result. The physics and
   // circuit tools are here for the same reason turned up further: their world
   // is memory, so there is nothing to promote and nothing to undo.
+  //
+  // Running, checking and exporting a circuit now also write a line in the open
+  // board's history, and that does not move them out of this tier. The design
+  // still lives only in memory; what gets written is Evolv's own account of
+  // what it just did, which is the same bookkeeping the tool-run log has always
+  // kept for every call. A tool becomes effectful by changing the world, not by
+  // being remembered.
   //
   // Listed by name on purpose. This is a permission surface, and a tool that
   // quietly joined the automatic tier would be exactly the change nobody
@@ -428,6 +435,15 @@ test("exposes bounded tool configuration", async () => {
     "sandbox_validate", "sandbox_write_file"
   ]);
   assert.ok(payload.tools.filter((tool) => tool.risk === "sandbox").every((tool) => tool.riskPolicy?.automatic === true));
+  // The record tier: writes that land in Evolv's own store and nowhere else. A
+  // board's name, what it is for, and a figure read off a meter. Automatic
+  // because none of it reaches the user's files or the network and all of it is
+  // undone by deleting a row — and pinned by name here for the same reason the
+  // sandbox list is.
+  assert.deepEqual(payload.tools.filter((tool) => tool.risk === "record").map((tool) => tool.name).sort(), [
+    "board_measure", "board_save"
+  ]);
+  assert.ok(payload.tools.filter((tool) => tool.risk === "record").every((tool) => tool.riskPolicy?.automatic === true));
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "network-read").map((tool) => tool.name).sort(), [
     "convert_currency", "get_kanye_quote", "get_weather", "search_wikipedia"
   ]);

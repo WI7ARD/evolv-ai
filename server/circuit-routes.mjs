@@ -12,9 +12,9 @@
 // circuit_build cannot drift apart.
 
 export async function handleCircuitRoutes(context) {
-  const { req, res, url, readBody, bodyLimit, json, circuitService, database } = context;
+  const { req, res, url, readBody, bodyLimit, json, circuitService, bench } = context;
   if (!url.pathname.startsWith("/api/circuit")) return false;
-  if (!circuitService) {
+  if (!circuitService || !bench) {
     throw Object.assign(new Error("The circuit sandbox is unavailable in this build."), {
       status: 503, code: "CAPABILITY_UNAVAILABLE"
     });
@@ -50,7 +50,9 @@ export async function handleCircuitRoutes(context) {
   // reads.
   if (req.method === "POST" && url.pathname === "/api/circuit/run") {
     const body = await readBody(req, bodyLimit);
-    json(res, 200, circuitService.run(body));
+    // Through the bench, which runs it and writes down that it did. If no board
+    // is open the recording is a no-op, so a scratch circuit stays scratch.
+    json(res, 200, bench.run(body));
     return true;
   }
 
@@ -76,7 +78,7 @@ export async function handleCircuitRoutes(context) {
   // The design as a file something else can build from. Served as a download
   // rather than as JSON: the point of it is to land in a folder KiCad opens.
   if (req.method === "GET" && url.pathname === "/api/circuit/export") {
-    const result = circuitService.export({
+    const result = bench.exportDesign({
       format: url.searchParams.get("format") || "netlist",
       name: url.searchParams.get("name") || ""
     });
@@ -110,7 +112,7 @@ export async function handleCircuitRoutes(context) {
 
   if (req.method === "POST" && url.pathname === "/api/circuit/check") {
     const body = await readBody(req, bodyLimit);
-    json(res, 200, circuitService.check(body));
+    json(res, 200, bench.check(body));
     return true;
   }
 
@@ -131,38 +133,8 @@ export async function handleCircuitRoutes(context) {
     return true;
   }
 
-  // Saved circuits. The service holds no database handle — it stays memory-only,
-  // which is what keeps its tools in the automatic risk tier — so persistence
-  // lives out here, moving opaque snapshots between the two.
-  if (url.pathname === "/api/circuit/circuits") {
-    if (req.method === "GET") {
-      json(res, 200, { circuits: database.listCircuits({ limit: url.searchParams.get("limit") || 50 }) });
-      return true;
-    }
-    if (req.method === "POST") {
-      const body = await readBody(req, bodyLimit);
-      const snapshot = circuitService.snapshot();
-      json(res, 201, database.saveCircuit({
-        name: body.name, snapshot, partCount: snapshot.components.length
-      }));
-      return true;
-    }
-  }
-
-  const savedMatch = url.pathname.match(/^\/api\/circuit\/circuits\/([^/]+)(?:\/(load))?$/);
-  if (savedMatch) {
-    const id = decodeURIComponent(savedMatch[1]);
-    if (req.method === "POST" && savedMatch[2] === "load") {
-      const saved = database.getCircuit(id);
-      if (!saved) throw Object.assign(new Error("That circuit no longer exists."), { status: 404, code: "CIRCUIT_NOT_FOUND" });
-      json(res, 200, { name: saved.name, circuit: circuitService.restore(saved.snapshot) });
-      return true;
-    }
-    if (req.method === "DELETE") {
-      json(res, 200, { removed: database.deleteCircuit(id) });
-      return true;
-    }
-  }
-
+  // Saving lives on /api/boards now. A saved circuit was a design and nothing
+  // else; a board is the same design plus what has happened to it, and every
+  // circuit saved before boards existed was carried across by migration 20.
   return false;
 }

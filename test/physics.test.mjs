@@ -192,7 +192,7 @@ test("the physics tools never ask for approval and never touch anything real", a
   for (const tool of physicsTools) {
     // A scene is memory. Prompting to drop a box would train someone to
     // approve without reading, which is what makes the real prompts work.
-    assert.ok(["read", "sandbox"].includes(tool.risk), `${tool.name} must stay in the automatic tier, got ${tool.risk}`);
+    assert.ok(["read", "sandbox", "record"].includes(tool.risk), `${tool.name} must stay in the automatic tier, got ${tool.risk}`);
     assert.equal(tool.permission, null, `${tool.name} needs no capability grant`);
   }
 

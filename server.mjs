@@ -16,6 +16,7 @@ import { handleGoalRoutes, streamGoalResume } from "./server/goal-routes.mjs";
 import { handleSandboxRoutes } from "./server/sandbox-routes.mjs";
 import { handlePhysicsRoutes } from "./server/physics-routes.mjs";
 import { handleCircuitRoutes } from "./server/circuit-routes.mjs";
+import { handleBoardRoutes } from "./server/board-routes.mjs";
 import { handleHudRoutes } from "./server/hud-routes.mjs";
 import { createUnavailableSecretStore } from "./lib/secrets.mjs";
 import { createOllamaClient } from "./lib/ollama-client.mjs";
@@ -246,6 +247,12 @@ const circuitService = new Proxy({}, {
   get(target, property) {
     const value = scopedResource("circuitService")[property];
     return typeof value === "function" ? value.bind(scopedResource("circuitService")) : value;
+  }
+});
+const bench = new Proxy({}, {
+  get(_target, property) {
+    const value = scopedResource("bench")[property];
+    return typeof value === "function" ? value.bind(scopedResource("bench")) : value;
   }
 });
 const physicsService = new Proxy({}, {
@@ -1793,10 +1800,15 @@ async function handlePersistedChat(req, res, state, conversationId, body) {
       // actually go and a per-turn figure would hide most of the cost.
       if (roundUsage) {
         const tokens = readUsage(roundUsage);
+        const micros = estimateMicros(providerId, selectedModel, tokens);
         database.recordTokenUsage({
           conversationId, messageId: activeAssistantId, providerId, modelId: selectedModel,
-          ...tokens, estimatedMicros: estimateMicros(providerId, selectedModel, tokens)
+          ...tokens, estimatedMicros: micros
         });
+        // And onto the board, if one is open. "What did this board cost to
+        // design" is a question a monthly total cannot answer, and it is the
+        // one worth asking before starting the next one.
+        if (micros) bench.spend(micros);
       }
       agentRuntime.recordEffect(agentRunId, agentStepId, "after", "model.stream", {
         round, contentCharacters: content.length, thinkingCharacters: thinking.length, toolCalls: toolCalls.length
@@ -2864,7 +2876,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (await handleSandboxRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, sandboxService })) return;
     if (await handlePhysicsRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, physicsService, database })) return;
-    if (await handleCircuitRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, circuitService, database })) return;
+    if (await handleCircuitRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, circuitService, bench })) return;
+    if (await handleBoardRoutes({ req, res, url, readBody, bodyLimit: SMALL_BODY, json, bench })) return;
     if (await handleHudRoutes({ req, res, url, json, toolRegistry, projectService })) return;
     if (await handleGoalRoutes({
       req, res, url, authenticated, readBody, bodyLimit: SMALL_BODY, json, goalRunner, agentRuntime, vaultService,

@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { CircuitService, CIRCUIT_VERSION } from "../lib/circuit.mjs";
 import { createDatabase } from "../lib/database.mjs";
 import { handleCircuitRoutes } from "../server/circuit-routes.mjs";
+import { handleBoardRoutes } from "../server/board-routes.mjs";
+import { BenchService } from "../lib/bench.mjs";
 import { layout } from "../lib/circuit/layout.mjs";
 
 // A working LED circuit, described the way a model would: parts and net names,
@@ -187,9 +189,10 @@ test("the HTTP surface is a window onto the same circuit", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "evolv-circuit-"));
   const database = createDatabase({ dataDir: directory, dbPath: path.join(directory, "c.db"), defaultPrompt: "test" });
   const circuitService = new CircuitService();
+  const bench = new BenchService({ database, circuitService });
   const sent = [];
   const json = (res, status, payload) => sent.push({ status, payload });
-  const call = (method, pathname, body) => handleCircuitRoutes({
+  const call = (method, pathname, body) => (pathname.startsWith("/api/boards") ? handleBoardRoutes : handleCircuitRoutes)({
     req: { method },
     res: {},
     url: new URL(`http://local${pathname}`),
@@ -208,7 +211,7 @@ test("the HTTP surface is a window onto the same circuit", async () => {
     bodyLimit: 1_000_000,
     json,
     circuitService,
-    database
+    bench
   });
 
   try {
@@ -226,25 +229,45 @@ test("the HTTP surface is a window onto the same circuit", async () => {
     const perceived = sent.at(-1).payload;
     assert.ok(perceived.nets.N1 > 1.9 && perceived.nets.N1 < 2.3);
 
-    // Saved and reloaded through the database, which never sees inside the
+    // Saved as a board and reopened. The database never sees inside the
     // snapshot — the service holds no database handle, which is what keeps its
     // tools in the automatic risk tier.
-    await call("POST", "/api/circuit/circuits", { name: "LED test" });
-    const saved = sent.at(-1).payload;
-    assert.equal(saved.partCount, 4);
+    await call("POST", "/api/boards", { name: "LED test", intent: "Light one LED off 5V" });
+    const saved = sent.at(-1).payload.board;
+    assert.equal(sent.at(-1).status, 201);
+    assert.equal(saved.stages.find((stage) => stage.id === "design").headline, "4 parts");
+    assert.equal(saved.stages.find((stage) => stage.id === "intent").state, "done");
+
+    // Running it writes the simulate stage without anyone asking, which is the
+    // only way a history stays complete.
+    await call("POST", "/api/circuit/run", { seconds: 0.002 });
+    await call("GET", `/api/boards/${saved.id}`);
+    const afterRun = sent.at(-1).payload.board;
+    const simulate = afterRun.stages.find((stage) => stage.id === "simulate");
+    assert.equal(simulate.state, "done");
+    assert.match(simulate.headline, /from the supply/, "the headline carries what the board draws");
 
     await call("DELETE", "/api/circuit");
     await call("GET", "/api/circuit");
     assert.equal(sent.at(-1).payload.counts.parts, 0);
 
-    await call("POST", `/api/circuit/circuits/${saved.id}/load`);
-    assert.equal(sent.at(-1).payload.circuit.counts.parts, 4);
-    assert.equal(sent.at(-1).payload.name, "LED test");
+    await call("POST", `/api/boards/${saved.id}/open`);
+    assert.equal(sent.at(-1).payload.board.name, "LED test");
+    await call("GET", "/api/circuit");
+    assert.equal(sent.at(-1).payload.counts.parts, 4);
+
+    // A measurement off a real board, compared against what was simulated.
+    await call("POST", "/api/circuit/expectations", { subject: "D1", measure: "current", condition: "reaches", value: 0.01 });
+    await call("POST", "/api/circuit/check", { seconds: 0.002 });
+    await call("POST", `/api/boards/${saved.id}/measurements`, { subject: "D1", measure: "current", value: 0.0134, note: "bench meter" });
+    const measured = sent.at(-1).payload.board.measurements[0];
+    assert.equal(measured.agreement, "agrees", `expected the bench to agree: ${measured.detail}`);
+    assert.match(measured.detail, /Simulated .*, measured 13\.40mA/);
 
     // An unavailable service is a 503 rather than a crash, matching physics.
     await assert.rejects(() => handleCircuitRoutes({
       req: { method: "GET" }, res: {}, url: new URL("http://local/api/circuit"),
-      readBody: async () => ({}), bodyLimit: 1, json, circuitService: null, database
+      readBody: async () => ({}), bodyLimit: 1, json, circuitService: null, bench
     }), (error) => {
       assert.equal(error.code, "CAPABILITY_UNAVAILABLE");
       return true;

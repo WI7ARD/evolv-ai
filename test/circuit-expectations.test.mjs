@@ -7,6 +7,7 @@ import {
 } from "../lib/circuit/expectations.mjs";
 import { handleCircuitRoutes } from "../server/circuit-routes.mjs";
 import { CircuitService } from "../lib/circuit.mjs";
+import { BenchService } from "../lib/bench.mjs";
 
 // The point of this stage is that a failure is a diagnosis. So most of these
 // tests assert what the failure *says*, not just that it failed.
@@ -365,6 +366,9 @@ test("the expectation routes are reachable the way the server calls them", async
   // they are exercised here through the router itself, with a readBody that
   // checks it was called properly.
   const circuitService = blinker();
+  // A bench with no board open, which is the ordinary case for a scratch
+  // circuit: it runs and checks, and there is nothing to write it down against.
+  const bench = new BenchService({ database: null, circuitService });
   const sent = [];
   const call = (method, pathname, body) => handleCircuitRoutes({
     req: { method },
@@ -378,7 +382,7 @@ test("the expectation routes are reachable the way the server calls them", async
     bodyLimit: 1_000_000,
     json: (res, status, payload) => sent.push({ status, payload }),
     circuitService,
-    database: null
+    bench
   });
 
   await call("POST", "/api/circuit/expectations", { subject: "D1", measure: "lit", condition: "reaches", value: 0.5 });
