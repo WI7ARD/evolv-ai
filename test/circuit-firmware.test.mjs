@@ -398,3 +398,31 @@ test("assigning to a name nothing declared is refused, not quietly invented", ()
   assert.match(chip.error.message, /conut has not been declared/);
   assert.match(chip.error.message, /var conut/, "and says what to write instead");
 });
+
+test("a chip that never started says so, instead of the LED taking the blame", () => {
+  // The check said "never switched — it sat between 0% and 0%", which is true
+  // and points at the resistor. The microcontroller had died on line 2 and knew
+  // it; the error was only ever written where the schematic panel looks.
+  const service = new CircuitService();
+  service.apply("add", { kind: "supply", volts: 5, pins: { positive: "VCC", negative: "GND" } });
+  service.apply("add", { kind: "ground", pins: { pin: "GND" } });
+  service.apply("add", { kind: "mcu", pins: { vcc: "VCC", gnd: "GND", d0: "DRV" } });
+  service.apply("add", { kind: "resistor", ohms: 220, pins: { a: "DRV", b: "N1" } });
+  service.apply("add", { kind: "led", colour: "red", pins: { anode: "N1", cathode: "GND" } });
+  service.apply("firmware", { id: "U1", source: "function setup() {\n  pinMode(0, NONSENSE)\n}\nfunction loop() {\n  digitalWrite(0, 1)\n}" });
+  service.apply("expect", { subject: "D1", measure: "lit", condition: "toggles at", value: 5, tolerance: 1 });
+
+  const checked = service.apply("check", {});
+  const firmware = checked.findings.find((finding) => finding.code === "FIRMWARE_UNKNOWN_NAME");
+  assert.ok(firmware, "the run has to carry what the chip said about itself");
+  assert.equal(firmware.component, "U1");
+  assert.match(firmware.message, /^U1: NONSENSE has not been given a value \(line 2\)$/,
+    "and say it once — the error already names its own line");
+  assert.match(checked.summary, /^U1: NONSENSE has not been given a value \(line 2\)\. Everything after that follows from it\./);
+
+  // Working firmware leaves the summary alone.
+  service.apply("firmware", { id: "U1", source: "function setup() {\n  pinMode(0, 1)\n}\nfunction loop() {\n  digitalWrite(0, 1)\n  delay(100)\n  digitalWrite(0, 0)\n  delay(100)\n}" });
+  const working = service.apply("check", {});
+  assert.equal(working.summary, "All 1 expectation met.");
+  assert.deepEqual(working.findings.filter((finding) => String(finding.code).startsWith("FIRMWARE_")), []);
+});

@@ -1104,6 +1104,7 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .circuit-checks-summary { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
 .circuit-checks-summary.is-good { color: #7fd6a2; }
 .circuit-checks-summary.is-bad { color: #ff8095; }
+.circuit-checks-summary.is-stale { color: #f0c674; }
 .circuit-checks ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .circuit-check { display: flex; gap: 12px; align-items: baseline; padding: 8px 12px;
   border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; font-size: 13px; }
@@ -1115,6 +1116,40 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
 .circuit-check.is-fail .circuit-check-mark { color: #ff8095; }
 .circuit-check-body { display: grid; gap: 2px; }
 .circuit-check-body span { color: var(--muted); }
+/* The board's timeline. Every stage is shown, reached or not, because the empty
+   ones are what tell you where you are — so a pending stage is dimmed rather
+   than hidden, and a stale one is marked in the colour of a warning rather than
+   of a failure, since nothing is wrong with it except its age. */
+.circuit-board-bar { border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 4px; }
+.board-timeline { margin: 12px 0 4px; }
+.board-timeline ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.board-stage { flex: 1 1 150px; min-width: 130px; display: grid; gap: 2px; padding: 8px 10px;
+  border: 1px solid var(--line); border-top-width: 3px; border-radius: 8px; font-size: 12px; }
+.board-stage.is-pending { opacity: .55; }
+.board-stage.is-done { border-top-color: #7fd6a2; }
+.board-stage.is-failed { border-top-color: #ff8095; }
+.board-stage.is-stale { border-top-color: #f0c674; }
+.board-stage-label { font-family: var(--mono, monospace); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted); }
+.board-stage-headline { color: var(--text); overflow-wrap: anywhere; }
+.board-stage.is-pending .board-stage-headline { color: var(--muted); }
+.board-stage-note { color: #f0c674; font-size: 11px; }
+.circuit-measure-heading { margin: 24px 0 4px; padding-top: 20px; border-top: 1px solid var(--line);
+  font-size: 15px; font-weight: 500; }
+.circuit-measure-bar { margin-top: 12px; }
+.board-measurements { margin-top: 16px; }
+.board-measurements h3 { display: none; }
+.board-measurements h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.board-measurements ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.board-measurement { display: flex; gap: 12px; align-items: baseline; padding: 8px 12px;
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; font-size: 13px; }
+.board-measurement.is-agrees { border-left-color: #7fd6a2; }
+.board-measurement.is-near { border-left-color: #f0c674; }
+.board-measurement.is-differs { border-left-color: #ff8095; }
+.board-measurement-mark { flex: 0 0 auto; min-width: 88px; font-family: var(--mono, monospace);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.board-measurement-body { display: grid; gap: 2px; }
+.board-measurement-body span { color: var(--muted); }
 .circuit-sensor { fill: #8fd0ff; font-size: 9px; text-anchor: middle; opacity: .9; }
 .circuit-world { margin-top: 16px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .circuit-world-line { margin: 0; font-size: 13px; color: var(--muted); }

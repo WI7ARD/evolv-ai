@@ -348,3 +348,16 @@ test("the page draws and computes nothing", async () => {
     assert.ok(!code.includes(forbidden), `${forbidden} does not belong in the renderer`);
   }
 });
+
+test("the verdict on screen comes from the board when this tab has not run a check", async () => {
+  // The page showed "2 expectations, not yet checked" directly beneath a
+  // timeline reading "All 2 expectations met" — both true, one of them only
+  // about checks run since the tab opened. Two panels on one screen disagreeing
+  // is worse than either being absent.
+  const script = await readFile(new URL("../public/circuit.js", import.meta.url), "utf8");
+  assert.match(script, /renderChecks\(state\.checks\)\s*\n\s*\|\| renderChecks\(state\.board\?\.lastCheck/,
+    "the recorded verdict has to be the fallback, ahead of the unchecked list");
+  // And it has to be read before the first paint, not after it.
+  assert.match(script, /state\.api\("\/api\/circuit"\),\s*\n\s*readBoard\(\)/,
+    "the board is read alongside the circuit, so the first draw already knows about it");
+});

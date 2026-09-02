@@ -239,3 +239,51 @@ test("stageReport always returns every stage, in order", () => {
   ], "the empty stages are what tell you where you are, so none of them may be hidden");
   assert.ok(report.every((stage) => ["pending", "done", "stale"].includes(stage.state)));
 });
+
+test("a check that failed is not drawn as a stage completed", async (t) => {
+  const { bench: workshop, circuitService } = await bench(t);
+  const board = workshop.save({ name: "LED" });
+  // 220Ω on 5V gives about 13mA; asking for 100mA cannot be met.
+  circuitService.apply("expect", { subject: "D1", measure: "current", condition: "reaches", value: 0.1 });
+  workshop.check({ seconds: 0.002 });
+
+  const verify = workshop.get(board.id).stages.find((stage) => stage.id === "verify");
+  assert.equal(verify.state, "failed", "a timeline that draws four unmet expectations as done is a reassuring one");
+  assert.equal(verify.headline, "1 of 1 not met");
+  // And there is no point suggesting the next stage: a board that does not do
+  // what was asked of it is not ready to export.
+  assert.match(workshop.summary(), /^Verify: 1 of 1 not met\.$/);
+});
+
+test("a simulation that predicted nothing is the most useful disagreement there is", () => {
+  const verify = { results: [{ subject: "D1", measure: "lit", measured: 0 }] };
+  const lit = compareMeasurement(normaliseMeasurement({ subject: "D1", measure: "lit", value: 0.44 }), verify);
+  // This read "unchecked" while printing both numbers — the label and the
+  // sentence disagreeing about whether there was anything to compare.
+  assert.equal(lit.agreement, "differs");
+  assert.equal(lit.simulated, 0);
+  assert.match(lit.detail, /the simulation predicted nothing here at all/);
+
+  const dark = compareMeasurement(normaliseMeasurement({ subject: "D1", measure: "lit", value: 0 }), verify);
+  assert.equal(dark.agreement, "agrees", "and a board that is dark where the solver said dark agrees with it");
+});
+
+test("a rate is not a level, and is not compared against one", () => {
+  // A 5Hz blink checked with "toggles at" stores 5 as its measured figure — in
+  // hertz. Read as a brightness it printed "Simulated 500%", which is the same
+  // unit confusion the expectation validator had, arriving from the other side.
+  const blink = { results: [{ subject: "D1", measure: "lit", condition: "toggles at", measured: 5 }] };
+  const reading = compareMeasurement(normaliseMeasurement({ subject: "D1", measure: "lit", value: 0.61 }), blink);
+  assert.equal(reading.agreement, "unchecked");
+  assert.equal(reading.simulated, null);
+  assert.match(reading.detail, /a rate in hertz, which is not the same kind of number/);
+
+  // A level checked alongside it is still compared.
+  const both = { results: [
+    { subject: "D1", measure: "lit", condition: "toggles at", measured: 5 },
+    { subject: "D1", measure: "lit", condition: "reaches", measured: 0.58 }
+  ] };
+  const level = compareMeasurement(normaliseMeasurement({ subject: "D1", measure: "lit", value: 0.61 }), both);
+  assert.equal(level.agreement, "agrees");
+  assert.equal(level.simulated, 0.58);
+});

@@ -318,12 +318,32 @@
 
         <section id="circuit-view" class="view panel-view agent-view">
           <div class="panel-header">
-            <div><p class="eyebrow">SANDBOX</p><h1>Circuit</h1><p>A schematic you could build on a bench from real parts. Describe what you want — "an LED on 5V" — and Evolv wires it, solves it, and says what would actually happen, including which part burns out. Started with <code>/circuit</code>.</p></div>
+            <div><p class="eyebrow">BENCH</p><h1>Evolv Circuit</h1><p>A board taken from a sentence to something you can order the parts for. Describe what you want — "an LED on 5V" — and Evolv wires it, solves it, programs it, checks it does what you asked, and exports a netlist. Started with <code>/circuit</code>.</p></div>
             <div class="panel-header-actions">
               <button id="circuit-back-to-chat" class="secondary-button" type="button">Back to chat</button>
             </div>
           </div>
           <article class="mind-card">
+            <div class="physics-controls circuit-board-bar">
+              <label class="physics-field">
+                <span>Board</span>
+                <select id="board-picker">
+                  <option value="">Not saved yet</option>
+                </select>
+              </label>
+              <label class="physics-field">
+                <span>Called</span>
+                <input id="board-name" type="text" placeholder="Bike telemetry" size="16" />
+              </label>
+              <label class="physics-field">
+                <span>For</span>
+                <input id="board-intent" type="text" placeholder="Log the speed once a second" size="28" />
+              </label>
+              <button id="board-save" class="primary-button" type="button">Save board</button>
+              <button id="board-built" class="secondary-button" type="button" title="Record that this board was actually made, so the readings below have something to be readings of">Built it</button>
+              <span id="board-summary" class="settings-note" aria-live="polite"></span>
+            </div>
+            <div id="board-timeline"></div>
             <div class="physics-controls">
               <label class="physics-field">
                 <span>Add a part</span>
@@ -388,6 +408,28 @@
               <summary>Bill of materials</summary>
               <div id="circuit-bom"></div>
             </details>
+            <h2 class="circuit-measure-heading">Off the real board</h2>
+            <p class="settings-note">What a meter said, next to what the solver predicted. This is the only reading here that did not come from the simulation, so it is the only one that can prove it right or wrong.</p>
+            <div class="physics-controls circuit-measure-bar">
+              <label class="physics-field">
+                <span>Measured</span>
+                <input id="board-measure-subject" type="text" placeholder="PS1" size="8" />
+              </label>
+              <label class="sr-only" for="board-measure-kind">What was measured</label>
+              <select id="board-measure-kind">
+                <option value="current">current, amps</option>
+                <option value="voltage">voltage, volts</option>
+                <option value="lit">brightness, 0 to 1</option>
+                <option value="rpm">speed, rpm</option>
+                <option value="angle">angle, degrees</option>
+              </select>
+              <label class="physics-field">
+                <span>Read</span>
+                <input id="board-measure-value" type="number" step="any" size="8" />
+              </label>
+              <button id="board-measure-add" class="secondary-button" type="button" title="What a meter said on the real board, compared against what was simulated">Record reading</button>
+            </div>
+            <div id="board-measurements"></div>
           </article>
         </section>
         <section id="physics-view" class="view panel-view agent-view">

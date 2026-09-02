@@ -11,7 +11,13 @@
 
 const $ = (selector) => document.querySelector(selector);
 
-const state = { api: null, toast: null, frame: null, circuit: null, checks: null, busy: false, selected: "" };
+const state = {
+  api: null, toast: null, frame: null, circuit: null, checks: null, busy: false, selected: "",
+  // The board this circuit belongs to, and every board there is. Held here
+  // rather than read from the controls, because the controls are what the
+  // person is typing and this is what the server actually has.
+  board: null, boards: []
+};
 
 export function initCircuit({ api, toast }) {
   state.api = api;
@@ -303,10 +309,11 @@ function renderConditions(frame) {
 // The measured figure is on every line, passing or failing. A green tick with
 // no number is a claim to be taken on trust; "peaked at 7.94mA, under the
 // 20mA limit" is the reading itself, and it is the same amount of space.
-function renderChecks(checks) {
+function renderChecks(checks, stale = false) {
   if (!checks?.results?.length) return "";
   return `<section class="circuit-checks">
-    <p class="circuit-checks-summary is-${checks.failed ? "bad" : "good"}">${escapeHtml(checks.summary)}</p>
+    <p class="circuit-checks-summary is-${stale ? "stale" : checks.failed ? "bad" : "good"}">${escapeHtml(checks.summary)}${
+      stale ? " This was the last check; the design has changed since, so run it again." : ""}</p>
     <ul>${checks.results.map((result) => `<li class="circuit-check is-${result.pass ? "pass" : "fail"}">
       <span class="circuit-check-mark">${result.pass ? "held" : "failed"}</span>
       <span class="circuit-check-body">
@@ -408,12 +415,131 @@ function renderBom(circuit) {
   </table>`;
 }
 
+// The board's timeline: nine stages, always all of them.
+//
+// The empty stages are the point. A list that only showed what had been done
+// would read as a log; showing every stage is what makes it a spine you can see
+// your position on.
+function renderTimeline(board) {
+  if (!board) {
+    return `<p class="settings-note">This circuit is not saved to a board yet. Name it above and everything that happens to it gets written down — what was simulated, checked, exported and built.</p>`;
+  }
+  return `<section class="board-timeline">
+    <ol>${board.stages.map((stage) => `<li class="board-stage is-${stage.state}">
+      <span class="board-stage-label">${escapeHtml(stage.label)}</span>
+      <span class="board-stage-headline">${escapeHtml(stage.headline || stageBlank(stage.id))}</span>
+      ${stage.state === "stale" ? `<span class="board-stage-note">out of date — the ${escapeHtml(listOf(stage.changed || []))} changed since</span>` : ""}
+    </li>`).join("")}</ol>
+    ${board.spendMicros ? `<p class="settings-note">${escapeHtml(spendOf(board.spendMicros))} of cloud spent designing this board, estimated from published prices.</p>` : ""}
+  </section>`;
+}
+
+// What an unreached stage is waiting for. Written out rather than left blank,
+// because "Verify —" tells you nothing and "Verify: nothing expected yet" tells
+// you what to do next.
+const STAGE_BLANKS = {
+  intent: "no stated purpose",
+  design: "no parts yet",
+  simulate: "not run yet",
+  program: "no firmware",
+  specify: "nothing expected yet",
+  verify: "not checked yet",
+  export: "not exported",
+  build: "not built",
+  measure: "nothing measured yet"
+};
+
+function stageBlank(id) { return STAGE_BLANKS[id] || ""; }
+
+function listOf(items) {
+  if (items.length <= 1) return items[0] || "design";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+// Money, written the way lib/token-spend.mjs writes it. The page does no
+// arithmetic beyond dividing by a million, because a second opinion about what
+// something cost is worse than none.
+function spendOf(micros) {
+  const dollars = micros / 1_000_000;
+  if (dollars < 0.01) return `$${dollars.toFixed(4)}`;
+  if (dollars < 1) return `$${dollars.toFixed(3)}`;
+  return `$${dollars.toFixed(2)}`;
+}
+
+// What the real board did, next to what the solver said it would.
+//
+// Both numbers, always. The whole value of this stage is in looking at the
+// difference, and a verdict on its own would invite somebody to read "agrees"
+// and stop looking.
+function renderMeasurements(board) {
+  const measurements = board?.measurements || [];
+  if (!measurements.length) return "";
+  return `<section class="board-measurements">
+    <h3>Off the real board</h3>
+    <ul>${measurements.map((entry) => `<li class="board-measurement is-${entry.agreement}">
+      <span class="board-measurement-mark">${escapeHtml(entry.subject)} ${escapeHtml(entry.measure)}</span>
+      <span class="board-measurement-body">
+        <strong>${escapeHtml(entry.detail)}</strong>
+        ${entry.note ? `<span>${escapeHtml(entry.note)}</span>` : ""}
+      </span>
+    </li>`).join("")}</ul>
+  </section>`;
+}
+
+// Everything the board panel knows, read in one place.
+async function readBoard() {
+  const [listing, current] = await Promise.all([
+    state.api("/api/boards"),
+    state.api("/api/boards/current")
+  ]);
+  state.boards = listing.boards || [];
+  state.board = current.board || null;
+}
+
+export async function refreshBoard() {
+  if (!state.api) return;
+  try {
+    await readBoard();
+    draw();
+  } catch (error) {
+    state.toast?.(error.message || "Could not read the boards.");
+  }
+}
+
+function drawBoard() {
+  const timeline = $("#board-timeline");
+  if (timeline) timeline.innerHTML = renderTimeline(state.board);
+  const measurements = $("#board-measurements");
+  if (measurements) measurements.innerHTML = renderMeasurements(state.board);
+  const summary = $("#board-summary");
+  if (summary) summary.textContent = state.board?.summary || "";
+  const picker = $("#board-picker");
+  if (picker) {
+    const selected = state.board?.id || "";
+    picker.innerHTML = `<option value="">${state.boards.length ? "Open a board…" : "Not saved yet"}</option>`
+      + state.boards.map((board) =>
+        `<option value="${escapeHtml(board.id)}"${board.id === selected ? " selected" : ""}>${escapeHtml(board.name)}</option>`).join("");
+  }
+  // The name and intent fields follow the open board, but only when they are
+  // not being typed into: overwriting a half-typed name on every refresh is how
+  // a form fights the person using it.
+  const name = $("#board-name");
+  if (name && document.activeElement !== name) name.value = state.board?.name || "";
+  const intent = $("#board-intent");
+  if (intent && document.activeElement !== intent) intent.value = state.board?.intent || "";
+}
+
 export async function refreshCircuit() {
   if (!state.api) return;
   try {
+    // All three before drawing anything. The board used to be read after the
+    // first draw, so on the first paint the page had no idea a check had ever
+    // been run and said "2 expectations, not yet checked" directly under a
+    // timeline reading "All 2 expectations met".
     const [frame, circuit] = await Promise.all([
       state.api("/api/circuit/frame"),
-      state.api("/api/circuit")
+      state.api("/api/circuit"),
+      readBoard()
     ]);
     state.frame = frame;
     state.circuit = circuit;
@@ -433,7 +559,15 @@ function draw() {
   const world = $("#circuit-world");
   if (world) world.innerHTML = renderConditions(state.frame);
   const checks = $("#circuit-checks");
-  if (checks) checks.innerHTML = renderChecks(state.checks) || renderExpectations(state.circuit, state.checks);
+  if (checks) {
+    // A check run in this tab first, then the one the board remembers, then the
+    // expectations nobody has checked yet. Without the middle one the page said
+    // "2 expectations, not yet checked" directly beneath a timeline reading
+    // "All 2 expectations met" — both true, one of them only about this tab.
+    checks.innerHTML = renderChecks(state.checks)
+      || renderChecks(state.board?.lastCheck, state.board?.lastCheck?.stale)
+      || renderExpectations(state.circuit, state.checks);
+  }
   const parts = $("#circuit-parts");
   if (parts) parts.innerHTML = renderParts(state.circuit);
   const bom = $("#circuit-bom");
@@ -462,6 +596,7 @@ function draw() {
       ? `${counts.parts} part${counts.parts === 1 ? "" : "s"}, ${counts.nets} net${counts.nets === 1 ? "" : "s"}${state.circuit.solved ? "" : " — not solved"}`
       : "";
   }
+  drawBoard();
 }
 
 async function act(action, parameters = {}) {
@@ -650,6 +785,75 @@ export function bindCircuitControls() {
       await refreshCircuit();
     } catch (error) {
       state.toast?.(error.message || "Could not add that probe.");
+    }
+  });
+  $("#board-save")?.addEventListener("click", async () => {
+    const name = $("#board-name")?.value?.trim();
+    if (!name) {
+      state.toast?.("Give the board a name first.");
+      return;
+    }
+    try {
+      await state.api("/api/boards", {
+        method: "POST",
+        body: JSON.stringify({ name, intent: $("#board-intent")?.value || "" })
+      });
+      await refreshCircuit();
+      state.toast?.(`Saved ${name}`);
+    } catch (error) {
+      state.toast?.(error.message || "Could not save the board.");
+    }
+  });
+  $("#board-picker")?.addEventListener("change", async (event) => {
+    const id = event.target.value;
+    if (!id) return;
+    try {
+      await state.api(`/api/boards/${encodeURIComponent(id)}/open`, { method: "POST", body: "{}" });
+      state.checks = null;
+      await refreshCircuit();
+    } catch (error) {
+      state.toast?.(error.message || "Could not open that board.");
+    }
+  });
+  $("#board-built")?.addEventListener("click", async () => {
+    if (!state.board) {
+      state.toast?.("Save the board first — there has to be something to have built.");
+      return;
+    }
+    try {
+      await state.api(`/api/boards/${encodeURIComponent(state.board.id)}/built`, { method: "POST", body: "{}" });
+      await refreshBoard();
+      state.toast?.("Recorded. Readings off it can be compared against the simulation now.");
+    } catch (error) {
+      state.toast?.(error.message || "Could not record that.");
+    }
+  });
+  $("#board-measure-add")?.addEventListener("click", async () => {
+    if (!state.board) {
+      state.toast?.("Save the board first, so the reading has something to belong to.");
+      return;
+    }
+    // Held rather than looked up twice: they are read, then cleared, and a
+    // missing element must not throw between the two and take every listener
+    // registered after this one with it.
+    const subjectField = $("#board-measure-subject");
+    const valueField = $("#board-measure-value");
+    const subject = subjectField?.value?.trim();
+    const value = Number(valueField?.value);
+    if (!subject || !Number.isFinite(value)) {
+      state.toast?.("A reading needs a part and a number.");
+      return;
+    }
+    try {
+      await state.api(`/api/boards/${encodeURIComponent(state.board.id)}/measurements`, {
+        method: "POST",
+        body: JSON.stringify({ subject, measure: $("#board-measure-kind")?.value || "current", value })
+      });
+      if (subjectField) subjectField.value = "";
+      if (valueField) valueField.value = "";
+      await refreshBoard();
+    } catch (error) {
+      state.toast?.(error.message || "Could not record that reading.");
     }
   });
   $("#circuit-refresh")?.addEventListener("click", refreshCircuit);

@@ -446,3 +446,19 @@ test("a plot whose axis reads the same at both ends says how big the swing is", 
   // 7.94mA through the supply's own 0.05Ω.
   assert.ok(Math.abs(swing - (0.00794 * 0.05)) < 5e-5, `expected about 400µV of ripple, measured ${swing * 1000}mV`);
 });
+
+test('"toggles at" carries a frequency, not a brightness', () => {
+  // The blink board's own expectation was rejected: 5 was read as a brightness
+  // of 500%, so the one thing everybody wants to say about a flashing LED could
+  // not be said. Found by building the board rather than by reading the code.
+  const blink = normaliseExpectation({ subject: "D1", measure: "lit", condition: "toggles at", value: 5, tolerance: 1 });
+  assert.equal(blink.value, 5);
+  assert.equal(describeExpectation(blink), "D1 toggles at 5Hz ± 1Hz");
+
+  // And the range check still does its job where the value really is a
+  // brightness — including the top of a band, which it used to ignore.
+  assert.throws(() => normaliseExpectation({ subject: "D1", measure: "lit", condition: "reaches", value: 50 }),
+    (error) => error.code === "CIRCUIT_EXPECT_INVALID");
+  assert.throws(() => normaliseExpectation({ subject: "D1", measure: "lit", condition: "stays between", value: 0.2, upper: 80 }),
+    (error) => error.code === "CIRCUIT_EXPECT_INVALID");
+});
