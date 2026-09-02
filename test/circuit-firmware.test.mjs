@@ -426,3 +426,44 @@ test("a chip that never started says so, instead of the LED taking the blame", (
   assert.equal(working.summary, "All 1 expectation met.");
   assert.deepEqual(working.findings.filter((finding) => String(finding.code).startsWith("FIRMWARE_")), []);
 });
+
+test("firmware is written with the names every sketch uses", async () => {
+  // pinMode(0, OUTPUT) is how this is spelled everywhere, and it did not work:
+  // the only accepted spelling was a bare 1, and OUTPUT came back as "OUTPUT
+  // has not been given a value". Found by writing the blink board by hand.
+  const { CONSTANTS } = await import("../lib/circuit/firmware.mjs");
+  const { PIN_MODES } = await import("../lib/circuit/mcu.mjs");
+  // firmware.mjs cannot import mcu.mjs — mcu.mjs imports firmware.mjs — so the
+  // two tables are pinned together here instead of by a comment.
+  assert.equal(CONSTANTS.INPUT, PIN_MODES.INPUT);
+  assert.equal(CONSTANTS.OUTPUT, PIN_MODES.OUTPUT);
+  assert.equal(CONSTANTS.INPUT_PULLUP, PIN_MODES.INPUT_PULLUP);
+  assert.equal(CONSTANTS.HIGH, 1);
+  assert.equal(CONSTANTS.LOW, 0);
+
+  const service = new CircuitService();
+  service.apply("add", { kind: "supply", volts: 5, pins: { positive: "VCC", negative: "GND" } });
+  service.apply("add", { kind: "ground", pins: { pin: "GND" } });
+  service.apply("add", { kind: "mcu", pins: { vcc: "VCC", gnd: "GND", d0: "DRV" } });
+  service.apply("add", { kind: "resistor", ohms: 220, pins: { a: "DRV", b: "N1" } });
+  service.apply("add", { kind: "led", colour: "red", pins: { anode: "N1", cathode: "GND" } });
+  service.apply("firmware", { id: "U1", source:
+    "function setup() {\n  pinMode(0, OUTPUT)\n}\nfunction loop() {\n  digitalWrite(0, HIGH)\n  delay(100)\n  digitalWrite(0, LOW)\n  delay(100)\n}" });
+  service.apply("expect", { subject: "D1", measure: "lit", condition: "toggles at", value: 5, tolerance: 1 });
+  assert.equal(service.apply("check", {}).summary, "All 1 expectation met.");
+
+  // They are fixed values, not seeded globals. As globals, `HIGH = 5` would be
+  // accepted and every digitalWrite after it would drive the wrong level.
+  service.apply("firmware", { id: "U1", source: "function loop() {\n  HIGH = 5\n}" });
+  service.apply("run", { seconds: 0.001 });
+  const error = service.perceive().mcus.U1.error;
+  assert.equal(error.code, "FIRMWARE_ASSIGN_TO_CONSTANT");
+  assert.match(error.message, /HIGH is a fixed value and cannot be assigned to/);
+
+  // A program that declares its own name still sees its own.
+  service.apply("firmware", { id: "U1", source: "function loop() {\n  var OUTPUT = 9\n  print(OUTPUT)\n}" });
+  service.apply("run", { seconds: 0.001 });
+  const view = service.perceive().mcus.U1;
+  assert.equal(view.error, null);
+  assert.equal(view.output[0].line, "9");
+});

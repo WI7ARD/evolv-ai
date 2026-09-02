@@ -287,3 +287,19 @@ test("a rate is not a level, and is not compared against one", () => {
   assert.equal(level.agreement, "agrees");
   assert.equal(level.simulated, 0.58);
 });
+
+test("a check runs the circuit, so the board records that it ran", async (t) => {
+  // The timeline read "Simulate: not run yet" directly beside a Verify verdict
+  // taken off a full transient. A check is a run with a judgement on the end of
+  // it; recording only the judgement made the board deny the run it just did.
+  const { bench: workshop, circuitService } = await bench(t);
+  const board = workshop.save({ name: "LED" });
+  circuitService.apply("expect", { subject: "D1", measure: "current", condition: "reaches", value: 0.01 });
+
+  workshop.check({ seconds: 0.002 });
+
+  const simulate = workshop.get(board.id).stages.find((stage) => stage.id === "simulate");
+  assert.equal(simulate.state, "done");
+  assert.match(simulate.headline, /Ran 2ms, .* from the supply/,
+    "and with the figure that run produced, not just the fact of it");
+});
