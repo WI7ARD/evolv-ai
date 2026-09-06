@@ -29,6 +29,8 @@ const elements = {
   editCancel: $("#edit-cancel"),
   saveChat: $("#save-chat-button"),
   localSetup: $("#local-setup"),
+  localSetupOffline: $("#local-setup-offline"),
+  localSetupRecheck: $("#local-setup-recheck"),
   localSetupTitle: $("#local-setup-title"),
   localSetupDetail: $("#local-setup-detail"),
   installButton: $("#install-evolv-local"),
@@ -1357,6 +1359,32 @@ function renderLocalSetup(status, health) {
   const installing = health.install?.phase === "pulling" || health.install?.phase === "creating";
   const label = health.evolvModelLabel || "Evolv Local";
 
+  // Ollama is not there at all.
+  //
+  // This is the state most first runs land in, and it used to be offered the
+  // same "Get Evolv Local" button as every other — a button that cannot work,
+  // because installing a model needs the Ollama that is missing. Pressing it
+  // failed, which is a worse first ninety seconds than not offering it.
+  //
+  // And it does not pretend to know which of the two it is. A refused
+  // connection looks identical whether Ollama was never installed or is simply
+  // not running, so both ways out are offered rather than guessing and being
+  // confidently wrong at the one moment a person has no idea what is going on.
+  if (status.setup === "offline") {
+    elements.localSetupOffline?.classList.remove("hidden");
+    elements.installButton?.classList.add("hidden");
+    if (elements.localSetupTitle) elements.localSetupTitle.textContent = "Evolv needs Ollama to run AI on this computer.";
+    if (elements.localSetupDetail) {
+      elements.localSetupDetail.textContent =
+        "It is free, runs on your machine, and nothing you type leaves it. If it is already installed, start it and check again.";
+    }
+    elements.installProgress?.classList.add("hidden");
+    elements.localSetup.classList.remove("hidden");
+    return;
+  }
+  elements.localSetupOffline?.classList.add("hidden");
+  elements.installButton?.classList.remove("hidden");
+
   const dismissible = status.setup === "optional" || status.setup === "stale";
   if (status.setup === "none" || (dismissible && app.dismissedLocalSetup)) {
     if (!installing) return elements.localSetup.classList.add("hidden");
@@ -1429,6 +1457,28 @@ function renderLocalSetup(status, health) {
   elements.localSetup.classList.remove("hidden");
 
   if (installing) attachToInstall();
+}
+
+// "Already installed — check again". Answers either way: a check that silently
+// did nothing is indistinguishable from a broken button, and this is pressed by
+// someone who has just been told the app cannot find something.
+function bindOllamaRecheck() {
+  elements.localSetupRecheck?.addEventListener("click", async () => {
+    const button = elements.localSetupRecheck;
+    const wasSaying = button.textContent;
+    button.disabled = true;
+    button.textContent = "Looking…";
+    try {
+      const health = await refreshHealth();
+      toast(health?.connected ? "Found it. Ollama is running." : "Still cannot reach Ollama. Start it, then try again.",
+        health?.connected ? "success" : "error");
+    } catch (error) {
+      toast(error.message || "Could not check for Ollama.", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = wasSaying;
+    }
+  });
 }
 
 function formatProgress(snapshot) {
@@ -1646,7 +1696,19 @@ async function refreshModels() {
     app.models = [];
     updateFavoriteButton();
     if (error.code === "PROVIDER_AUTH_FAILED") refreshProviders().catch(() => {});
-    toast(error.message, "error");
+    // A provider that cannot be reached is not news here.
+    //
+    // On a first run with no Ollama, the status dot says it, the setup panel
+    // says it and offers a way out, and the model picker says it — and then
+    // this fired a red toast saying it a fourth time. Four components agreeing
+    // is not reassuring when one of them is alarming: the scary one is the one
+    // people believe. The list above already emptied itself and named the
+    // reason, which is this catch doing its job.
+    //
+    // Everything else still shouts. A rejected API key or a provider returning
+    // nonsense is genuinely news, and silence there would be the opposite
+    // mistake.
+    if (error.code !== "PROVIDER_UNREACHABLE") toast(error.message, "error");
   }
 }
 
@@ -5075,6 +5137,7 @@ function bindEvents() {
       toast("Starter .evolvpack generated.");
     } catch (error) { toast(error.message, "error"); }
   });
+  bindOllamaRecheck();
   elements.installButton?.addEventListener("click", () => {
     elements.installError.classList.add("hidden");
     attachToInstall();

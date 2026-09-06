@@ -176,10 +176,19 @@ subtly wrong in a way only that provider would notice. Adding a third is a
 decision to be made again, not a table to append to.
 
 API keys are encrypted before they touch disk and are **write-only** — Evolv
-never returns a stored key to the browser or includes one in an export. On the
-desktop app, keys are sealed with the Windows Data Protection API (DPAPI) so
-they can only be decrypted by the same Windows user on the same machine; in the
-browser build they are encrypted with a key held in the server's data directory.
+never returns a stored key to the browser or includes one in an export. Keys are
+sealed by the operating system's own store, which on Windows is the Data
+Protection API, so they can only be decrypted by the same user on the same
+machine.
+
+**Cloud keys are desktop-only.** Running in the browser with `npm start`, there
+is no OS keystore to seal them with, so Evolv refuses to store one rather than
+inventing a weaker scheme and describing it as encryption: the key would end up
+next to the file it protects, which is not encryption at rest, it is a lock with
+its key taped to the door. Browser mode runs against local Ollama models, which
+need no key. Adding a cloud key there answers "Cloud API keys are available in
+the Evolv desktop app."
+
 Outbound provider requests refuse redirects, so a key cannot be forwarded to
 whichever host a redirect names.
 

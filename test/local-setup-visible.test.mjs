@@ -41,3 +41,31 @@ test("the messages list still reserves room for the fixed composer", async () =>
   assert.match(css, /\.messages\s*\{[^}]*padding:\s*38px 0 190px/);
   assert.match(css, /\.composer-wrap\s*\{[^}]*position:\s*fixed[^}]*z-index:\s*3/);
 });
+
+test("a first run with no Ollama offers a way out instead of an alarm", async () => {
+  // This is the state most first runs land in, and it was the worst ninety
+  // seconds in the product: a red toast, a status dot and a model picker all
+  // saying the same thing, plus a "Get Evolv Local" button that could not work
+  // because installing a model needs the Ollama that is missing.
+  const { readFile } = await import("node:fs/promises");
+  const script = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const markup = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+
+  // The offline state gets its own branch, and the button that cannot work is
+  // put away rather than left to fail.
+  assert.match(script, /if \(status\.setup === "offline"\)/);
+  assert.match(script, /elements\.installButton\?\.classList\.add\("hidden"\)/);
+
+  // Two ways out, because a refused connection cannot tell "never installed"
+  // from "not running" — and guessing at the one moment a person has no idea
+  // what is happening is how you are confidently wrong when it costs most.
+  assert.match(markup, /id="local-setup-download"[^>]*href="https:\/\/ollama\.com\/download"/);
+  assert.match(markup, /id="local-setup-recheck"/);
+  // An external link opened from the app must not hand over the opener.
+  assert.match(markup, /id="local-setup-download"[^>]*rel="noreferrer noopener"/);
+
+  // And the provider being unreachable is not shouted about. Everything else
+  // still is: a rejected key is genuinely news, and silence there would be the
+  // opposite mistake.
+  assert.match(script, /if \(error\.code !== "PROVIDER_UNREACHABLE"\) toast\(error\.message, "error"\)/);
+});

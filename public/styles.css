@@ -146,6 +146,12 @@ body::before {
    click. That made "Get Evolv Local" unreachable for anyone who already had a
    model, which is everyone the offer is aimed at. */
 .local-setup { margin: 0 auto 10px; width: min(760px, 92%); border: 1px solid var(--line); background: #171b1a; padding: 14px 16px; display: grid; gap: 12px; }
+/* Two ways out of the same state, because a refused connection cannot tell
+   "never installed" from "not running" and guessing would be confidently wrong
+   at the one moment a person has no idea what is happening. */
+.local-setup-offline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.local-setup-offline a.primary-button { text-decoration: none; display: inline-flex; align-items: center; }
+
 .local-setup-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .local-setup-copy strong { display: block; font-size: 12px; }
 .local-setup-copy p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
