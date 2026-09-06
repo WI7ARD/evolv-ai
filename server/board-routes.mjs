@@ -85,6 +85,33 @@ export async function handleBoardRoutes(context) {
     return true;
   }
 
+  // The links between the board and the world, and the run that steps both.
+  //
+  // On /api/boards rather than a surface of their own because a link belongs to
+  // the bench, not to either simulation: neither the circuit nor the world can
+  // answer what it is joined to.
+  if (url.pathname === "/api/boards/links") {
+    if (req.method === "GET") {
+      json(res, 200, { links: bench.links() });
+      return true;
+    }
+    if (req.method === "POST") {
+      const body = await readBody(req, bodyLimit);
+      json(res, 201, { link: bench.link(body), links: bench.links() });
+      return true;
+    }
+    if (req.method === "DELETE") {
+      json(res, 200, { ...bench.unlink(url.searchParams.get("id")), links: bench.links() });
+      return true;
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/boards/coupled-run") {
+    const body = await readBody(req, bodyLimit);
+    json(res, 200, bench.runCoupled(body));
+    return true;
+  }
+
   const boardMatch = url.pathname.match(/^\/api\/boards\/([^/]+)$/);
   if (boardMatch) {
     const id = decodeURIComponent(boardMatch[1]);
