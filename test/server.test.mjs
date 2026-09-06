@@ -55,7 +55,14 @@ test("serves the application shell", async () => {
   assert.doesNotMatch(shell, /id="live-button"/);
   assert.doesNotMatch(shell, /whisper-voice/);
   assert.doesNotMatch(shell, /Open palm/i);
-  assert.match(shell, /id="intelligence-view"/);
+  // Eight nav items became six. Four of the eight were abstractions only the
+  // author understood — Evolution, Intelligence, Versions, Mind — and two of
+  // them were both called Mind-something while being unrelated. Their contents
+  // were not deleted; they were regrouped by what they actually are.
+  assert.match(shell, /id="memory-view"/);
+  assert.match(shell, /id="behaviour-view"/);
+  assert.doesNotMatch(shell, /id="intelligence-view"|id="mind-view"|id="versions-view"|id="evolution-view"/,
+    "the four abstract views are gone as containers");
   assert.match(shell, /Memory Inbox/);
   assert.match(shell, /id="obsidian-status-badge"/);
   assert.match(shell, /id="tool-recipe-generate"/);

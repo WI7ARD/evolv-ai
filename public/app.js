@@ -1747,7 +1747,7 @@ async function loadIntelligenceModels() {
 }
 
 async function refreshIntelligence({ refreshModels = false } = {}) {
-  if (!$("#intelligence-view")) return;
+  if (!$("#behaviour-view")) return;
   [app.intelligence, app.evolution] = await Promise.all([api("/api/intelligence"), api("/api/evolution")]);
   if (refreshModels || !app.intelligenceModels.length) await loadIntelligenceModels();
   renderIntelligence();
@@ -3363,8 +3363,15 @@ function switchView(view) {
   $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   $$(".view").forEach((item) => item.classList.remove("active"));
   $(`#${view}-view`).classList.add("active");
-  if (view === "intelligence") refreshIntelligence().catch((error) => toast(error.message, "error"));
-  if (view === "mind") refreshObsidian().catch((error) => toast(error.message, "error"));
+  // Memory and Behaviour were four views between them — Mind studio, Personal
+  // intelligence, Evolution lab and Mind history — so each now pulls what its
+  // former homes pulled. refreshIntelligence still feeds both: it loads the
+  // memory inbox and the learning evidence, which parted company in the markup
+  // but not in the route behind it.
+  if (view === "memory") {
+    Promise.all([refreshIntelligence(), refreshObsidian()]).catch((error) => toast(error.message, "error"));
+  }
+  if (view === "behaviour") refreshIntelligence().catch((error) => toast(error.message, "error"));
   if (view === "tools") {
     Promise.all([refreshTools(), refreshToolRecipes(), refreshObsidian()]).catch((error) => toast(error.message, "error"));
   }
@@ -5195,7 +5202,7 @@ function bindEvents() {
         body: JSON.stringify({ proposalId: app.state.pendingProposal.id })
       });
       await refreshState();
-      switchView("versions");
+      switchView("behaviour");
       toast("Upgrade approved and activated.");
     } catch (error) {
       toast(error.message, "error");

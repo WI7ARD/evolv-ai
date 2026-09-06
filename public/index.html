@@ -36,22 +36,19 @@
             <span id="agent-dot" class="notification-dot hidden" title="A goal run is waiting for approval"></span>
             <span id="sandbox-dot" class="notification-dot hidden" title="A simulation is open; the project is untouched"></span>
           </button>
+          <button class="nav-item" data-view="circuit">
+            <span class="nav-icon">⏛</span> Circuit
+          </button>
           <button class="nav-item" data-view="projects">
             <span class="nav-icon">▣</span> Projects
           </button>
-          <button class="nav-item" data-view="evolution">
-            <span class="nav-icon">↗</span> Evolution
+          <button class="nav-item" data-view="memory">
+            <span class="nav-icon">◇</span> Memory
+            <span id="intelligence-dot" class="notification-dot hidden" title="Memories are waiting for review"></span>
+          </button>
+          <button class="nav-item" data-view="behaviour">
+            <span class="nav-icon">↗</span> Behaviour
             <span id="proposal-dot" class="notification-dot hidden"></span>
-          </button>
-          <button class="nav-item" data-view="intelligence">
-            <span class="nav-icon">AI</span> Intelligence
-            <span id="intelligence-dot" class="notification-dot hidden"></span>
-          </button>
-          <button class="nav-item" data-view="versions">
-            <span class="nav-icon">⌁</span> Versions
-          </button>
-          <button class="nav-item" data-view="mind">
-            <span class="nav-icon">◇</span> Mind
           </button>
           <button class="nav-item" data-view="tools">
             <span class="nav-icon">⌘</span> Tools
@@ -590,169 +587,12 @@
           </article>
         </section>
 
-        <section id="intelligence-view" class="view panel-view">
+        <section id="memory-view" class="view panel-view">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">ROUTE · REMEMBER · EVALUATE</p>
-              <h1>Personal intelligence</h1>
-              <p>See why Auto chose a model, review every proposed memory, and test behavioral upgrades before activation.</p>
-            </div>
-            <button id="intelligence-refresh" class="secondary-button" type="button">Refresh</button>
-          </div>
-          <div class="stats-grid intelligence-stats">
-            <article class="stat-card"><span>ROUTED</span><strong id="route-count">0</strong><small>Auto decisions</small></article>
-            <article class="stat-card"><span>ROUTE RATING</span><strong id="route-success">0%</strong><small>helpful rated routes</small></article>
-            <article class="stat-card"><span>MEMORY INBOX</span><strong id="memory-proposal-count">0</strong><small>waiting for review</small></article>
-            <article class="stat-card"><span>EVAL CASES</span><strong id="evaluation-case-count">0</strong><small>from your feedback</small></article>
-            <article class="stat-card"><span>CLOUD THIS MONTH</span><strong id="spend-month">$0.00</strong><small id="spend-month-detail">estimated</small></article>
-          </div>
-          <article class="mind-card" id="spend-card">
-            <div class="mind-card-heading"><div><p class="eyebrow">USAGE</p><h2>Where the tokens went</h2></div></div>
-            <p class="settings-note" id="spend-note">Token counts come from the provider and are exact. The money is an estimate from published list prices — Evolv cannot see what your account is actually billed.</p>
-            <div id="spend-breakdown"></div>
-          </article>
-          <div class="intelligence-grid">
-            <article class="mind-card intelligence-settings-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">CONTROL</p><h2>Balanced Auto</h2></div><span class="model-badge">REVIEW-ONLY LEARNING</span></div>
-              <p class="settings-note">Local models are preferred for simple work. Cloud providers are considered only when you enable them below.</p>
-              <label class="tool-switch"><input id="auto-routing-enabled" type="checkbox" checked /> Auto model routing</label>
-              <label class="tool-switch"><input id="auto-memory-enabled" type="checkbox" checked /> Inspect every completed turn for memory proposals</label>
-              <div><span class="field-label">CLOUD PROVIDERS ALLOWED IN AUTO</span><div id="auto-cloud-providers" class="provider-capabilities"></div></div>
-              <div>
-                <span class="field-label">CLOUD PROVIDERS ALLOWED TO RECEIVE VAULT EXCERPTS</span>
-                <div id="vault-cloud-providers" class="provider-capabilities"></div>
-                <p class="settings-note">Off by default. A cloud model receives no Obsidian text unless you enable that provider here.</p>
-              </div>
-              <div>
-                <span class="field-label">CLOUD PROVIDERS ALLOWED TO RECEIVE PROJECT SOURCES</span>
-                <div id="project-cloud-providers" class="provider-capabilities"></div>
-                <p class="settings-note">Off by default. Project file excerpts stay local unless you enable a provider here.</p>
-              </div>
-              <label><span class="field-label">EVALUATION CASE LIMIT</span><select id="evaluation-limit"><option>3</option><option>5</option><option selected>10</option></select></label>
-              <label><span class="field-label">MONTHLY CLOUD COST-UNIT SAFEGUARD (0 = UNLIMITED)</span><input id="monthly-cost-limit" type="number" min="0" max="100000" step="1" value="0" /></label>
-              <button id="save-intelligence-settings" class="primary-button" type="button">Save intelligence settings</button>
-            </article>
-            <article class="mind-card agent-model-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">SPECIALISTS</p><h2>Who runs each step</h2></div></div>
-              <p class="settings-note">A goal plan is shared out between specialists. Each one can run on its own model — checking criteria against evidence is worth more than searching a folder, and paying for the strong model on every step is how goals become too expensive to use.</p>
-              <label class="tool-switch"><input id="agent-specialists-enabled" type="checkbox" checked /> Share goal steps out between specialists</label>
-              <p class="settings-note">Turn this off and every step runs as one generalist voice, on the goal's own model, with no pinned models and no per-role limits. That is the control arm: goals run both ways are compared below, under <strong>Were specialists worth it</strong>.</p>
-              <div id="agent-model-pins" class="agent-model-pins"></div>
-              <p class="settings-note">Left on “the goal's own model”, a specialist uses whatever the run was started with. Pinned models come from the provider selected in chat; switch provider to pin one from somewhere else.</p>
-              <button id="save-agent-models" class="primary-button" type="button">Save specialist models</button>
-            </article>
-            <article class="mind-card intelligence-model-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">MODEL PROFILES</p><h2>Auto preferences</h2></div></div>
-              <p class="settings-note">Rate models from 1–5. Cost may be 0 for local models. Disabling Auto never removes manual selection.</p>
-              <div id="intelligence-models" class="intelligence-models"></div>
-            </article>
-          </div>
-          <article class="mind-card memory-inbox-card">
-            <div class="mind-card-heading"><div><p class="eyebrow">APPROVAL REQUIRED</p><h2>Memory Inbox</h2></div><button id="approve-selected-memories" class="primary-button" type="button">Approve selected</button></div>
-            <p class="settings-note">Edit any proposal before approving it. Rejected proposals never enter Evolv's active context.</p>
-            <div id="memory-proposal-list" class="memory-proposal-list"></div>
-          </article>
-          <div class="intelligence-grid">
-            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">TRANSPARENT ROUTING</p><h2>Recent decisions</h2></div></div><div id="routing-history" class="routing-history"></div></article>
-            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">EVIDENCE</p><h2>Learning runs</h2></div></div><div id="evaluation-history" class="evaluation-history"></div></article>
-          </div>
-          <div class="intelligence-grid">
-            <article class="mind-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">LOCAL · NO JUDGE CALL</p><h2>Run evidence</h2></div><span id="evolution-run-count" class="model-badge">0 RUNS</span></div>
-              <p class="settings-note">Completion, tools, citations, latency, tokens, and cost come from recorded run facts. Quality and factuality stay unscored until you rate the answer.</p>
-              <div id="run-evidence-history" class="routing-history"></div>
-            </article>
-            <article class="mind-card">
-              <div class="mind-card-heading"><div><p class="eyebrow">EXPLICIT FEEDBACK ONLY</p><h2>Recurring failures</h2></div><span id="recurring-failure-count" class="model-badge">0 RECURRING</span></div>
-              <p class="settings-note">Patterns appear only after your negative ratings. Selecting them does not change Evolv; it only links evidence to a reviewable candidate.</p>
-              <div id="failure-pattern-list" class="routing-history"></div>
-            </article>
-          </div>
-          <article class="mind-card specialist-comparison-card">
-            <div class="mind-card-heading"><div><p class="eyebrow">CONTROL ARM · RECORDED PER RUN</p><h2>Were specialists worth it</h2></div><span id="specialist-verdict-badge" class="model-badge">NO VERDICT</span></div>
-            <p id="specialist-verdict" class="settings-note">Run some goals with specialists on and some with them off. Nothing here is inferred — every figure comes from runs you already finished.</p>
-            <div id="specialist-cohorts" class="specialist-cohorts"></div>
-            <div id="specialist-gaps" class="routing-history"></div>
-            <p id="specialist-method" class="settings-note"></p>
-          </article>
-          <article class="mind-card strategy-lab-card">
-            <div class="mind-card-heading"><div><p class="eyebrow">BENCHMARK → REVIEW → APPROVE</p><h2>Strategy lab</h2></div><button id="rollback-strategy" class="secondary-button" type="button">Rollback active strategy</button></div>
-            <p class="settings-note">A benchmark runs five fixed cases twice (10 model calls). Cloud models may create provider charges. Evolv will never activate a candidate automatically.</p>
-            <form id="strategy-candidate-form" class="stack-form">
-              <label><span class="field-label">CANDIDATE NAME</span><input name="name" maxlength="100" required placeholder="Evidence and verification discipline" /></label>
-              <label><span class="field-label">GUIDANCE TO TEST</span><textarea name="instruction" rows="4" minlength="20" maxlength="4000" required placeholder="Answer from supplied evidence, follow explicit limits, verify outcomes, and recover honestly from failed operations."></textarea></label>
-              <label><span class="field-label">WHY THIS MAY HELP</span><textarea name="rationale" rows="2" maxlength="1000" placeholder="Link the proposed behavior to observed failures."></textarea></label>
-              <button class="primary-button" type="submit">Create reviewable candidate</button>
-            </form>
-            <div id="strategy-version-list" class="memory-proposal-list"></div>
-          </article>
-        </section>
-
-        <section id="evolution-view" class="view panel-view">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">FEEDBACK → EVIDENCE → PROPOSAL</p>
-              <h1>Evolution lab</h1>
-              <p>Convert your ratings into a better behavioral prompt. Nothing changes until you approve it.</p>
-            </div>
-            <button id="propose-button" class="primary-button">Generate upgrade</button>
-          </div>
-
-          <div class="stats-grid">
-            <article class="stat-card"><span>TOTAL SIGNALS</span><strong id="feedback-total">0</strong><small>ratings collected</small></article>
-            <article class="stat-card"><span>POSITIVE</span><strong id="feedback-positive">0%</strong><small>helpful responses</small></article>
-            <article class="stat-card"><span>MIND VERSION</span><strong id="version-number">1</strong><small>reversible iterations</small></article>
-          </div>
-
-          <div id="no-proposal" class="empty-panel">
-            <div class="empty-glyph">↗</div>
-            <h2>No upgrade waiting</h2>
-            <p>Rate a few chat responses, add notes where useful, then ask an Ollama model to propose the next version.</p>
-          </div>
-
-          <div id="proposal-panel" class="proposal-panel hidden">
-            <div class="proposal-heading">
-              <div>
-                <p class="eyebrow">PROPOSED MIND</p>
-                <h2 id="proposal-summary"></h2>
-              </div>
-              <span id="proposal-model" class="model-badge"></span>
-            </div>
-            <p id="proposal-rationale" class="rationale"></p>
-            <div class="prompt-preview">
-              <div class="preview-label">PROPOSED SYSTEM PROMPT</div>
-              <pre id="proposal-prompt"></pre>
-            </div>
-            <div>
-              <div class="preview-label">ACCEPTANCE TESTS</div>
-              <div id="proposal-tests" class="tests"></div>
-            </div>
-            <div id="proposal-evaluation" class="proposal-evaluation"></div>
-            <div class="proposal-actions">
-              <button id="reject-proposal" class="secondary-button">Discard</button>
-              <button id="evaluate-proposal" class="secondary-button">Run blind evaluation</button>
-              <button id="apply-proposal" class="primary-button">Approve & activate</button>
-            </div>
-          </div>
-        </section>
-
-        <section id="versions-view" class="view panel-view">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">COMPLETE & REVERSIBLE</p>
-              <h1>Mind history</h1>
-              <p>Every approved behavior change is preserved. Return to an earlier version at any time.</p>
-            </div>
-          </div>
-          <div id="versions-list" class="versions-list"></div>
-        </section>
-
-        <section id="mind-view" class="view panel-view">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">GROUNDING · COGNITION · CREATION</p>
-              <h1>Mind studio</h1>
-              <p>Shape what Evolv knows, how it approaches a problem, and what architectural changes it may propose.</p>
+              <p class="eyebrow">WHAT EVOLV KNOWS</p>
+              <h1>Memory</h1>
+              <p>Everything Evolv has learned about you and your work — and every memory waiting for your approval. Nothing enters its context until you let it.</p>
             </div>
             <button id="spark-button" class="primary-button">Surprise me</button>
           </div>
@@ -870,21 +710,112 @@
               <div id="obsidian-changes" class="vault-change-list"></div>
             </article>
 
-            <article class="mind-card">
-              <div class="mind-card-heading">
-                <div><p class="eyebrow">SAFE SELF-EVOLUTION</p><h2>Architecture proposals</h2></div>
-                <span class="model-badge">NO AUTO-APPLY</span>
+            
+          </div>
+        
+          <div class="stats-grid">
+            <article class="stat-card"><span>MEMORY INBOX</span><strong id="memory-proposal-count">0</strong><small>waiting for review</small></article>
+          </div>
+          <article class="mind-card memory-inbox-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">APPROVAL REQUIRED</p><h2>Memory Inbox</h2></div><button id="approve-selected-memories" class="primary-button" type="button">Approve selected</button></div>
+            <p class="settings-note">Edit any proposal before approving it. Rejected proposals never enter Evolv's active context.</p>
+            <div id="memory-proposal-list" class="memory-proposal-list"></div>
+          </article>
+        </section>
+        <section id="behaviour-view" class="view panel-view">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">PROPOSE · EVIDENCE · APPROVE · REVERT</p>
+              <h1>Behaviour</h1>
+              <p>How Evolv works with you, and every change it has proposed to that. Nothing takes effect until you approve it, and anything approved can be taken back.</p>
+            </div>
+            <button id="propose-button" class="primary-button">Generate upgrade</button>
+          </div>
+          <div class="stats-grid">
+            <article class="stat-card"><span>TOTAL SIGNALS</span><strong id="feedback-total">0</strong><small>ratings collected</small></article>
+            <article class="stat-card"><span>POSITIVE</span><strong id="feedback-positive">0%</strong><small>helpful responses</small></article>
+            <article class="stat-card"><span>MIND VERSION</span><strong id="version-number">1</strong><small>reversible iterations</small></article>
+            <article class="stat-card"><span>EVAL CASES</span><strong id="evaluation-case-count">0</strong><small>from your feedback</small></article>
+          </div>
+
+          <div id="no-proposal" class="empty-panel">
+            <div class="empty-glyph">↗</div>
+            <h2>No upgrade waiting</h2>
+            <p>Rate a few chat responses, add notes where useful, then ask an Ollama model to propose the next version.</p>
+          </div>
+
+          <div id="proposal-panel" class="proposal-panel hidden">
+            <div class="proposal-heading">
+              <div>
+                <p class="eyebrow">PROPOSED MIND</p>
+                <h2 id="proposal-summary"></h2>
               </div>
-              <p class="mind-explainer">Ask the selected Ollama model to design a bounded system change. Proposals include risks and tests, but cannot edit files or grant themselves permissions.</p>
-              <form id="architecture-form" class="stack-form">
-                <textarea id="architecture-request" rows="5" maxlength="5000" placeholder="What should Evolv improve about its architecture or behavior?" required></textarea>
-                <button id="architecture-propose" class="primary-button" type="submit">Design proposal</button>
-              </form>
-              <div id="architecture-list" class="architecture-list"></div>
+              <span id="proposal-model" class="model-badge"></span>
+            </div>
+            <p id="proposal-rationale" class="rationale"></p>
+            <div class="prompt-preview">
+              <div class="preview-label">PROPOSED SYSTEM PROMPT</div>
+              <pre id="proposal-prompt"></pre>
+            </div>
+            <div>
+              <div class="preview-label">ACCEPTANCE TESTS</div>
+              <div id="proposal-tests" class="tests"></div>
+            </div>
+            <div id="proposal-evaluation" class="proposal-evaluation"></div>
+            <div class="proposal-actions">
+              <button id="reject-proposal" class="secondary-button">Discard</button>
+              <button id="evaluate-proposal" class="secondary-button">Run blind evaluation</button>
+              <button id="apply-proposal" class="primary-button">Approve & activate</button>
+            </div>
+          </div>
+          <article class="mind-card">
+                <div class="mind-card-heading">
+                  <div><p class="eyebrow">SAFE SELF-EVOLUTION</p><h2>Architecture proposals</h2></div>
+                  <span class="model-badge">NO AUTO-APPLY</span>
+                </div>
+                <p class="mind-explainer">Ask the selected Ollama model to design a bounded system change. Proposals include risks and tests, but cannot edit files or grant themselves permissions.</p>
+                <form id="architecture-form" class="stack-form">
+                  <textarea id="architecture-request" rows="5" maxlength="5000" placeholder="What should Evolv improve about its architecture or behavior?" required></textarea>
+                  <button id="architecture-propose" class="primary-button" type="submit">Design proposal</button>
+                </form>
+                <div id="architecture-list" class="architecture-list"></div>
+          </article>
+          <div class="intelligence-grid">
+            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">EVIDENCE</p><h2>Learning runs</h2></div></div><div id="evaluation-history" class="evaluation-history"></div></article>
+          </div>
+          <div class="intelligence-grid">
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">LOCAL · NO JUDGE CALL</p><h2>Run evidence</h2></div><span id="evolution-run-count" class="model-badge">0 RUNS</span></div>
+              <p class="settings-note">Completion, tools, citations, latency, tokens, and cost come from recorded run facts. Quality and factuality stay unscored until you rate the answer.</p>
+              <div id="run-evidence-history" class="routing-history"></div>
+            </article>
+            <article class="mind-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">EXPLICIT FEEDBACK ONLY</p><h2>Recurring failures</h2></div><span id="recurring-failure-count" class="model-badge">0 RECURRING</span></div>
+              <p class="settings-note">Patterns appear only after your negative ratings. Selecting them does not change Evolv; it only links evidence to a reviewable candidate.</p>
+              <div id="failure-pattern-list" class="routing-history"></div>
             </article>
           </div>
+          <article class="mind-card specialist-comparison-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">CONTROL ARM · RECORDED PER RUN</p><h2>Were specialists worth it</h2></div><span id="specialist-verdict-badge" class="model-badge">NO VERDICT</span></div>
+            <p id="specialist-verdict" class="settings-note">Run some goals with specialists on and some with them off. Nothing here is inferred — every figure comes from runs you already finished.</p>
+            <div id="specialist-cohorts" class="specialist-cohorts"></div>
+            <div id="specialist-gaps" class="routing-history"></div>
+            <p id="specialist-method" class="settings-note"></p>
+          </article>
+          <article class="mind-card strategy-lab-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">BENCHMARK → REVIEW → APPROVE</p><h2>Strategy lab</h2></div><button id="rollback-strategy" class="secondary-button" type="button">Rollback active strategy</button></div>
+            <p class="settings-note">A benchmark runs five fixed cases twice (10 model calls). Cloud models may create provider charges. Evolv will never activate a candidate automatically.</p>
+            <form id="strategy-candidate-form" class="stack-form">
+              <label><span class="field-label">CANDIDATE NAME</span><input name="name" maxlength="100" required placeholder="Evidence and verification discipline" /></label>
+              <label><span class="field-label">GUIDANCE TO TEST</span><textarea name="instruction" rows="4" minlength="20" maxlength="4000" required placeholder="Answer from supplied evidence, follow explicit limits, verify outcomes, and recover honestly from failed operations."></textarea></label>
+              <label><span class="field-label">WHY THIS MAY HELP</span><textarea name="rationale" rows="2" maxlength="1000" placeholder="Link the proposed behavior to observed failures."></textarea></label>
+              <button class="primary-button" type="submit">Create reviewable candidate</button>
+            </form>
+            <div id="strategy-version-list" class="memory-proposal-list"></div>
+          </article>
+          <div class="versions-list-heading"><p class="eyebrow">COMPLETE &amp; REVERSIBLE</p><h2>History</h2><p class="settings-note">Every approved change is preserved. Return to an earlier version at any time.</p></div>
+          <div id="versions-list" class="versions-list"></div>
         </section>
-
         <section id="marketplace-view" class="view panel-view marketplace-view">
           <div class="panel-header marketplace-header">
             <div>
@@ -1152,6 +1083,55 @@
         <p class="settings-note">Evolv locks after 30 minutes without activity. Changing the password signs out every open session.</p>
         <button class="primary-button full-width" value="close">Done</button>
       </form>
+          <div class="stats-grid">
+            <article class="stat-card"><span>ROUTED</span><strong id="route-count">0</strong><small>Auto decisions</small></article>
+            <article class="stat-card"><span>ROUTE RATING</span><strong id="route-success">0%</strong><small>helpful rated routes</small></article>
+            <article class="stat-card"><span>CLOUD THIS MONTH</span><strong id="spend-month">$0.00</strong><small id="spend-month-detail">estimated</small></article>
+          </div>
+          <article class="mind-card" id="spend-card">
+            <div class="mind-card-heading"><div><p class="eyebrow">USAGE</p><h2>Where the tokens went</h2></div></div>
+            <p class="settings-note" id="spend-note">Token counts come from the provider and are exact. The money is an estimate from published list prices — Evolv cannot see what your account is actually billed.</p>
+            <div id="spend-breakdown"></div>
+          </article>
+          <div class="intelligence-grid">
+            <article class="mind-card intelligence-settings-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">CONTROL</p><h2>Balanced Auto</h2></div><span class="model-badge">REVIEW-ONLY LEARNING</span></div>
+              <p class="settings-note">Local models are preferred for simple work. Cloud providers are considered only when you enable them below.</p>
+              <label class="tool-switch"><input id="auto-routing-enabled" type="checkbox" checked /> Auto model routing</label>
+              <label class="tool-switch"><input id="auto-memory-enabled" type="checkbox" checked /> Inspect every completed turn for memory proposals</label>
+              <div><span class="field-label">CLOUD PROVIDERS ALLOWED IN AUTO</span><div id="auto-cloud-providers" class="provider-capabilities"></div></div>
+              <div>
+                <span class="field-label">CLOUD PROVIDERS ALLOWED TO RECEIVE VAULT EXCERPTS</span>
+                <div id="vault-cloud-providers" class="provider-capabilities"></div>
+                <p class="settings-note">Off by default. A cloud model receives no Obsidian text unless you enable that provider here.</p>
+              </div>
+              <div>
+                <span class="field-label">CLOUD PROVIDERS ALLOWED TO RECEIVE PROJECT SOURCES</span>
+                <div id="project-cloud-providers" class="provider-capabilities"></div>
+                <p class="settings-note">Off by default. Project file excerpts stay local unless you enable a provider here.</p>
+              </div>
+              <label><span class="field-label">EVALUATION CASE LIMIT</span><select id="evaluation-limit"><option>3</option><option>5</option><option selected>10</option></select></label>
+              <label><span class="field-label">MONTHLY CLOUD COST-UNIT SAFEGUARD (0 = UNLIMITED)</span><input id="monthly-cost-limit" type="number" min="0" max="100000" step="1" value="0" /></label>
+              <button id="save-intelligence-settings" class="primary-button" type="button">Save intelligence settings</button>
+            </article>
+            <article class="mind-card agent-model-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">SPECIALISTS</p><h2>Who runs each step</h2></div></div>
+              <p class="settings-note">A goal plan is shared out between specialists. Each one can run on its own model — checking criteria against evidence is worth more than searching a folder, and paying for the strong model on every step is how goals become too expensive to use.</p>
+              <label class="tool-switch"><input id="agent-specialists-enabled" type="checkbox" checked /> Share goal steps out between specialists</label>
+              <p class="settings-note">Turn this off and every step runs as one generalist voice, on the goal's own model, with no pinned models and no per-role limits. That is the control arm: goals run both ways are compared below, under <strong>Were specialists worth it</strong>.</p>
+              <div id="agent-model-pins" class="agent-model-pins"></div>
+              <p class="settings-note">Left on “the goal's own model”, a specialist uses whatever the run was started with. Pinned models come from the provider selected in chat; switch provider to pin one from somewhere else.</p>
+              <button id="save-agent-models" class="primary-button" type="button">Save specialist models</button>
+            </article>
+            <article class="mind-card intelligence-model-card">
+              <div class="mind-card-heading"><div><p class="eyebrow">MODEL PROFILES</p><h2>Auto preferences</h2></div></div>
+              <p class="settings-note">Rate models from 1–5. Cost may be 0 for local models. Disabling Auto never removes manual selection.</p>
+              <div id="intelligence-models" class="intelligence-models"></div>
+            </article>
+          </div>
+          <div class="intelligence-grid">
+            <article class="mind-card"><div class="mind-card-heading"><div><p class="eyebrow">TRANSPARENT ROUTING</p><h2>Recent decisions</h2></div></div><div id="routing-history" class="routing-history"></div></article>
+          </div>
     </dialog>
 
     <dialog id="password-dialog">
