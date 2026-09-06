@@ -233,8 +233,10 @@ test("only the run's own pack lends its specialists", async () => {
   const runner = readFileSync(new URL("../lib/goal-runner.mjs", import.meta.url), "utf8");
 
   assert.match(runner, /#roster\(packId = "", specialists = true\)/);
-  assert.match(runner, /item\.type === "agent" && item\.packId === packId/);
-  assert.match(runner, /if \(!packId \|\| typeof this\.marketplace\?\.runtime !== "function"\) return listAgents\(\)/);
+  // The roster used to be able to grow by an installed pack's own agents.
+  // Packs are gone, so it is the built-in roster — which is what it always was
+  // on every machine that had installed nothing.
+  assert.doesNotMatch(runner, /marketplace/i);
   // Every place a plan is written, revised, or executed resolves against the
   // same roster, or a specialist would survive planning and vanish at run time.
   assert.match(runner, /plannerSystemPrompt\(tools, roster\)/);

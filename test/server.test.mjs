@@ -66,8 +66,8 @@ test("serves the application shell", async () => {
   assert.match(shell, /Memory Inbox/);
   assert.match(shell, /id="obsidian-status-badge"/);
   assert.match(shell, /id="tool-recipe-generate"/);
-  assert.match(shell, /id="marketplace-view"/);
-  assert.match(shell, /id="marketplace-permission-dialog"/);
+  assert.doesNotMatch(shell, /marketplace/i,
+    "the Marketplace is gone: 1,668 lines of signing, permissions and consent UI serving one pack");
   assert.match(shell, /\/assets\/evolv-logo\.png/);
   assert.match(shell, /CLOUD PROVIDERS ALLOWED TO RECEIVE VAULT EXCERPTS/);
   assert.match(shell, /Run evidence/);
@@ -121,46 +121,6 @@ test("evidence evolution API starts with immutable baseline and blocks unsafe ca
   assert.equal(unsafe.status, 400);
   assert.equal((await unsafe.json()).code, "STRATEGY_BOUNDARY");
   assert.equal((await (await client.fetch("/api/evolution")).json()).activeStrategy.id, "strategy-baseline-v1");
-});
-
-test("Marketplace API browses, installs, configures, disables, and uninstalls a bundled pack", async () => {
-  const catalog = await (await client.fetch("/api/marketplace")).json();
-  assert.equal(catalog.offline, true);
-  assert.equal(catalog.packs.length, 9);
-  assert.ok(catalog.packs.some((item) => item.id === "evolv.autonomous-engineer"));
-  const agentArtwork = await client.fetch("/assets/marketplace/autonomous-engineer.png");
-  assert.equal(agentArtwork.status, 200);
-  assert.equal(agentArtwork.headers.get("content-type"), "image/png");
-  const pack = catalog.packs.find((item) => item.id === "evolv.game-development");
-  assert.ok(pack);
-  const artwork = await client.fetch(pack.screenshots[0]);
-  assert.equal(artwork.status, 200);
-  assert.equal(artwork.headers.get("content-type"), "image/jpeg");
-  assert.ok(Number(artwork.headers.get("content-length")) > 100_000);
-  const previewResponse = await client.fetch("/api/marketplace/install/preview", {
-    method: "POST", body: JSON.stringify({ id: pack.id })
-  });
-  assert.equal(previewResponse.status, 200);
-  const preview = await previewResponse.json();
-  const approvedPermissions = preview.permissions.filter((item) => item.required).map((item) => item.id);
-  const installedResponse = await client.fetch("/api/marketplace/install", {
-    method: "POST", body: JSON.stringify({ id: pack.id, approvedPermissions })
-  });
-  assert.equal(installedResponse.status, 201);
-  const installed = await installedResponse.json();
-  assert.equal(installed.enabled, true);
-  const runtime = await (await client.fetch("/api/marketplace/runtime")).json();
-  assert.ok(runtime.capabilities.some((item) => item.id === "evolv.game-development:debug-system"));
-  const configuredResponse = await client.fetch(`/api/marketplace/packs/${encodeURIComponent(pack.id)}/config`, {
-    method: "PUT", body: JSON.stringify({ config: { engine: "Unity", prototypeBias: false } })
-  });
-  assert.equal(configuredResponse.status, 200);
-  assert.equal((await configuredResponse.json()).config.engine, "Unity");
-  assert.equal((await client.fetch(`/api/marketplace/packs/${encodeURIComponent(pack.id)}`, {
-    method: "PATCH", body: JSON.stringify({ enabled: false })
-  })).status, 200);
-  assert.equal((await (await client.fetch("/api/marketplace/runtime")).json()).capabilities.some((item) => item.packId === pack.id), false);
-  assert.equal((await client.fetch(`/api/marketplace/packs/${encodeURIComponent(pack.id)}`, { method: "DELETE", body: "{}" })).status, 200);
 });
 
 test("browser mode exposes safe Obsidian status but cannot claim an external folder", async () => {

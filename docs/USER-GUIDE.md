@@ -16,16 +16,6 @@ Models are labelled with what they can do (🔧 tools, 👁 images, 🧠 reasoni
 
 Use **Projects** to keep work scoped. **Load verified demo** creates a real local demo with tasks and indexed evidence; it is safe to remove like any other project. Connect a folder only when you want Evolv's bounded read tools to inspect it.
 
-## Marketplace packs
-
-1. Open **Marketplace** and choose a pack.
-2. Select **Install**.
-3. Review required and optional permissions. Required permissions cannot be unchecked; optional permissions remain your choice.
-4. Select **Approve & install** once. Evolv blocks duplicate submissions and verifies the installed version is enabled before reporting success.
-5. Select **Enter chat** on an installed pack and describe what you want. The pack infers a bounded task from the conversation.
-
-If installation fails, the approval panel keeps the exact safe error visible. Close it with **Cancel**, the × button, Escape, or by selecting the backdrop. No pack can silently expand its permissions.
-
 ## Conversation sidebar
 
 The full left sidebar now scrolls. Conversations are not capped to a small fixed box; use the sidebar scrollbar or mouse wheel to reach every chat and the connection/privacy status below them.

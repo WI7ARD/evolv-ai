@@ -175,32 +175,6 @@ async function createWindow() {
     claimsFile: path.join(app.getPath("userData"), "project-folder-owners.json")
   });
   globalThis.__EVOLV_PROJECT_HOST = projectHost;
-  const profileRoot = path.resolve(path.join(process.env.EVOLV_DATA_DIR, "profiles"));
-  globalThis.__EVOLV_MARKETPLACE_HOST = Object.freeze({
-    async openPackDirectory(directory) {
-      const resolved = path.resolve(directory);
-      if (!resolved.startsWith(`${profileRoot}${path.sep}`)) throw new Error("Pack directory is outside Evolv profile storage.");
-      const result = await shell.openPath(resolved);
-      if (result) throw new Error(result);
-    },
-    async chooseConfigurationPath({ kind, title }) {
-      if (!["file", "folder"].includes(kind)) throw new Error("Unsupported Marketplace picker.");
-      const result = await dialog.showOpenDialog(mainWindow, {
-        title: String(title || (kind === "folder" ? "Choose folder" : "Choose file")).slice(0, 120),
-        defaultPath: app.getPath("documents"),
-        properties: [kind === "folder" ? "openDirectory" : "openFile"]
-      });
-      return { canceled: result.canceled, path: result.canceled ? "" : String(result.filePaths[0] || "") };
-    },
-    async choosePackSourceDirectory() {
-      const result = await dialog.showOpenDialog(mainWindow, {
-        title: "Choose Evolv pack source folder",
-        defaultPath: app.getPath("documents"),
-        properties: ["openDirectory"]
-      });
-      return { canceled: result.canceled, path: result.canceled ? "" : String(result.filePaths[0] || "") };
-    }
-  });
   voiceService = new DesktopVoiceService({
     userDataPath: app.getPath("userData"),
     downloadsPath: app.getPath("downloads"),

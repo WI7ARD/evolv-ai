@@ -112,8 +112,8 @@ function renderDetail() {
 
 async function refresh(selectId = "") {
   if (!state.api) return;
-  const [runs, projects, providers, marketplace] = await Promise.all([
-    state.api("/api/runs?limit=100"), state.api("/api/projects"), state.api("/api/providers"), state.api("/api/marketplace").catch(() => ({ installed: [] }))
+  const [runs, projects, providers] = await Promise.all([
+    state.api("/api/runs?limit=100"), state.api("/api/projects"), state.api("/api/providers")
   ]);
   state.runs = (runs.runs || []).filter((run) => run.executor === "goal-runner-v1");
   state.projects = projects.projects || [];
@@ -122,8 +122,6 @@ async function refresh(selectId = "") {
   if (!state.selectedId && state.runs.length) state.selectedId = state.runs[0].id;
   $("#agent-project").innerHTML = state.projects.map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("");
   $("#agent-provider").innerHTML = state.providers.map((provider) => `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.name)}</option>`).join("");
-  const installed = marketplace.installed || marketplace.packs?.filter((pack) => pack.installed) || [];
-  $("#agent-pack").innerHTML = '<option value="">No pack</option>' + installed.map((pack) => `<option value="${escapeHtml(pack.id)}">${escapeHtml(pack.name)}</option>`).join("");
   if (!$("#agent-model").options.length) await populateModels();
   renderRunList(); renderDetail();
 }
@@ -209,7 +207,7 @@ export function initAgentWorkspace({ api, toast, getCsrf }) {
       const values = Object.fromEntries(new FormData(event.currentTarget));
       const created = await api("/api/agent-goals", { method: "POST", body: JSON.stringify({
         objective: values.objective, successCriteria: values.successCriteria, projectId: values.projectId,
-        packId: values.packId, provider: values.provider, model: values.model, budgets: budgets(values.budget)
+        provider: values.provider, model: values.model, budgets: budgets(values.budget)
       }) });
       state.selectedId = created.id;
       toast("Plan proposed. Review every step before approval.");

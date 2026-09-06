@@ -143,11 +143,11 @@ test("the interface offers copy, edit, the command list, and the shortcuts", asy
   assert.match(html, /placeholder="Message Evolv…\s+\/ for commands"/);
   assert.match(app, /function renderCommandMenu/);
 
-  // Ctrl+N, Escape, and up-arrow recall. Ctrl+K keeps its existing meaning.
+  // Ctrl+N, Escape, and up-arrow recall. Ctrl+K was the Marketplace shortcut
+  // and left with it rather than being given a new meaning nobody asked for.
   assert.match(app, /event\.key\.toLowerCase\(\) === "n"/);
   assert.match(app, /event\.key === "Escape"/);
   assert.match(app, /event\.key === "ArrowUp"/);
-  assert.match(app, /event\.key\.toLowerCase\(\) === "k"/, "the marketplace shortcut still works");
 
   // Saving one chat to the vault, rather than the whole database as JSON.
   assert.match(html, /id="save-chat-button"/);
