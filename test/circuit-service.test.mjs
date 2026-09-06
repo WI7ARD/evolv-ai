@@ -361,3 +361,22 @@ test("the verdict on screen comes from the board when this tab has not run a che
   assert.match(script, /state\.api\("\/api\/circuit"\),\s*\n\s*readBoard\(\)/,
     "the board is read alongside the circuit, so the first draw already knows about it");
 });
+
+test("the view survives a refresh, and only follows the board while nobody has moved it", async () => {
+  // draw() replaces the whole SVG, so a view held on the element would reset on
+  // every refresh — and a circuit that ran would keep snapping back to whole
+  // board while you were trying to look at one corner of it.
+  const script = await readFile(new URL("../public/circuit.js", import.meta.url), "utf8");
+  assert.match(script, /view: \{ x: 0, y: 0, w: 0, h: 0, pinned: false \}/,
+    "the view lives in state, not on the element that gets replaced");
+  assert.match(script, /if \(!state\.view\.pinned \|\| !state\.view\.w\) fitView\(state\.frame\)/,
+    "an unmoved view follows the board; a moved one is left alone");
+
+  // Pan and zoom write the attribute directly. Going through draw() would
+  // rebuild every symbol on every frame of a drag.
+  assert.match(script, /svg\.setAttribute\("viewBox"/);
+  // And the mapping from cursor to drawing goes through the real transform,
+  // because the canvas letterboxes and the element/viewBox ratio is not it.
+  assert.match(script, /getScreenCTM\(\)/,
+    "cursor-anchored zoom needs the SVG's own transform, not a ratio of sizes");
+});

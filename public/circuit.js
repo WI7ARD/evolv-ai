@@ -16,8 +16,26 @@ const state = {
   // The board this circuit belongs to, and every board there is. Held here
   // rather than read from the controls, because the controls are what the
   // person is typing and this is what the server actually has.
-  board: null, boards: []
+  board: null, boards: [],
+  // The window onto the drawing.
+  //
+  // Content coordinates stay the server's — this is only which part of them is
+  // on screen, held here rather than on the element because draw() replaces the
+  // SVG wholesale and a view that reset on every refresh would fight anyone
+  // trying to look at something while a circuit ran.
+  //
+  // `pinned` is set the first time the view is moved by hand. After that the
+  // page stops re-fitting on its own: snapping back to whole-board every time a
+  // part is added would undo the zoom the moment it became useful.
+  view: { x: 0, y: 0, w: 0, h: 0, pinned: false }
 };
+
+// How far the view may be moved from the whole board, as a multiple of it.
+// Eight times in is enough to read a designator on a forty-part board; three
+// times out is enough to see where you are and no further, because a schematic
+// adrift in empty space is harder to recover from than one that will not zoom.
+const MAX_ZOOM_IN = 8;
+const MAX_ZOOM_OUT = 3;
 
 export function initCircuit({ api, toast }) {
   state.api = api;
@@ -144,8 +162,67 @@ function renderSchematic(frame) {
     return `<text class="circuit-net" x="${label.x}" y="${label.y}"${turn}>${escapeHtml(caption)}</text>`;
   }).join("");
 
-  return `<svg class="circuit-canvas" viewBox="0 0 ${frame.width + 60} ${frame.height + 40}" role="img"
+  const view = state.view;
+  return `<svg class="circuit-canvas" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" role="img"
     aria-label="Circuit schematic with ${frame.symbols.length} parts">${wires}${dots}${symbols}${labels}</svg>`;
+}
+
+// The whole board, with the margin the layout leaves for labels.
+function contentBox(frame) {
+  return { x: 0, y: 0, w: (frame?.width || 0) + 60, h: (frame?.height || 0) + 40 };
+}
+
+function fitView(frame) {
+  const box = contentBox(frame);
+  if (!box.w || !box.h) return;
+  state.view = { ...box, pinned: false };
+}
+
+// Client coordinates to the drawing's own, through the SVG's real transform.
+//
+// The canvas letterboxes — it keeps the drawing's aspect ratio inside whatever
+// box the panel gives it — so the ratio of the element's size to the viewBox is
+// not the mapping. getScreenCTM is, exactly, including the letterboxing.
+function toCanvas(svg, clientX, clientY) {
+  const matrix = svg.getScreenCTM();
+  if (!matrix) return null;
+  const point = svg.createSVGPoint();
+  point.x = clientX;
+  point.y = clientY;
+  return point.matrixTransform(matrix.inverse());
+}
+
+// Zoom about a point, so whatever is under the cursor stays under it. Zooming
+// about the centre instead makes you chase the thing you were looking at.
+function zoomAbout(clientX, clientY, factor) {
+  const svg = $(".circuit-canvas");
+  if (!svg || !state.view.w) return;
+  const anchor = toCanvas(svg, clientX, clientY);
+  if (!anchor) return;
+  const box = contentBox(state.frame);
+  const width = clamp(state.view.w * factor, box.w / MAX_ZOOM_IN, box.w * MAX_ZOOM_OUT);
+  const scale = width / state.view.w;
+  state.view = {
+    x: anchor.x - ((anchor.x - state.view.x) * scale),
+    y: anchor.y - ((anchor.y - state.view.y) * scale),
+    w: width,
+    h: state.view.h * scale,
+    pinned: true
+  };
+  applyView();
+}
+
+function clamp(value, low, high) { return Math.min(high, Math.max(low, value)); }
+
+// Moving the window does not change anything the server drew, so it writes the
+// attribute directly rather than going through draw(). Re-rendering the whole
+// schematic on every frame of a drag would be visible.
+function applyView() {
+  const svg = $(".circuit-canvas");
+  const view = state.view;
+  if (svg) svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+  const reset = $("#circuit-fit");
+  if (reset) reset.hidden = !view.pinned;
 }
 
 // What each kind of probe is measuring, and in what. A motor's speed shown in
@@ -558,7 +635,13 @@ export async function refreshCircuit() {
 
 function draw() {
   const canvas = $("#circuit-schematic");
+  // A view nobody has moved follows the board: adding a part to a circuit you
+  // have not zoomed should show you the part. Once it has been moved by hand it
+  // is left alone, because re-fitting on every refresh would undo the zoom at
+  // exactly the moment it started being useful.
+  if (!state.view.pinned || !state.view.w) fitView(state.frame);
   if (canvas) canvas.innerHTML = renderSchematic(state.frame);
+  applyView();
   const findings = $("#circuit-findings");
   if (findings) findings.innerHTML = renderFindings(state.circuit?.findings);
   const mcus = $("#circuit-mcus");
@@ -708,6 +791,105 @@ export function suspendCircuit() {
   // The simulation must not keep running for a view nobody is looking at — the
   // same rule the physics sandbox follows.
   stopLive();
+}
+
+
+// Panning, wheel zoom and pinch.
+//
+// Bound once on the container rather than on the SVG, because draw() replaces
+// the SVG on every refresh and listeners attached to it would go with it.
+function bindCanvasView() {
+  const surface = $("#circuit-schematic");
+  if (!surface) return;
+
+  surface.addEventListener("wheel", (event) => {
+    if (!state.frame?.symbols?.length) return;
+    // Only when the pointer is actually over the drawing, and only then is the
+    // page scroll suppressed — a wheel beside the drawing should still scroll.
+    if (!event.target.closest(".circuit-canvas")) return;
+    event.preventDefault();
+    // A trackpad reports many small deltas and a mouse a few large ones, so the
+    // step is taken from the sign rather than the magnitude. Zoom that depended
+    // on how hard the wheel was turned is unusable on one of the two.
+    zoomAbout(event.clientX, event.clientY, event.deltaY > 0 ? 1.12 : 1 / 1.12);
+  }, { passive: false });
+
+  // Pointers currently down, so one is a pan and two are a pinch.
+  const pointers = new Map();
+  let panFrom = null;
+  let pinchFrom = null;
+
+  const spread = () => {
+    const [first, second] = [...pointers.values()];
+    return Math.hypot(first.x - second.x, first.y - second.y);
+  };
+  const midpoint = () => {
+    const [first, second] = [...pointers.values()];
+    return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+  };
+
+  surface.addEventListener("pointerdown", (event) => {
+    const svg = event.target.closest(".circuit-canvas");
+    if (!svg) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 2) {
+      panFrom = null;
+      pinchFrom = { distance: spread(), width: state.view.w };
+      return;
+    }
+    // A drag that started on a part is a drag of that part, not of the view —
+    // there is nothing to drag yet, but claiming the gesture here means adding
+    // it later does not have to fight the pan.
+    if (event.target.closest("[data-id]")) return;
+    panFrom = { x: event.clientX, y: event.clientY, viewX: state.view.x, viewY: state.view.y };
+    surface.setPointerCapture(event.pointerId);
+    surface.classList.add("is-panning");
+  });
+
+  surface.addEventListener("pointermove", (event) => {
+    if (!pointers.has(event.pointerId)) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (pinchFrom && pointers.size === 2) {
+      const distance = spread();
+      if (distance > 0 && pinchFrom.distance > 0) {
+        const centre = midpoint();
+        // Against the width the pinch started at, not the last frame's, so the
+        // gesture does not drift as it is held.
+        const wanted = pinchFrom.width * (pinchFrom.distance / distance);
+        zoomAbout(centre.x, centre.y, wanted / state.view.w);
+      }
+      return;
+    }
+
+    if (!panFrom) return;
+    const svg = $(".circuit-canvas");
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    // Client pixels to drawing units. The letterboxing means one axis has the
+    // true scale and the other is padded, so the larger ratio is the real one.
+    const scale = Math.max(state.view.w / rect.width, state.view.h / rect.height);
+    state.view = {
+      ...state.view,
+      x: panFrom.viewX - ((event.clientX - panFrom.x) * scale),
+      y: panFrom.viewY - ((event.clientY - panFrom.y) * scale),
+      pinned: true
+    };
+    applyView();
+  });
+
+  const release = (event) => {
+    pointers.delete(event.pointerId);
+    if (pointers.size < 2) pinchFrom = null;
+    if (pointers.size === 0) {
+      panFrom = null;
+      surface.classList.remove("is-panning");
+    }
+  };
+  surface.addEventListener("pointerup", release);
+  surface.addEventListener("pointercancel", release);
+  surface.addEventListener("pointerleave", release);
 }
 
 export function bindCircuitControls() {
@@ -866,6 +1048,11 @@ export function bindCircuitControls() {
     } catch (error) {
       state.toast?.(error.message || "Could not record that reading.");
     }
+  });
+  bindCanvasView();
+  $("#circuit-fit")?.addEventListener("click", () => {
+    fitView(state.frame);
+    applyView();
   });
   $("#circuit-refresh")?.addEventListener("click", refreshCircuit);
   // Selecting a part in the drawing highlights its row, and the reverse.

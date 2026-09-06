@@ -1059,8 +1059,15 @@ input[type="range"] { width: 100%; accent-color: var(--acid); margin-top: 12px; 
    A schematic is line art: one stroke colour, no fills, and enough contrast
    that a photograph of the screen is still readable — which is what someone
    building from it will actually do. */
-.circuit-schematic { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #0d1013; padding: 8px; }
-.circuit-canvas { display: block; width: 100%; height: auto; min-width: 320px; }
+/* A viewport rather than a strip that grows with the drawing. Panning needs a
+   fixed frame to pan inside, and a schematic that got taller every time a part
+   was added pushed everything below it off the screen. touch-action is off so a
+   pinch reaches the canvas instead of zooming the whole page. */
+.circuit-schematic { position: relative; overflow: hidden; border: 1px solid var(--line);
+  border-radius: 8px; background: #0d1013; padding: 8px; height: 420px; touch-action: none; }
+.circuit-schematic.is-panning { cursor: grabbing; }
+.circuit-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.circuit-schematic.is-panning .circuit-canvas { cursor: grabbing; }
 .circuit-empty { color: var(--muted); text-align: center; padding: 32px 12px; margin: 0; }
 .circuit-wire { fill: none; stroke: #7fd4ff; stroke-width: 1.5; stroke-linecap: square; }
 .circuit-wire.is-dangling { stroke: #ff8098; stroke-dasharray: 3 3; }
