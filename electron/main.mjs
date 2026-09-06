@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } from "electron";
 import path from "node:path";
+import fsPromises from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createElectronSecretStore } from "../lib/secrets.mjs";
 import { createLogger } from "../lib/logger.mjs";
@@ -111,7 +112,14 @@ function registerAppBridge() {
   });
   ipcMain.handle("update:status", async (event) => {
     trustedVoiceRequest(event);
-    return updateService.status();
+    return updateService.status(await updateService.holdings());
+  });
+  // Getting the space back without waiting for the next update, which is the
+  // only thing to do when the disk is already full.
+  ipcMain.handle("update:reclaim", async (event) => {
+    trustedVoiceRequest(event);
+    const freed = await updateService.reclaim();
+    return { ...updateService.status(await updateService.holdings()), freedBytes: freed.freedBytes };
   });
   ipcMain.handle("update:check", async (event) => {
     trustedVoiceRequest(event);
@@ -140,6 +148,20 @@ async function createWindow() {
     userDataPath: app.getPath("userData"),
     executablePath: process.execPath
   });
+  // Starting is proof the installed version works, and therefore that
+  // everything staged to produce it is spent: the package it was unpacked
+  // from, and the copy of the old install kept in case this moment never came.
+  //
+  // This used to remove only the previous AppImage on Linux. Windows kept every
+  // package it had ever downloaded, one per version, in a folder under AppData
+  // that nobody browses to — so an app somebody had updated five times was
+  // sitting on a gigabyte of finished downloads, and looked from outside like
+  // it was simply large.
+  updateService.cleanupAfterStart()
+    .then((freed) => {
+      if (freed.freedBytes > 0) desktopLogger?.info?.("Reclaimed space from finished updates", { bytes: freed.freedBytes });
+    })
+    .catch((error) => desktopLogger?.warn?.("Could not clear finished updates", { error: error.message }));
   vaultHost = new DesktopVaultHost({
     dialog,
     shell,
@@ -153,32 +175,6 @@ async function createWindow() {
     claimsFile: path.join(app.getPath("userData"), "project-folder-owners.json")
   });
   globalThis.__EVOLV_PROJECT_HOST = projectHost;
-  const profileRoot = path.resolve(path.join(process.env.EVOLV_DATA_DIR, "profiles"));
-  globalThis.__EVOLV_MARKETPLACE_HOST = Object.freeze({
-    async openPackDirectory(directory) {
-      const resolved = path.resolve(directory);
-      if (!resolved.startsWith(`${profileRoot}${path.sep}`)) throw new Error("Pack directory is outside Evolv profile storage.");
-      const result = await shell.openPath(resolved);
-      if (result) throw new Error(result);
-    },
-    async chooseConfigurationPath({ kind, title }) {
-      if (!["file", "folder"].includes(kind)) throw new Error("Unsupported Marketplace picker.");
-      const result = await dialog.showOpenDialog(mainWindow, {
-        title: String(title || (kind === "folder" ? "Choose folder" : "Choose file")).slice(0, 120),
-        defaultPath: app.getPath("documents"),
-        properties: [kind === "folder" ? "openDirectory" : "openFile"]
-      });
-      return { canceled: result.canceled, path: result.canceled ? "" : String(result.filePaths[0] || "") };
-    },
-    async choosePackSourceDirectory() {
-      const result = await dialog.showOpenDialog(mainWindow, {
-        title: "Choose Evolv pack source folder",
-        defaultPath: app.getPath("documents"),
-        properties: ["openDirectory"]
-      });
-      return { canceled: result.canceled, path: result.canceled ? "" : String(result.filePaths[0] || "") };
-    }
-  });
   voiceService = new DesktopVoiceService({
     userDataPath: app.getPath("userData"),
     downloadsPath: app.getPath("downloads"),
@@ -202,12 +198,25 @@ async function createWindow() {
   const local = await serverModule.ready;
   const origin = local.url;
 
+  // Chromium asks synchronously as well as asynchronously, and a missing
+  // check handler answers "no" to the synchronous form — which is what a
+  // getUserMedia call sees first.
+  // Writing to the clipboard is what a copy button does, and Chromium asks
+  // permission for it. Reading the clipboard is deliberately not granted: that
+  // is the user's other applications, and paste needs no permission anyway.
+  const allowed = ["media", "camera", "microphone", "clipboard-sanitized-write"];
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+    if (requestingOrigin && requestingOrigin !== origin) return false;
+    return allowed.includes(permission);
+  });
+
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const requestingOrigin = new URL(webContents.getURL()).origin;
     const mediaTypes = details?.mediaTypes || [];
     const trustedMedia = permission === "camera" || permission === "microphone"
       || (permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => ["audio", "video"].includes(type)));
-    callback(requestingOrigin === origin && trustedMedia);
+    callback(requestingOrigin === origin && (trustedMedia || permission === "clipboard-sanitized-write"));
   });
 
   mainWindow = new BrowserWindow({

@@ -1,4 +1,9 @@
 import { initAgentWorkspace, refreshAgentWorkspace } from "./agent-workspace.js";
+import { initSandboxWorkspace, refreshSandboxes } from "./sandbox.js";
+import { initPhysics, refreshPhysics, suspendPhysics } from "./physics.js";
+import { initCircuit, refreshCircuit, bindCircuitControls, suspendCircuit } from "./circuit.js";
+import { initLab, refreshLab, suspendLab } from "./lab.js";
+import { initDemo } from "./demo.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -18,6 +23,26 @@ const elements = {
   healthDot: $("#status-dot"),
   healthLabel: $("#status-label"),
   healthDetail: $("#status-detail"),
+  favoriteModel: $("#favorite-model"),
+  commandMenu: $("#command-menu"),
+  editBanner: $("#edit-banner"),
+  editCancel: $("#edit-cancel"),
+  saveChat: $("#save-chat-button"),
+  localSetup: $("#local-setup"),
+  localSetupOffline: $("#local-setup-offline"),
+  localSetupRecheck: $("#local-setup-recheck"),
+  localSetupTitle: $("#local-setup-title"),
+  localSetupDetail: $("#local-setup-detail"),
+  installButton: $("#install-evolv-local"),
+  installProgress: $("#local-setup-progress"),
+  installPhase: $("#local-setup-phase"),
+  installBytes: $("#local-setup-bytes"),
+  installBar: $("#local-setup-bar"),
+  installStatus: $("#local-setup-status"),
+  installCancel: $("#local-setup-cancel"),
+  installHide: $("#local-setup-hide"),
+  installError: $("#local-setup-error"),
+  installErrorDetail: $("#local-setup-error-detail"),
   activeVersion: $("#active-version"),
   proposalDot: $("#proposal-dot"),
   intelligenceDot: $("#intelligence-dot"),
@@ -90,7 +115,8 @@ const elements = {
   desktopUpdateStatus: $("#desktop-update-status"),
   desktopUpdateNotes: $("#desktop-update-notes"),
   desktopUpdateCheck: $("#desktop-update-check"),
-  desktopUpdateInstall: $("#desktop-update-install")
+  desktopUpdateInstall: $("#desktop-update-install"),
+  desktopUpdateReclaim: $("#desktop-update-reclaim")
 };
 
 const defaultSettings = {
@@ -142,16 +168,8 @@ const app = {
   intelligenceModels: [],
   obsidian: null,
   toolRecipes: [],
-  marketplace: null,
   projects: [],
   activeProjectId: localStorage.getItem("evolv:active-project") || "",
-  marketplaceTab: "discover",
-  marketplaceSelectedId: "",
-  pendingMarketplaceInstall: null,
-  marketplaceInstallInFlight: false,
-  marketplaceConfigSaveInFlight: false,
-  pendingPackCommand: null,
-  activePack: null,
   account: null,
   legacyConversations: loadJson("evolv:conversations", []),
   legacyCurrent: loadJson("evolv:current", []),
@@ -376,7 +394,6 @@ function conversationMessages(rows) {
       memory: row.metadata?.memory || [],
       vault: row.metadata?.vault || null,
       project: row.metadata?.project || null,
-      packSession: row.metadata?.packSession || null,
       ...(row.role === "user" && row.metadata?.images?.length ? { images: row.metadata.images } : {}),
       tools: (row.metadata?.tool_calls || []).map((call) => ({
         callId: call.id,
@@ -420,8 +437,6 @@ async function openConversation(id) {
     localStorage.setItem("evolv:active-project", app.activeProjectId);
     renderProjects();
   }
-  app.activePack = lastUser?.packSession || null;
-  renderActivePack();
   saveLocal();
   renderMessages();
   renderConversationList();
@@ -559,7 +574,6 @@ function setSpeakingState(speaking) {
   app.desktopVoice.speaking = active;
   document.documentElement.classList.toggle("tts-speaking", active);
   document.documentElement.dataset.ttsState = active ? "speaking" : "idle";
-  if (!active) app.desktopVoice.suppressUntil = Date.now() + 1_000;
   $$(".speak-button").forEach((button) => button.classList.toggle("speaking", active));
 }
 
@@ -633,274 +647,6 @@ function setListenStatus(text = "") {
   elements.voiceListenStatus.textContent = text;
   elements.voiceListenStatus.classList.toggle("hidden", !text);
   $("#composer-hint").classList.toggle("hidden", Boolean(text));
-}
-
-function playWakeChime() {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return;
-  try {
-    const context = new AudioContext();
-    const gain = context.createGain();
-    const first = context.createOscillator();
-    const second = context.createOscillator();
-    const now = context.currentTime;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.06, now + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-    first.frequency.value = 660;
-    second.frequency.value = 880;
-    first.connect(gain);
-    second.connect(gain);
-    gain.connect(context.destination);
-    first.start(now);
-    first.stop(now + 0.09);
-    second.start(now + 0.07);
-    second.stop(now + 0.18);
-    app.desktopVoice.suppressUntil = Date.now() + 500;
-    setTimeout(() => context.close().catch(() => {}), 350);
-  } catch {}
-}
-
-function populateMicrophones(devices = []) {
-  const selected = String(Number.isInteger(Number(app.settings.captureDevice)) ? Number(app.settings.captureDevice) : -1);
-  elements.voiceMicrophone.replaceChildren(new Option("Windows default microphone", "-1"));
-  for (const device of devices) {
-    if (!Number.isInteger(Number(device?.id)) || !device?.name) continue;
-    elements.voiceMicrophone.add(new Option(String(device.name).slice(0, 160), String(device.id)));
-  }
-  elements.voiceMicrophone.value = [...elements.voiceMicrophone.options].some((option) => option.value === selected) ? selected : "-1";
-}
-
-function legacyRenderDesktopVoiceStatus() {
-  const supported = Boolean(window.evolvDesktopVoice);
-  const status = app.desktopVoice.status;
-  elements.liveListeningEnabled.checked = Boolean(app.settings.liveListening);
-  elements.wakeWordEnabled.checked = app.settings.wakeWordEnabled !== false;
-  elements.voiceSensitivity.value = ["high", "balanced", "low"].includes(app.settings.voiceSensitivity) ? app.settings.voiceSensitivity : "high";
-  populateMicrophones(status?.diagnostics?.devices || []);
-  elements.liveListenButton.classList.toggle("active", app.desktopVoice.listening);
-  elements.liveListenButton.disabled = !supported || app.desktopVoice.starting;
-  elements.liveListeningEnabled.disabled = !supported || app.desktopVoice.starting;
-  elements.wakeWordEnabled.disabled = !supported;
-  elements.voiceMicrophone.disabled = !supported || app.desktopVoice.starting;
-  elements.voiceSensitivity.disabled = !supported || app.desktopVoice.starting;
-  elements.choosePiperRuntime.disabled = !supported;
-  elements.choosePiperModel.disabled = !supported;
-  elements.downloadPiperModels.disabled = !supported;
-  elements.testWakeWord.disabled = !supported;
-  const recognition = status?.recognition;
-  elements.desktopVoiceBadge.textContent = supported
-    ? (app.desktopVoice.listening ? "Listening" : status?.diagnostics?.state === "restarting" ? "Recovering" : recognition?.ready ? "Whisper ready" : "Desktop ready")
-    : "Desktop only";
-  elements.desktopVoiceBadge.classList.toggle("ready", supported);
-  if (!supported) {
-    elements.whisperStatus.textContent = "Open Evolv with npm run desktop or the desktop app to use Whisper.cpp.";
-    elements.piperStatus.textContent = "Open the Evolv desktop app to use local voice and Piper.";
-    return;
-  }
-  if (recognition?.ready) {
-    elements.whisperStatus.textContent = `Live recognition ready · ${recognition.engine} · ${recognition.model}`;
-  } else {
-    elements.whisperStatus.textContent = `Live recognition fallback · ${(recognition?.missing || []).join(", ") || "checking local engine"}`;
-  }
-  const piper = status?.piper;
-  if (!piper) {
-    elements.piperStatus.textContent = "Checking the local Piper files…";
-  } else if (piper.ready) {
-    elements.piperStatus.textContent = `Piper ready · ${piper.model}`;
-  } else {
-    const detected = piper.model ? `Detected ${piper.model}. ` : "";
-    elements.piperStatus.textContent = `${detected}Still needed: ${(piper.missing || []).join(", ")}.`;
-  }
-  renderVoiceDiagnostics();
-}
-
-function renderVoiceDiagnostics() {
-  const diagnostics = app.desktopVoice.status?.diagnostics || {};
-  const active = Date.now() < app.desktopVoice.voiceTestUntil;
-  elements.testWakeWord.textContent = active ? "Listening for “Evolve”…" : "Test “Evolve” wake word";
-  elements.voiceDiagnosticsStatus.textContent = [
-    `State: ${diagnostics.state || (app.desktopVoice.listening ? "listening" : "idle")}`,
-    `Microphone: ${diagnostics.microphone || "waiting for device information"}`,
-    `Mode: ${diagnostics.mode || "continuous-vad"}`,
-    `Sensitivity: ${diagnostics.sensitivity || app.settings.voiceSensitivity || "high"} (threshold ${diagnostics.vadThreshold ?? "pending"})`,
-    diagnostics.restartAttempt ? `Recovery attempt: ${diagnostics.restartAttempt} of 3` : "",
-    `Last heard: ${diagnostics.lastTranscript || "nothing transcribed yet"}`,
-    diagnostics.lastError ? `Last error: ${diagnostics.lastError}` : "",
-    app.desktopVoice.voiceTestResult
-  ].filter(Boolean).join("\n");
-}
-
-function finishWakeWordTest(message) {
-  clearTimeout(app.desktopVoice.voiceTestTimer);
-  clearInterval(app.desktopVoice.voiceTestPoll);
-  app.desktopVoice.voiceTestUntil = 0;
-  app.desktopVoice.voiceTestTimer = null;
-  app.desktopVoice.voiceTestPoll = null;
-  app.desktopVoice.voiceTestResult = message;
-  renderVoiceDiagnostics();
-}
-
-async function runWakeWordTest() {
-  if (!window.evolvDesktopVoice) return toast("Voice testing requires the Evolv desktop app.", "error");
-  finishWakeWordTest("");
-  app.desktopVoice.voiceTestUntil = Date.now() + 20_000;
-  app.desktopVoice.voiceTestResult = "TEST: Say “Evolve, test microphone” now.";
-  renderVoiceDiagnostics();
-  if (!app.desktopVoice.listening) await setLiveListening(true);
-  if (!app.desktopVoice.listening) return finishWakeWordTest("FAILED: Live listening could not start. Check the error above.");
-  app.desktopVoice.voiceTestPoll = setInterval(() => refreshDesktopVoiceStatus().catch(() => {}), 1_000);
-  app.desktopVoice.voiceTestTimer = setTimeout(() => {
-    finishWakeWordTest("NO WAKE WORD: Whisper did not hear “Evolve.” Move closer, check Windows microphone input, and try again.");
-  }, 20_000);
-}
-
-async function legacyRefreshDesktopVoiceStatus() {
-  if (!window.evolvDesktopVoice) return renderDesktopVoiceStatus();
-  try {
-    app.desktopVoice.status = await window.evolvDesktopVoice.status();
-    app.desktopVoice.listening = Boolean(app.desktopVoice.status.listening);
-  } catch (error) {
-    toast(`Desktop voice: ${error.message}`, "error");
-  }
-  renderDesktopVoiceStatus();
-}
-
-function recognizedVoiceCommand(text, confidence = 0) {
-  if (!app.desktopVoice.listening || app.desktopVoice.speaking || Date.now() < app.desktopVoice.suppressUntil) return;
-  const transcript = String(text || "").trim();
-  if (!transcript || confidence < 0.25) return;
-  if (Date.now() < app.desktopVoice.voiceTestUntil) {
-    const heardWakeWord = /\b(?:evolv|evolve|evolved|evolving)\b/i.test(transcript);
-    if (!heardWakeWord) {
-      app.desktopVoice.voiceTestResult = `HEARD SPEECH, NOT WAKE WORD: "${transcript.slice(0, 120)}". Keep trying until the timer ends.`;
-      renderVoiceDiagnostics();
-      return;
-    }
-    finishWakeWordTest(heardWakeWord
-      ? `PASS: Whisper heard “${transcript.slice(0, 120)}”.`
-      : `HEARD SPEECH, NOT WAKE WORD: “${transcript.slice(0, 120)}”. Try saying “Evolve” more clearly.`);
-    return;
-  }
-  if (Date.now() < app.desktopVoice.commandCooldownUntil) return;
-  let command = transcript;
-  if (app.settings.wakeWordEnabled !== false) {
-    const wake = transcript.match(/\b(?:evolv|evolve|evolved|evolving)\b/i);
-    if (wake) {
-      command = transcript.slice((wake.index || 0) + wake[0].length).replace(/^[\s,.:;!?-]+/, "").trim();
-      app.desktopVoice.wakeArmedUntil = Date.now() + 15_000;
-      if (!command) {
-        setListenStatus("Evolve heard · say your command");
-        playWakeChime();
-        return;
-      }
-    } else if (Date.now() < app.desktopVoice.wakeArmedUntil) {
-      command = transcript;
-    } else {
-      setListenStatus("Listening · say “Evolve”");
-      return;
-    }
-  }
-  app.desktopVoice.wakeArmedUntil = 0;
-  if (/^(?:stop|cancel|never mind)$/i.test(command) && app.generating) {
-    app.controller?.abort();
-    setListenStatus("Stopped · say “Evolve”");
-    return;
-  }
-  if (app.generating) {
-    setListenStatus("Evolv is answering · try again when it finishes");
-    return;
-  }
-  elements.prompt.value = command;
-  resizePrompt();
-  app.desktopVoice.commandCooldownUntil = Date.now() + 5_000;
-  setListenStatus(`Heard: ${command.slice(0, 80)}`);
-  sendMessage(command).finally(() => {
-    if (app.desktopVoice.listening) setListenStatus(app.settings.wakeWordEnabled === false ? "Listening live" : "Listening · say “Evolve”");
-  });
-}
-
-function handleDesktopVoiceEvent(event) {
-  if (!event || typeof event !== "object") return;
-  if (event.type === "ready") {
-    app.desktopVoice.listening = true;
-    setListenStatus(app.settings.wakeWordEnabled === false ? "Listening live" : "Listening · say “Evolve”");
-    refreshDesktopVoiceStatus().catch(() => {});
-  } else if (event.type === "restarting") {
-    app.desktopVoice.listening = false;
-    app.settings.liveListening = true;
-    saveLocal();
-    setListenStatus(`Recovering microphone · attempt ${event.attempt || 1} of 3`);
-    refreshDesktopVoiceStatus().catch(() => {});
-  } else if (event.type === "partial" && !app.desktopVoice.speaking) {
-    setListenStatus(`Hearing: ${String(event.text || "").slice(0, 80)}`);
-  } else if (event.type === "transcript") {
-    if (app.desktopVoice.status?.diagnostics) {
-      app.desktopVoice.status.diagnostics.lastTranscript = String(event.text || "").slice(0, 500);
-      app.desktopVoice.status.diagnostics.lastTranscriptAt = new Date().toISOString();
-    }
-    recognizedVoiceCommand(event.text, Number(event.confidence) || 0);
-  } else if (event.type === "error") {
-    app.desktopVoice.listening = false;
-    app.settings.liveListening = false;
-    saveLocal();
-    setListenStatus("");
-    if (app.desktopVoice.status?.diagnostics) {
-      app.desktopVoice.status.diagnostics.state = "error";
-      app.desktopVoice.status.diagnostics.lastError = String(event.error || "").slice(0, 500);
-    }
-    toast(`Live listening: ${event.error}`, "error");
-  } else if (event.type === "stopped") {
-    app.desktopVoice.listening = false;
-    setListenStatus("");
-  }
-  renderDesktopVoiceStatus();
-}
-
-async function setLiveListening(enabled) {
-  if (!window.evolvDesktopVoice) {
-    toast("Live listening is available in the Evolv desktop app.", "error");
-    return;
-  }
-  if (app.desktopVoice.starting) return;
-  app.desktopVoice.starting = true;
-  renderDesktopVoiceStatus();
-  try {
-    app.desktopVoice.status = enabled
-      ? await window.evolvDesktopVoice.startListening({
-          wakeWord: "evolve",
-          sensitivity: ["high", "balanced", "low"].includes(app.settings.voiceSensitivity) ? app.settings.voiceSensitivity : "high",
-          captureDevice: Number.isInteger(Number(app.settings.captureDevice)) ? Number(app.settings.captureDevice) : -1
-        })
-      : await window.evolvDesktopVoice.stopListening();
-    app.desktopVoice.listening = Boolean(app.desktopVoice.status?.listening);
-    app.settings.liveListening = enabled;
-    saveLocal();
-    setListenStatus(enabled ? (app.settings.wakeWordEnabled === false ? "Listening live" : "Starting · say “Evolve”") : "");
-  } catch (error) {
-    app.settings.liveListening = false;
-    saveLocal();
-    toast(`Live listening: ${error.message}`, "error");
-  } finally {
-    app.desktopVoice.starting = false;
-  }
-  renderDesktopVoiceStatus();
-}
-
-async function legacyInitializeDesktopVoice() {
-  renderDesktopVoiceStatus();
-  if (!window.evolvDesktopVoice) return;
-  app.desktopVoice.removeListener?.();
-  app.desktopVoice.removeListener = window.evolvDesktopVoice.onEvent(handleDesktopVoiceEvent);
-  await refreshDesktopVoiceStatus();
-  if (app.settings.liveListening && !app.desktopVoice.status?.desiredListening) await setLiveListening(true);
-}
-
-async function restartLiveListeningForSettings() {
-  saveLocal();
-  if (!app.settings.liveListening) return renderDesktopVoiceStatus();
-  await setLiveListening(false);
-  await setLiveListening(true);
 }
 
 function stopMicrophoneCapture() {
@@ -1384,15 +1130,36 @@ function formatBytes(bytes) {
 async function init() {
   if (!await initializeAuth()) return;
   initAgentWorkspace({ api, toast, getCsrf: () => app.auth?.csrfToken || "" });
+  initSandboxWorkspace({ api, toast, project: activeProject });
+  initPhysics({ api, toast });
+  initCircuit({ api, toast });
+  bindCircuitControls();
+  $("#circuit-back-to-chat")?.addEventListener("click", () => switchView("chat"));
+  initLab({ api, toast, project: activeProject });
+  initDemo({ api, toast, sendMessage, switchView });
+  $("#demo-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
+  $("#lab-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
+  $("#sandbox-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
+  $("#physics-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
+  // The agent has no sidebar entry, so it needs its own way back.
+  $("#agent-back-to-chat")?.addEventListener("click", () => {
+    switchView("chat");
+    elements.prompt.focus();
+  });
   startSessionWatch();
-  resetMarketplaceDialogs();
   bindEvents();
-  const recentMarketplaceSearches = document.createElement("datalist");
-  recentMarketplaceSearches.id = "marketplace-recent-searches";
-  recentMarketplaceSearches.innerHTML = loadJson("evolv:marketplace-searches", [])
-    .slice(0, 8).map((item) => `<option value="${escapeHtml(item)}"></option>`).join("");
-  document.body.append(recentMarketplaceSearches);
-  $("#marketplace-search")?.setAttribute("list", recentMarketplaceSearches.id);
   populateVoices();
   try {
     await migrateBrowserData();
@@ -1421,7 +1188,7 @@ async function init() {
   renderMessages();
   await Promise.allSettled([
     refreshHealth(), refreshModels(), refreshState(), refreshTools(), refreshMemory(),
-    refreshMacros(), refreshIntelligence(), refreshObsidian(), refreshToolRecipes(), refreshMarketplace()
+    refreshMacros(), refreshIntelligence(), refreshObsidian(), refreshToolRecipes()
   ]);
   try {
     await refreshConversations({ openCurrent: true });
@@ -1441,13 +1208,16 @@ function renderDesktopUpdateStatus(status) {
   elements.desktopUpdateNotes.textContent = status?.release?.notes || "";
   elements.desktopUpdateNotes.classList.toggle("hidden", !status?.release?.notes);
   if (!supported) {
-    elements.desktopUpdateStatus.textContent = "Automatic updates are available in the packaged Windows app.";
+    elements.desktopUpdateStatus.textContent = "Automatic updates are available in the packaged Windows app and the Linux AppImage.";
   } else if (status.phase === "checking") {
     elements.desktopUpdateStatus.textContent = "Checking the verified GitHub releaseâ€¦";
   } else if (status.phase === "downloading") {
     elements.desktopUpdateStatus.textContent = "Downloading and verifying the updateâ€¦";
   } else if (status.phase === "ready") {
-    elements.desktopUpdateStatus.textContent = `Evolv ${status.release.version} is verified and ready to install.`;
+    // Worth saying plainly: the reason it finished so quickly is that most of
+    // the new version was already on disk.
+    elements.desktopUpdateStatus.textContent = `Evolv ${status.release.version} is verified and ready to install.${
+      status.savings?.reusedBytes ? ` Downloaded ${formatBytes(status.savings.fetchedBytes)} of ${formatBytes(status.savings.totalBytes)}; the rest was reused from the copy you already have.` : ""}`;
   } else if (status.phase === "installing") {
     elements.desktopUpdateStatus.textContent = "Installing the update; Evolv will restart.";
   } else if (status.phase === "available") {
@@ -1458,6 +1228,23 @@ function renderDesktopUpdateStatus(status) {
     elements.desktopUpdateStatus.textContent = `Update check failed: ${status.error || "GitHub is unavailable."}`;
   } else {
     elements.desktopUpdateStatus.textContent = `Automatic updates use ${status.repository}.`;
+  }
+
+  // What the updater is holding, and a way to get it back.
+  //
+  // This is the only place it can be found. The packages live under AppData,
+  // where nobody browses by accident, so several hundred megabytes of finished
+  // downloads sit there looking — from outside — like the app is simply large.
+  //
+  // Only touched when the figure was actually measured. A check answers without
+  // looking at the disk, and null means "not measured" rather than "nothing" —
+  // reading it as zero would make the button vanish every time someone pressed
+  // Check, which looks like the space went away with it.
+  const reclaim = elements.desktopUpdateReclaim;
+  if (reclaim && status.heldBytes !== null && status.heldBytes !== undefined) {
+    const held = Number(status.heldBytes) || 0;
+    reclaim.hidden = held < 1024 * 1024;
+    reclaim.textContent = `Free up ${formatBytes(held)}`;
   }
 }
 
@@ -1482,6 +1269,16 @@ async function refreshDesktopUpdateStatus({ check = false, silent = false } = {}
 
 function initializeDesktopUpdates() {
   refreshDesktopUpdateStatus({ silent: true });
+  elements.desktopUpdateReclaim?.addEventListener("click", async () => {
+    if (!window.evolvDesktopApp?.reclaimUpdateSpace) return;
+    try {
+      const status = await window.evolvDesktopApp.reclaimUpdateSpace();
+      renderDesktopUpdateStatus(status);
+      toast(status.freedBytes > 0 ? `Freed ${formatBytes(status.freedBytes)}.` : "There was nothing left to clear.");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  });
   if (!window.evolvDesktopApp?.checkForUpdates) return;
   const lastCheck = Number(localStorage.getItem("evolv:last-update-check") || 0);
   if (Date.now() - lastCheck < 6 * 60 * 60 * 1000) return;
@@ -1492,12 +1289,344 @@ function initializeDesktopUpdates() {
   }, 4_000);
 }
 
+// Four states, not two. Ollama answering its version endpoint while holding no
+// models is the state that used to show green and then fail on the first
+// message, so it gets its own colour and its own instruction.
+function localStatusOf(health) {
+  if (!health.connected) {
+    return { dot: "error", label: "Ollama offline", detail: "Start Ollama to chat", setup: "offline" };
+  }
+  if (!health.modelCount) {
+    return {
+      dot: "needs-model",
+      label: "Ollama connected — model needed",
+      detail: `${health.evolvModelLabel || "Evolv Local"} not installed`,
+      setup: "empty"
+    };
+  }
+  if (!health.evolvModelInstalled) {
+    // Whatever they pulled themselves works fine. This is an offer, not a
+    // blocker, and it must never talk anyone out of a model they already have.
+    return {
+      dot: "connected",
+      label: "Ollama connected",
+      detail: `${health.modelCount} model${health.modelCount === 1 ? "" : "s"} · Evolv Local not installed`,
+      setup: "optional"
+    };
+  }
+  if (health.evolvModelStale) {
+    // Installed and working, but built before its instructions last changed.
+    // Not a fault, so the dot stays green.
+    return { dot: "connected", label: "Evolv Local ready", detail: "Update available", setup: "stale" };
+  }
+  return { dot: "connected", label: "Evolv Local ready", detail: `v${health.version}`, setup: "none" };
+}
+
 async function refreshHealth() {
   const health = await api("/api/health");
-  elements.healthDot.classList.toggle("connected", health.connected);
-  elements.healthDot.classList.toggle("error", !health.connected);
-  elements.healthLabel.textContent = health.connected ? "Ollama connected" : "Ollama offline";
-  elements.healthDetail.textContent = health.connected ? `v${health.version}` : "Start Ollama to chat";
+  app.health = health;
+  const status = localStatusOf(health);
+
+  for (const name of ["connected", "error", "needs-model"]) {
+    elements.healthDot.classList.toggle(name, status.dot === name);
+  }
+  elements.healthLabel.textContent = status.label;
+  elements.healthDetail.textContent = status.detail;
+  renderLocalSetup(status, health);
+  return health;
+}
+
+function renderLocalSetup(status, health) {
+  if (!elements.localSetup) return;
+  const installing = health.install?.phase === "pulling" || health.install?.phase === "creating";
+  const label = health.evolvModelLabel || "Evolv Local";
+
+  // Ollama is not there at all.
+  //
+  // This is the state most first runs land in, and it used to be offered the
+  // same "Get Evolv Local" button as every other — a button that cannot work,
+  // because installing a model needs the Ollama that is missing. Pressing it
+  // failed, which is a worse first ninety seconds than not offering it.
+  //
+  // And it does not pretend to know which of the two it is. A refused
+  // connection looks identical whether Ollama was never installed or is simply
+  // not running, so both ways out are offered rather than guessing and being
+  // confidently wrong at the one moment a person has no idea what is going on.
+  if (status.setup === "offline") {
+    elements.localSetupOffline?.classList.remove("hidden");
+    elements.installButton?.classList.add("hidden");
+    if (elements.localSetupTitle) elements.localSetupTitle.textContent = "Evolv needs Ollama to run AI on this computer.";
+    if (elements.localSetupDetail) {
+      elements.localSetupDetail.textContent =
+        "It is free, runs on your machine, and nothing you type leaves it. If it is already installed, start it and check again.";
+    }
+    elements.installProgress?.classList.add("hidden");
+    elements.localSetup.classList.remove("hidden");
+    return;
+  }
+  elements.localSetupOffline?.classList.add("hidden");
+  elements.installButton?.classList.remove("hidden");
+
+  const dismissible = status.setup === "optional" || status.setup === "stale";
+  if (status.setup === "none" || (dismissible && app.dismissedLocalSetup)) {
+    if (!installing) return elements.localSetup.classList.add("hidden");
+  }
+
+  // What this machine can actually hold. Offering the biggest build to a laptop
+  // that will swap on it is how people decide local models are useless, so the
+  // server picks from the catalogue by memory and the offer follows.
+  const offered = health.recommendedLabel || label;
+  const size = health.recommendedBytes ? ` (about ${formatBytes(health.recommendedBytes)})` : "";
+
+  // Evolv Local is a ladder, and this machine gets every rung it can hold: a
+  // small fast one and a large careful one are useful for different questions,
+  // and fetching them in one run beats running the installer three times.
+  const missing = health.missingModels || [];
+  const bulk = missing.length > 1;
+  const bulkSize = health.missingBytes ? ` (about ${formatBytes(health.missingBytes)} in total)` : "";
+  const builds = `${missing.length} Evolv Local builds`;
+  // Disk, not memory, is what usually stops this — and it is the one the person
+  // can do something about, so it is said rather than left to a failure twenty
+  // minutes into a download.
+  const free = health.freeDisk ? formatBytes(health.freeDisk) : "";
+  const diskNote = health.diskLimited && missing.length
+    ? ` Only ${missing.length} fit in the ${free} free on this computer; clear space and Evolv will offer the rest.`
+    : "";
+  const nothingFits = health.diskLimited && !missing.length;
+
+  const copy = nothingFits ? [
+    "There isn't enough free disk space for Evolv Local.",
+    `The smallest build needs about ${formatBytes(health.smallestBuildBytes || 0)} and this computer has ${free} free. Clear some space and Evolv will offer it again — nothing is downloaded until it fits.`
+  ] : {
+    offline: ["Ollama isn't running.", "Start Ollama on this computer, then refresh."],
+    empty: ["Ollama is running, but no AI models are installed.",
+      bulk ? `Evolv installs ${builds}${bulkSize} — a small fast one for quick questions and larger ones for careful work. You can chat as soon as the first finishes.${diskNote}`
+        : `Install ${offered}${size} to start chatting.${diskNote}`],
+    optional: [`Evolv Local isn't installed yet.`,
+      bulk ? `Your existing models still work. Evolv installs ${builds}${bulkSize}, every one this computer has room for.${diskNote}`
+        : `Your existing models still work. ${offered}${size} is the build this computer has room for.${diskNote}`],
+    stale: [`${label} was built from an older version of its instructions.`,
+      "Rebuilding takes a few seconds — the model itself is already downloaded, and nothing is re-downloaded."],
+    none: health.recommendedUpgrade
+      ? [`${label} is ready, and this computer could run more.`,
+        bulk
+          ? `${builds}${bulkSize} are still missing — the same assistant on larger bases, better at multi-step reasoning and tool use. Installing them leaves ${label} in place.`
+          : `${offered}${size} is the same assistant on a larger base — better at multi-step reasoning and tool use. Installing it leaves ${label} in place.`]
+      : [`${label} is ready.`, "You can start chatting."]
+  }[status.setup];
+
+  elements.localSetupTitle.textContent = copy[0];
+  elements.localSetupDetail.textContent = copy[1];
+  // Nothing to install while Ollama is unreachable, and nothing to offer when
+  // it would not fit — a button that starts a download doomed to fail is worse
+  // than no button.
+  elements.installButton.classList.toggle("hidden",
+    status.setup === "offline" || nothingFits || (status.setup === "none" && !health.recommendedUpgrade));
+  elements.installButton.textContent = status.setup === "stale"
+    ? `Rebuild ${label}`
+    : bulk
+      ? `Install ${builds}`
+      : status.setup === "none"
+        ? `Install ${offered}`
+        : health.baseModelInstalled && !health.evolvModelInstalled
+          ? `Finish setting up ${label}`
+          : `Get ${offered}`;
+  // A rebuild is one named build; everything else installs every rung this
+  // machine can hold, in one run.
+  elements.installButton.dataset.models = status.setup === "stale"
+    ? (health.evolvModel || "")
+    : (missing.length ? missing.join(",") : health.recommendedModel || "");
+  elements.localSetup.classList.remove("hidden");
+
+  if (installing) attachToInstall();
+}
+
+// "Already installed — check again". Answers either way: a check that silently
+// did nothing is indistinguishable from a broken button, and this is pressed by
+// someone who has just been told the app cannot find something.
+function bindOllamaRecheck() {
+  elements.localSetupRecheck?.addEventListener("click", async () => {
+    const button = elements.localSetupRecheck;
+    const wasSaying = button.textContent;
+    button.disabled = true;
+    button.textContent = "Looking…";
+    try {
+      const health = await refreshHealth();
+      toast(health?.connected ? "Found it. Ollama is running." : "Still cannot reach Ollama. Start it, then try again.",
+        health?.connected ? "success" : "error");
+    } catch (error) {
+      toast(error.message || "Could not check for Ollama.", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = wasSaying;
+    }
+  });
+}
+
+function formatProgress(snapshot) {
+  if (!snapshot.total) return "";
+  return `${formatBytes(snapshot.completed)} / ${formatBytes(snapshot.total)}`;
+}
+
+function renderInstallProgress(snapshot) {
+  const running = snapshot.phase === "pulling" || snapshot.phase === "creating";
+  elements.installProgress.classList.toggle("hidden", !running);
+  elements.installButton.disabled = running;
+  elements.installPhase.textContent = snapshot.phase === "creating"
+    ? "Configuring Evolv Local…"
+    : "Downloading Evolv Local";
+  elements.installBytes.textContent = formatProgress(snapshot);
+  elements.installStatus.textContent = snapshot.status || "";
+  // Percentages come from Ollama's own byte counts; when it has not reported
+  // any yet the bar sweeps instead of inventing a number.
+  const known = typeof snapshot.percent === "number";
+  elements.installBar.classList.toggle("indeterminate", running && !known);
+  elements.installBar.style.width = known ? `${snapshot.percent}%` : "";
+
+  const failed = snapshot.phase === "error";
+  elements.installError.classList.toggle("hidden", !failed);
+  if (failed) {
+    elements.localSetupTitle.textContent = snapshot.error?.message || "Evolv Local couldn't finish downloading.";
+    elements.localSetupDetail.textContent = "Nothing was changed. You can try again.";
+    elements.installErrorDetail.textContent = snapshot.error?.detail || "";
+    elements.installButton.textContent = "Try again";
+  }
+}
+
+// One install at a time. The server enforces it too — this only keeps a second
+// click from opening a second stream to the same run.
+let installStream = null;
+
+async function attachToInstall() {
+  if (installStream) return installStream;
+  installStream = (async () => {
+    try {
+      // Raw fetch rather than api(), because this response is a stream and
+      // api() parses it as JSON — but the CSRF header has to be sent by hand
+      // as a result, and it was not. Every mutating request needs it, including
+      // the cancel button beside this one, which used api() and worked while
+      // install returned 403. Nobody noticed because the button that starts
+      // this was itself painted underneath the composer and could not be
+      // clicked.
+      const response = await fetch("/api/ollama/install-evolv", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(app.auth?.csrfToken ? { "x-evolv-csrf": app.auth.csrfToken } : {})
+        },
+        // Whichever builds the panel offered. An empty value lets the server
+        // choose its default, which is what a rejoining client sends.
+        body: JSON.stringify(elements.installButton?.dataset.models
+          ? { models: elements.installButton.dataset.models.split(",").filter(Boolean) }
+          : {})
+      });
+      if (!response.ok || !response.body) throw new Error(`Install failed to start (${response.status}).`);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let last = null;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let index = buffer.indexOf("\n");
+        while (index >= 0) {
+          const line = buffer.slice(0, index).trim();
+          buffer = buffer.slice(index + 1);
+          index = buffer.indexOf("\n");
+          if (!line) continue;
+          last = JSON.parse(line);
+          renderInstallProgress(last);
+        }
+      }
+
+      if (last?.phase === "ready") await finishInstall();
+      else if (last?.cancelled) toast("Installation cancelled.");
+    } catch (error) {
+      renderInstallProgress({ phase: "error", error: { message: "Evolv Local couldn't finish downloading.", detail: error.message } });
+    } finally {
+      installStream = null;
+      elements.installButton.disabled = false;
+    }
+  })();
+  return installStream;
+}
+
+async function finishInstall() {
+  const health = await refreshHealth();
+  await refreshModels();
+  // Select it only if the person has not chosen something else in the meantime.
+  const target = health.evolvModel;
+  if (target && app.models.some((model) => model.name === target) && (app.settings.model === "auto" || !app.settings.model)) {
+    app.settings.model = target;
+    elements.model.value = target;
+    configureReasoning(target);
+    saveLocal();
+  }
+  elements.localSetup.classList.add("hidden");
+  toast(`${health.evolvModelLabel || "Evolv Local"} is ready.`);
+}
+
+function modelOption(model) {
+  const badges = [
+    model.capabilities?.includes("tools") ? "🔧" : "",
+    model.capabilities?.includes("vision") ? "👁" : "",
+    model.capabilities?.includes("thinking") ? "🧠" : ""
+  ].filter(Boolean).join("");
+  const detail = [model.parameterSize, formatBytes(model.size)].filter(Boolean).join(" · ");
+  // The size is known before the model is ever run, so a model this computer
+  // cannot hold says so in the list rather than failing mid-reply.
+  const fit = { over: "⚠ too big for this computer", tight: "⚠ tight fit" }[model.fit?.level] || "";
+  // What happened last time. A model that has failed twice running says so
+  // here, rather than being picked again because the list looks the same.
+  const failing = model.health?.failing ? `⚠ ${model.health.reason}` : "";
+  return new Option([model.name, detail, badges, fit, failing].filter(Boolean).join("  ·  "), model.name);
+}
+
+function addModelGroup(label, models) {
+  if (!models.length) return;
+  const group = document.createElement("optgroup");
+  group.label = label;
+  for (const model of models) group.append(modelOption(model));
+  elements.model.add(group);
+}
+
+function updateFavoriteButton() {
+  const model = app.models.find((item) => item.name === elements.model.value);
+  const favorite = Boolean(model?.favorite);
+  elements.favoriteModel.textContent = favorite ? "★" : "☆";
+  elements.favoriteModel.setAttribute("aria-pressed", String(favorite));
+  const action = favorite ? "Remove this model from favourites" : "Add this model to favourites";
+  elements.favoriteModel.setAttribute("aria-label", action);
+  elements.favoriteModel.title = action;
+  // Auto is a routing choice rather than a model, so there is nothing to star.
+  elements.favoriteModel.disabled = !model;
+}
+
+async function toggleFavoriteModel() {
+  const model = app.models.find((item) => item.name === elements.model.value);
+  if (!model) return;
+  try {
+    await api("/api/models/favorite", {
+      method: "POST",
+      body: JSON.stringify({ provider: app.settings.provider || "ollama", model: model.name, favorite: !model.favorite })
+    });
+    await refreshModels();
+    toast(model.favorite ? `${model.name} removed from favourites` : `${model.name} added to favourites`);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+// Said once, when the model is chosen, rather than after a reply has already
+// failed for a reason the person could have been told about up front.
+function warnAboutFit() {
+  const model = app.models.find((item) => item.name === elements.model.value);
+  if (!model) return;
+  // The record of real failures outranks the estimate: it already happened.
+  if (model.health?.failing) return toast(`${model.name}: ${model.health.reason}`, "error");
+  if (model.fit?.note) toast(`${model.name}: ${model.fit.note}`, model.fit.level === "over" ? "error" : "");
 }
 
 async function refreshModels() {
@@ -1507,26 +1636,32 @@ async function refreshModels() {
     elements.model.innerHTML = "";
     elements.model.add(new Option("Auto · Balanced", "auto"));
     if (!models.length) {
-      elements.model.add(new Option("No manual models available", ""));
+      // "No manual models available" read as a detail about the dropdown. It is
+      // not: with no models there is nothing to chat with at all, and the empty
+      // selector is the second place that has to say so.
+      const empty = new Option("No local models installed", "");
+      empty.disabled = true;
+      elements.model.add(empty);
       elements.model.value = "auto";
       app.settings.model = "auto";
       configureReasoning("auto");
+      updateFavoriteButton();
       return;
     }
-    for (const model of models) {
-      const badges = [
-        model.capabilities?.includes("tools") ? "🔧" : "",
-        model.capabilities?.includes("vision") ? "👁" : "",
-        model.capabilities?.includes("thinking") ? "🧠" : ""
-      ].filter(Boolean).join("");
-      const detail = [model.parameterSize, formatBytes(model.size)].filter(Boolean).join(" · ");
-      const label = [model.name, detail, badges].filter(Boolean).join("  ·  ");
-      elements.model.add(new Option(label, model.name));
+    // Favourites first, under a heading, so a long list of pulled models stops
+    // burying the two or three anyone actually uses.
+    const favorites = models.filter((model) => model.favorite);
+    if (favorites.length) {
+      addModelGroup("Favourites", favorites);
+      addModelGroup("All models", models.filter((model) => !model.favorite));
+    } else {
+      for (const model of models) elements.model.add(modelOption(model));
     }
     const remembered = app.settings.model === "auto" || models.some((model) => model.name === app.settings.model) ? app.settings.model : "auto";
     elements.model.value = remembered;
     app.settings.model = remembered;
     configureReasoning(remembered);
+    updateFavoriteButton();
     saveLocal();
   } catch (error) {
     const provider = app.providers.find((item) => item.id === app.settings.provider);
@@ -1540,8 +1675,22 @@ async function refreshModels() {
     elements.model.value = "auto";
     app.settings.model = "auto";
     configureReasoning("auto");
+    app.models = [];
+    updateFavoriteButton();
     if (error.code === "PROVIDER_AUTH_FAILED") refreshProviders().catch(() => {});
-    toast(error.message, "error");
+    // A provider that cannot be reached is not news here.
+    //
+    // On a first run with no Ollama, the status dot says it, the setup panel
+    // says it and offers a way out, and the model picker says it — and then
+    // this fired a red toast saying it a fourth time. Four components agreeing
+    // is not reassuring when one of them is alarming: the scary one is the one
+    // people believe. The list above already emptied itself and named the
+    // reason, which is this catch doing its job.
+    //
+    // Everything else still shouts. A rejected API key or a provider returning
+    // nonsense is genuinely news, and silence there would be the opposite
+    // mistake.
+    if (error.code !== "PROVIDER_UNREACHABLE") toast(error.message, "error");
   }
 }
 
@@ -1580,10 +1729,160 @@ async function loadIntelligenceModels() {
 }
 
 async function refreshIntelligence({ refreshModels = false } = {}) {
-  if (!$("#intelligence-view")) return;
+  if (!$("#behaviour-view")) return;
   [app.intelligence, app.evolution] = await Promise.all([api("/api/intelligence"), api("/api/evolution")]);
   if (refreshModels || !app.intelligenceModels.length) await loadIntelligenceModels();
   renderIntelligence();
+  // The roster is the server's to state. Duplicating it here would be a second
+  // copy of who the specialists are, free to drift from the one that runs.
+  await renderAgentModelPins().catch(() => {});
+  await renderSpecialistComparison().catch(() => {});
+  await renderSpend().catch(() => {});
+}
+
+// What has actually been spent, from the provider's own token counts.
+//
+// The figures Evolv showed before this were a character count divided by four
+// and "one cost unit per cloud request" — which charged a two-line question and
+// a forty-tool agent run the same. The tokens here are exact because the
+// provider reported them; the money is an estimate from list prices, and every
+// place it appears says so rather than implying Evolv can read a bill.
+function formatSpend(micros) {
+  const dollars = (Number(micros) || 0) / 1_000_000;
+  if (dollars === 0) return "$0.00";
+  if (dollars < 0.01) return `$${dollars.toFixed(4)}`;
+  if (dollars < 1) return `$${dollars.toFixed(3)}`;
+  return `$${dollars.toFixed(2)}`;
+}
+
+function formatTokenCount(count) {
+  const tokens = Math.max(0, Math.round(Number(count) || 0));
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(2)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
+}
+
+async function renderSpend() {
+  const card = $("#spend-breakdown");
+  if (!card) return;
+  const spend = await api("/api/spend");
+  const month = spend.thisMonth || {};
+  const total = $("#spend-month");
+  if (total) total.textContent = formatSpend(month.estimatedMicros);
+  const detail = $("#spend-month-detail");
+  if (detail) {
+    detail.textContent = month.turns
+      ? `estimated over ${formatTokenCount(month.totalTokens)} tokens`
+      : "nothing sent to a cloud model yet";
+  }
+
+  if (!spend.byModel?.length) {
+    card.innerHTML = `<p class="settings-note">Nothing has been sent to a cloud model this month. Local models cost nothing and are not counted here.</p>`;
+    return;
+  }
+  // Three different things, said three different ways. A local model is free,
+  // and that is a fact. A cloud model with no published rate here costs an
+  // unknown amount, which is not the same as nothing. Everything else has an
+  // estimate. Rendering all three as "—", or all three as a number, would make
+  // one of them a lie.
+  card.innerHTML = `<table class="circuit-parts">
+    <thead><tr><th>Model</th><th>Turns</th><th>In</th><th>Out</th><th>Estimated</th></tr></thead>
+    <tbody>${spend.byModel.map((row) => `<tr>
+      <td>${escapeHtml(row.modelId)}</td>
+      <td>${row.turns}</td>
+      <td>${formatTokenCount(row.inputTokens)}</td>
+      <td>${formatTokenCount(row.outputTokens)}</td>
+      <td>${row.providerId === "ollama" ? "local, free"
+        : row.unpriced ? "—" : escapeHtml(formatSpend(row.estimatedMicros))}</td>
+    </tr>`).join("")}</tbody>
+  </table>
+  ${month.unpriced ? `<p class="settings-note">${month.unpriced} turn${month.unpriced === 1 ? "" : "s"} used a model with no published rate here, so the estimate above is lower than the real total.</p>` : ""}
+  <p class="settings-note">List prices as of ${escapeHtml(spend.pricesUpdated)}. All time: ${escapeHtml(formatSpend(spend.allTime?.estimatedMicros))} over ${formatTokenCount(spend.allTime?.totalTokens)} tokens.</p>`;
+}
+
+const COHORT_ROWS = [
+  ["Runs", (cohort) => cohort.runs],
+  ["Completed", (cohort) => (cohort.completionRate == null ? "—" : `${Math.round(cohort.completionRate * 100)}% of ${cohort.finishedRuns}`)],
+  ["Cited evidence", (cohort) => (cohort.groundingRate == null ? "—" : `${Math.round(cohort.groundingRate * 100)}%`)],
+  ["Tool reliability", (cohort) => (cohort.toolReliability == null ? "—" : `${Math.round(cohort.toolReliability * 100)}%`)],
+  ["Tool calls per run", (cohort) => (cohort.toolCalls == null ? "—" : cohort.toolCalls)],
+  ["Your rating", (cohort) => (cohort.meanRating == null ? "unrated" : `${cohort.meanRating} over ${cohort.ratedRuns}`)],
+  ["Cost units per run", (cohort) => (cohort.meanCostUnits == null ? "—" : cohort.meanCostUnits)],
+  ["Latency", (cohort) => (cohort.meanLatencyMs == null ? "—" : `${Math.round(cohort.meanLatencyMs / 100) / 10}s`)]
+];
+
+const GAP_LABEL = {
+  completionRate: "Completion rate", groundingRate: "Cited evidence",
+  toolReliability: "Tool reliability", rating: "Your rating", costUnits: "Cost per run"
+};
+
+async function renderSpecialistComparison() {
+  const container = $("#specialist-cohorts");
+  if (!container) return;
+  const report = await api("/api/evolution/specialists");
+  $("#specialist-verdict").textContent = report.verdict;
+  const badge = $("#specialist-verdict-badge");
+  if (badge) {
+    badge.textContent = report.conclusive ? "MEASURED DIFFERENCE" : "NO VERDICT";
+    badge.classList.toggle("is-positive", Boolean(report.conclusive));
+  }
+  container.innerHTML = `
+    <table class="specialist-table">
+      <thead><tr><th></th><th>Specialists</th><th>One voice</th></tr></thead>
+      <tbody>${COHORT_ROWS.map(([label, read]) => `
+        <tr><th scope="row">${escapeHtml(label)}</th>
+          <td>${escapeHtml(String(read(report.cohorts.specialists)))}</td>
+          <td>${escapeHtml(String(read(report.cohorts.control)))}</td></tr>`).join("")}
+      </tbody>
+    </table>`;
+  // A gap is only shown once both arms are big enough to have earned one.
+  // Printing z-scores over four runs would invite exactly the conclusion the
+  // verdict above is refusing to draw.
+  const showable = Object.entries(report.comparison).filter(([, gap]) => gap && report.cohorts.specialists.runs >= report.minimumCohort && report.cohorts.control.runs >= report.minimumCohort);
+  $("#specialist-gaps").innerHTML = showable.length ? showable.map(([metric, gap]) => `
+    <div class="route-history-item${gap.separated ? " is-separated" : ""}">
+      <strong>${escapeHtml(GAP_LABEL[metric] || metric)}</strong>
+      <p>${gap.delta > 0 ? "+" : ""}${escapeHtml(String(Math.round(gap.delta * 1000) / 1000))} with specialists · z ${escapeHtml(String(Math.round(gap.z * 100) / 100))} · ${gap.separated ? "separated from its own noise" : "inside its own noise"}</p>
+    </div>`).join("") : "";
+  const method = $("#specialist-method");
+  if (method) {
+    method.textContent = report.unlabelledRuns
+      ? `${report.method} ${report.unlabelledRuns} earlier run${report.unlabelledRuns === 1 ? "" : "s"} predate the control arm and are counted in neither column.`
+      : report.method;
+  }
+}
+
+// What each specialist may reach, said in words rather than a policy name.
+const REACH_LABEL = {
+  all: "reads, and may propose changes",
+  read: "reads only",
+  none: "no tools — reasons over what other steps found"
+};
+
+async function renderAgentModelPins() {
+  const container = $("#agent-model-pins");
+  if (!container) return;
+  const { agents } = await api("/api/agents");
+  const provider = app.settings.provider || "ollama";
+  container.innerHTML = agents.map((agent) => {
+    // The models Evolv currently has loaded, plus whatever is already pinned —
+    // a pin from another provider must not vanish because the chat provider
+    // changed since it was set.
+    const options = app.models.map((model) => `${provider}:${model.name}`);
+    if (agent.model && !options.includes(agent.model)) options.unshift(agent.model);
+    return `
+      <div class="agent-model-pin">
+        <label for="agent-model-${escapeHtml(agent.id)}">
+          <strong>${escapeHtml(agent.name)}</strong>
+          <small>${escapeHtml(agent.description)}</small>
+          <span class="reach">${escapeHtml(REACH_LABEL[agent.tools] || agent.tools || "")}</span>
+        </label>
+        <select id="agent-model-${escapeHtml(agent.id)}" data-agent-model="${escapeHtml(agent.id)}">
+          <option value="">The goal's own model</option>
+          ${options.map((value) => `<option value="${escapeHtml(value)}"${value === agent.model ? " selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+        </select>
+      </div>`;
+  }).join("");
 }
 
 function renderIntelligence() {
@@ -1597,6 +1896,8 @@ function renderIntelligence() {
   elements.intelligenceDot?.classList.toggle("hidden", !(data.stats?.pendingMemories));
   $("#auto-routing-enabled").checked = settings.autoRouting !== false;
   $("#auto-memory-enabled").checked = settings.autoMemory !== false;
+  const specialistSwitch = $("#agent-specialists-enabled");
+  if (specialistSwitch) specialistSwitch.checked = settings.agentSpecialists !== false;
   $("#evaluation-limit").value = String(settings.evaluationLimit || 10);
   $("#monthly-cost-limit").value = String(settings.monthlyCostLimit || 0);
   const cloudProviders = app.providers.filter((provider) => provider.requiresKey && provider.configured);
@@ -1707,7 +2008,6 @@ function renderProviderSettings() {
   if (!elements.providerSettingsList) return;
   elements.providerSettingsList.innerHTML = app.providers.map((provider) => {
     const cloudDisabled = provider.requiresKey && !provider.secretStorageAvailable;
-    const custom = provider.id === "custom";
     const ollama = provider.id === "ollama";
     return `
       <section class="provider-card" data-provider-card="${escapeHtml(provider.id)}">
@@ -1718,13 +2018,8 @@ function renderProviderSettings() {
         ${provider.statusMessage ? `<p class="settings-note">${escapeHtml(provider.statusMessage)}</p>` : ""}
         <div class="provider-card-fields">
           ${provider.requiresKey ? `<label class="wide"><span class="field-label">API KEY</span><input data-provider-key type="password" autocomplete="off" placeholder="${provider.configured ? "Enter a new key to replace the saved key" : "Paste API key"}" ${cloudDisabled ? "disabled" : ""}></label>` : ""}
-          ${(custom || ollama) ? `<label class="wide"><span class="field-label">BASE URL</span><input data-provider-url type="url" value="${escapeHtml(provider.baseUrl || "")}" ${cloudDisabled ? "disabled" : ""}></label>` : ""}
+          ${ollama ? `<label class="wide"><span class="field-label">BASE URL</span><input data-provider-url type="url" value="${escapeHtml(provider.baseUrl || "")}" ${cloudDisabled ? "disabled" : ""}></label>` : ""}
         </div>
-        ${custom ? `<div class="provider-capabilities">
-          <label><input data-provider-capability="tools" type="checkbox" ${provider.capabilities?.tools ? "checked" : ""}> Tools</label>
-          <label><input data-provider-capability="vision" type="checkbox" ${provider.capabilities?.vision ? "checked" : ""}> Vision</label>
-          <label><input data-provider-capability="thinking" type="checkbox" ${provider.capabilities?.thinking ? "checked" : ""}> Reasoning</label>
-        </div>` : ""}
         ${cloudDisabled ? `<p class="settings-note">${escapeHtml(provider.secretStorageDescription)}</p>` : ""}
         <div class="data-actions">
           <button class="secondary-button provider-save" type="button" ${cloudDisabled ? "disabled" : ""}>Save</button>
@@ -1742,13 +2037,11 @@ async function providerAction(button, action) {
   button.disabled = true;
   try {
     if (action === "save") {
-      const capabilities = Object.fromEntries([...card.querySelectorAll("[data-provider-capability]")]
-        .map((input) => [input.dataset.providerCapability, input.checked]));
       const apiKey = card.querySelector("[data-provider-key]")?.value;
       const baseUrl = card.querySelector("[data-provider-url]")?.value;
       await api(`/api/providers/${encodeURIComponent(providerId)}/credentials`, {
         method: "PUT",
-        body: JSON.stringify({ ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}), capabilities })
+        body: JSON.stringify({ ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}) })
       });
       toast(`${providerId} settings saved.`);
     } else if (action === "test") {
@@ -1886,10 +2179,15 @@ function messageNode(message, index) {
         </div>` : ""}
       </details>
     `).join("")}</div>` : ""}
+    ${!isAssistant && !message.streaming ? `<div class="message-actions">
+      <button class="feedback-button edit-button" title="Edit and resend" aria-label="Edit and resend this message">✎</button>
+      <button class="feedback-button copy-button" title="Copy" aria-label="Copy this message">⧉</button>
+    </div>` : ""}
     ${isAssistant && !message.streaming ? `<div class="message-actions">
       <button class="feedback-button ${message.feedback === "up" ? "selected" : ""}" data-rating="up" title="Helpful">↑</button>
       <button class="feedback-button ${message.feedback === "down" ? "selected" : ""}" data-rating="down" title="Needs work">↓</button>
       <button class="feedback-button speak-button" title="Read aloud" aria-label="Read this response aloud">◖</button>
+      <button class="feedback-button copy-button" title="Copy" aria-label="Copy this response">⧉</button>
       ${index === app.messages.length - 1 || ["error", "interrupted", "limit"].includes(message.status) ? `
         <button class="feedback-button regen-button" title="Regenerate response" aria-label="Regenerate response">↻</button>` : ""}
     </div>` : ""}
@@ -1899,6 +2197,10 @@ function messageNode(message, index) {
       button.addEventListener("click", () => speakText(message.content));
     } else if (button.classList.contains("regen-button")) {
       button.addEventListener("click", regenerateResponse);
+    } else if (button.classList.contains("copy-button")) {
+      button.addEventListener("click", () => copyText(message.content, button));
+    } else if (button.classList.contains("edit-button")) {
+      button.addEventListener("click", () => startEditingMessage(index));
     } else {
       button.addEventListener("click", () => giveFeedback(index, button.dataset.rating));
     }
@@ -2027,8 +2329,175 @@ async function addAttachments(files) {
   renderAttachments();
 }
 
+// Composer commands are handled locally and never reach a model. `/agent` is
+// the only entry point to the goal runner now that it has no sidebar tab.
+const COMPOSER_COMMANDS = [
+  { name: "/agent", description: "Plan and run a verified goal", run: openAgentGoal },
+  { name: "/sandbox", description: "Review simulations before they touch the project", run: openSandbox },
+  { name: "/physics", description: "Open the physics sandbox", run: () => switchView("physics") },
+  { name: "/circuit", description: "Open Evolv Circuit, the board bench", run: () => switchView("circuit") },
+  { name: "/lab", description: "Open the lab display", run: () => switchView("lab") },
+  { name: "/demo", description: "Watch Evolv run a narrated experiment", run: () => switchView("demo") }
+];
+
+function openSandbox() {
+  switchView("sandbox");
+}
+
+// A response is worth more outside Evolv than inside it. Code blocks already
+// had this; whole messages did not, which left selecting the text by hand.
+// The old way of copying, which needs no permission and no secure context.
+// navigator.clipboard does not exist at all outside a secure context, and Evolv
+// is a plain-HTTP local server: open it from another machine on the network and
+// the modern API is simply absent.
+function copyBySelection(value) {
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.cssText = "position:fixed;top:-1000px;opacity:0;";
+  document.body.append(field);
+  field.select();
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+  field.remove();
+  return copied;
+}
+
+async function copyText(text, button, { label = "" } = {}) {
+  const value = String(text || "");
+  let copied = false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      copied = true;
+    }
+  } catch {
+    // Chromium asks permission for this and the desktop app answers narrowly,
+    // so a refusal here is expected rather than exceptional. Fall through.
+    copied = false;
+  }
+  if (!copied) copied = copyBySelection(value);
+  if (!copied) return toast("Clipboard is unavailable.", "error");
+  if (button) {
+    const original = button.textContent;
+    button.textContent = button.dataset.copiedLabel || "✓";
+    setTimeout(() => { button.textContent = original; }, 1200);
+  }
+  if (label) toast(label);
+  return true;
+}
+
+// The slash commands existed but could only be reached by typing one from
+// memory. The menu appears as soon as a "/" is typed and lists what is there.
+function renderCommandMenu() {
+  const match = elements.prompt.value.match(/^\/([a-z0-9-]*)$/i);
+  const matches = match
+    ? COMPOSER_COMMANDS.filter((command) => command.name.slice(1).startsWith(match[1].toLowerCase()))
+    : [];
+  elements.commandMenu.classList.toggle("hidden", !matches.length);
+  if (!matches.length) return;
+  elements.commandMenu.innerHTML = matches.map((command) => `
+    <button type="button" data-command="${escapeHtml(command.name)}">
+      <strong>${escapeHtml(command.name)}</strong><span>${escapeHtml(command.description)}</span>
+    </button>`).join("");
+}
+
+function hideCommandMenu() {
+  elements.commandMenu?.classList.add("hidden");
+}
+
+// Editing loads the message back into the composer and marks the point the
+// conversation will be rewound to. Nothing is deleted until the edited message
+// is actually sent, so backing out costs nothing.
+function startEditingMessage(index) {
+  const message = app.messages[index];
+  if (!message || message.role !== "user" || app.generating) return;
+  app.editing = { id: message.id, index };
+  elements.prompt.value = message.content || "";
+  elements.editBanner.classList.remove("hidden");
+  resizePrompt();
+  elements.prompt.focus();
+  elements.prompt.setSelectionRange(elements.prompt.value.length, elements.prompt.value.length);
+}
+
+function cancelEditing() {
+  if (!app.editing) return false;
+  app.editing = null;
+  elements.prompt.value = "";
+  elements.editBanner.classList.add("hidden");
+  resizePrompt();
+  return true;
+}
+
+async function saveChatToVault() {
+  if (!app.conversationId || !app.messages.length) {
+    toast("There is no chat to save yet.", "error");
+    return;
+  }
+  try {
+    const result = await api(`/api/conversations/${encodeURIComponent(app.conversationId)}/vault-note`, {
+      method: "POST",
+      body: "{}"
+    });
+    toast(`Saved to ${result.path}`);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+function matchComposerCommand(text) {
+  const match = String(text).trim().match(/^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i);
+  if (!match) return null;
+  const command = COMPOSER_COMMANDS.find((item) => item.name === `/${match[1].toLowerCase()}`);
+  return command ? { command, argument: (match[2] || "").trim() } : null;
+}
+
+function openAgentGoal(objective = "") {
+  switchView("agent");
+  const form = $("#agent-goal-form");
+  const field = form?.elements?.objective;
+  if (!field) return;
+  if (objective) field.value = objective;
+  // Send the person to the first thing they still have to supply.
+  const next = objective ? (form.elements.successCriteria?.value.trim() ? form : form.elements.successCriteria) : field;
+  (next === form ? form.elements.objective : next).focus();
+  if (objective) toast("Goal drafted. Add success criteria, then propose a plan.");
+}
+
 async function sendMessage(text) {
   if (!text.trim() || app.generating) return;
+  hideCommandMenu();
+
+  // An edited question replaces itself and the replies it drew. The rewind
+  // happens first and only once: if it fails, nothing is sent and the
+  // conversation is exactly as it was.
+  if (app.editing) {
+    const { id } = app.editing;
+    try {
+      await api(`/api/conversations/${encodeURIComponent(app.conversationId)}/truncate`, {
+        method: "POST",
+        body: JSON.stringify({ messageId: id })
+      });
+    } catch (error) {
+      toast(error.message, "error");
+      return;
+    }
+    app.editing = null;
+    elements.editBanner.classList.add("hidden");
+    await openConversation(app.conversationId);
+  }
+
+  const composerCommand = matchComposerCommand(text);
+  if (composerCommand) {
+    elements.prompt.value = "";
+    resizePrompt();
+    composerCommand.command.run(composerCommand.argument);
+    return;
+  }
   if (!elements.model.value) {
     toast("Install or select an Ollama model first.", "error");
     return;
@@ -2042,15 +2511,12 @@ async function sendMessage(text) {
     saveLocal();
   }
   const images = app.attachments.slice(0, 3);
-  const packCommandId = app.pendingPackCommand?.id || "";
-  const packId = app.activePack?.id || "";
   app.attachments = [];
-  clearPackCommand();
   renderAttachments();
   addMessage({ role: "user", content: text.trim(), ...(images.length ? { images } : {}) });
   elements.prompt.value = "";
   resizePrompt();
-  await streamAssistantResponse({ text: text.trim(), ...(images.length ? { images } : {}), ...(packCommandId ? { packCommandId } : packId ? { packId } : {}) });
+  await streamAssistantResponse({ text: text.trim(), ...(images.length ? { images } : {}) });
 }
 
 async function regenerateResponse() {
@@ -2137,7 +2603,6 @@ async function streamAssistantResponse(request) {
         assistant.vault = event.vault || null;
         assistant.project = event.project || null;
         if (event.project?.knowledgeWithheld) assistant.notices.push("Project knowledge was withheld from this cloud provider.");
-        if (event.pack) assistant.notices.push(`${event.pack.name} command: ${event.pack.command}`);
         if (event.toolsUnsupported && elements.toolsMaster?.checked && app.tools.some((tool) => tool.enabled)) {
           assistant.notices.push("This model doesn't support tools; answering without them.");
         }
@@ -2266,539 +2731,6 @@ function resizePrompt() {
   elements.prompt.style.height = `${Math.min(elements.prompt.scrollHeight, 180)}px`;
 }
 
-function marketplaceQuery() {
-  const params = new URLSearchParams({
-    query: $("#marketplace-search")?.value.trim() || "",
-    category: $("#marketplace-category")?.value || "",
-    filter: app.marketplaceTab === "installed" ? "installed" : ($("#marketplace-filter")?.value || ""),
-    sort: $("#marketplace-sort")?.value || "featured",
-    os: $("#marketplace-os")?.value || "",
-    model: $("#marketplace-model-filter")?.value.trim() || ""
-  });
-  return params.toString();
-}
-
-function marketplaceArtwork(pack) {
-  const candidate = (pack.screenshots || []).find((item) =>
-    /^\/assets\/marketplace\/[a-z0-9-]+\.(?:jpg|png)$/.test(String(item || "")));
-  return candidate || "";
-}
-
-async function refreshMarketplace({ preserveDetails = true } = {}) {
-  if (!$("#marketplace-view")) return;
-  $("#marketplace-status").textContent = "Refreshing local catalog…";
-  try {
-    app.marketplace = await api(`/api/marketplace?${marketplaceQuery()}`);
-    if (app.marketplace.developerMode) {
-      try { app.marketplacePublishers = (await api("/api/marketplace/publishers")).publishers || []; } catch { app.marketplacePublishers = []; }
-    }
-    $("#marketplace-developer-mode").checked = Boolean(app.marketplace.developerMode);
-    $("#marketplace-developer-mode-settings").checked = Boolean(app.marketplace.developerMode);
-    $("#marketplace-developer-panel").classList.toggle("hidden", !app.marketplace.developerMode);
-    const remote = app.marketplace.remoteCatalog || {};
-    if (document.activeElement !== $("#marketplace-catalog-url")) $("#marketplace-catalog-url").value = remote.url || "";
-    $("#marketplace-catalog-status").textContent = remote.configured
-      ? `${remote.cached ? "Verified cache ready" : "Configured, not cached"}${remote.fetchedAt ? ` · synced ${new Date(remote.fetchedAt).toLocaleString()}` : ""}${remote.lastError ? ` · ${remote.lastError}` : ""}`
-      : "No remote catalog configured. Only trusted Ed25519 publisher keys are accepted.";
-    const reviewBackend = app.marketplace.reviewBackend || {};
-    if (document.activeElement !== $("#marketplace-review-url")) $("#marketplace-review-url").value = reviewBackend.url || "";
-    $("#marketplace-review-key").innerHTML = `<option value="">Choose a trusted publisher key</option>${(app.marketplacePublishers || [])
-      .filter((publisher) => publisher.trusted)
-      .map((publisher) => `<option value="${escapeHtml(publisher.keyId)}" ${publisher.keyId === reviewBackend.publisherKeyId ? "selected" : ""}>${escapeHtml(publisher.name)} · ${escapeHtml(publisher.keyId.slice(-12))}</option>`).join("")}`;
-    $("#marketplace-review-status").textContent = reviewBackend.configured
-      ? `Signed responses pinned to ${reviewBackend.publisherKeyId}.`
-      : "No review service configured. Reviews remain in the local outbox.";
-    const updates = (app.marketplace.installed || []).filter((item) => item.updateAvailable).length;
-    $("#marketplace-dot").classList.toggle("hidden", updates === 0);
-    renderMarketplace();
-    if (preserveDetails && app.marketplaceSelectedId) await openMarketplaceDetails(app.marketplaceSelectedId, { quiet: true });
-  } catch (error) {
-    $("#marketplace-status").textContent = `Marketplace unavailable: ${error.message}`;
-    $("#marketplace-grid").innerHTML = "";
-    throw error;
-  }
-}
-
-function renderMarketplaceCard(pack) {
-  const state = pack.updateAvailable ? "Update available" : pack.installed ? (pack.enabled ? "Installed" : "Disabled") : pack.price ? `$${pack.price.toFixed(2)}` : "Free";
-  const artwork = marketplaceArtwork(pack);
-  return `
-    <article class="marketplace-card ${pack.id === app.marketplaceSelectedId ? "selected" : ""}" tabindex="0" role="button" data-pack-id="${escapeHtml(pack.id)}" aria-label="Open ${escapeHtml(pack.name)}" aria-current="${pack.id === app.marketplaceSelectedId ? "true" : "false"}">
-      ${artwork ? `<img class="marketplace-card-art" src="${escapeHtml(artwork)}" alt="" loading="lazy" decoding="async" />` : ""}
-      <div class="marketplace-card-head">
-        <div class="marketplace-icon"><span>${escapeHtml(pack.icon)}</span></div>
-        <div><h3>${escapeHtml(pack.name)}</h3><div class="marketplace-card-meta"><span>${escapeHtml(pack.author.name)}</span><span>v${escapeHtml(pack.version)}</span></div></div>
-        ${pack.verified ? '<span class="marketplace-badge good">Verified</span>' : ""}
-      </div>
-      <p>${escapeHtml(pack.description)}</p>
-      <div class="marketplace-badges">
-        <span class="marketplace-badge">${escapeHtml(pack.category.replaceAll("-", " "))}</span>
-        <span class="marketplace-badge ${pack.updateAvailable ? "warn" : pack.installed ? "good" : ""}">${escapeHtml(state)}</span>
-        ${pack.localOnly ? '<span class="marketplace-badge">Local-only</span>' : '<span class="marketplace-badge warn">Cloud optional</span>'}
-      </div>
-      <div class="marketplace-card-meta"><span>★ ${pack.rating.toFixed(1)}</span><span>${pack.reviewCount} catalog reviews</span><span>${pack.commands.length} commands</span></div>
-    </article>`;
-}
-
-function renderMarketplace() {
-  if (!app.marketplace) return;
-  $$(".marketplace-tab").forEach((button) => {
-    const active = button.dataset.marketplaceTab === app.marketplaceTab;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-    button.tabIndex = active ? 0 : -1;
-  });
-  const commandsMode = app.marketplaceTab === "commands";
-  const packs = app.marketplace.packs || [];
-  $("#marketplace-featured").classList.toggle("hidden", true);
-  $("#marketplace-grid").innerHTML = commandsMode
-    ? renderMarketplaceCommands(app.marketplace.runtime || [])
-    : packs.map(renderMarketplaceCard).join("");
-  $("#marketplace-empty").classList.toggle("hidden", commandsMode ? (app.marketplace.runtime || []).some((item) => item.type === "command") : packs.length > 0);
-  $("#marketplace-status").textContent = commandsMode
-    ? `${(app.marketplace.runtime || []).filter((item) => item.type === "command").length} enabled pack commands · local registry`
-    : `${packs.length} bundled pack${packs.length === 1 ? "" : "s"} · ${app.marketplace.installed.length} installed · available offline`;
-}
-
-function renderMarketplaceCommands(runtime) {
-  const commands = runtime.filter((item) => item.type === "command");
-  const packs = [...new Map(commands.map((command) => [command.packId, command])).values()];
-  return packs.map((command) => `
-    <article class="marketplace-command-card">
-      <div class="marketplace-card-meta"><span>${escapeHtml(command.packName)}</span><span>Free-form specialist</span></div>
-      <h3>Chat with ${escapeHtml(command.packName)}</h3>
-      <p>Describe what you need in your own words. The pack will infer and formulate the task instead of requiring a preset command.</p>
-      <button class="primary-button marketplace-chat-pack" type="button" data-pack-id="${escapeHtml(command.packId)}" data-pack-name="${escapeHtml(command.packName)}">Enter chat</button>
-    </article>`).join("");
-}
-
-function permissionMarkup(permission, { selectable = false, granted = [] } = {}) {
-  const checked = permission.required || granted.includes(permission.id);
-  return `<label class="marketplace-permission">
-    ${selectable ? `<input type="checkbox" value="${escapeHtml(permission.id)}" ${checked ? "checked" : ""} ${permission.required ? "disabled" : ""} />` : "<span></span>"}
-    <span><strong>${escapeHtml(permission.name || permission.id)} ${permission.required ? "· required" : "· optional"}</strong>
-      <small>${escapeHtml(permission.description || "")}</small><small>Why: ${escapeHtml(permission.reason || "")}</small>
-      ${permission.supported === false ? '<small>This permission is modeled but not implemented in the v0.1 runtime.</small>' : ""}
-    </span>
-    <span class="marketplace-risk">${escapeHtml(permission.risk || "")}</span>
-  </label>`;
-}
-
-async function openMarketplaceDetails(id, { quiet = false } = {}) {
-  try {
-    const pack = await api(`/api/marketplace/packs/${encodeURIComponent(id)}`);
-    const artwork = marketplaceArtwork(pack);
-    app.marketplaceSelectedId = id;
-    const installed = pack.installedRecord;
-    let reviewState = { backend: app.marketplace?.reviewBackend || {}, trustedReviews: [], outbox: [], fetchedAt: null };
-    if (installed) {
-      try { reviewState = await api(`/api/marketplace/packs/${encodeURIComponent(id)}/reviews`); } catch {}
-    }
-    const devWatch = (app.marketplace?.developerWatches || []).find((item) => item.id === pack.id);
-    const primary = !installed
-      ? `<button class="primary-button marketplace-install" type="button" data-pack-id="${escapeHtml(pack.id)}">Install</button>`
-      : pack.updateAvailable
-        ? `<button class="primary-button marketplace-update" type="button" data-pack-id="${escapeHtml(pack.id)}" data-version="${escapeHtml(pack.availableVersion || "")}">Review ${escapeHtml(pack.availableVersion || "update")}</button>`
-        : `<button class="secondary-button marketplace-toggle" type="button" data-pack-id="${escapeHtml(pack.id)}" data-enabled="${String(!installed.enabled)}">${installed.enabled ? "Disable" : "Enable"}</button>`;
-    const chatAction = installed?.enabled
-      ? `<button class="primary-button marketplace-chat-pack" type="button" data-pack-id="${escapeHtml(pack.id)}" data-pack-name="${escapeHtml(pack.name)}" data-pack-artwork="${escapeHtml(artwork)}">Chat with this pack</button>`
-      : "";
-    $("#marketplace-details").innerHTML = `
-      <div class="marketplace-detail-head">
-        <div class="marketplace-icon"><span>${escapeHtml(pack.icon)}</span></div>
-        <div><p class="eyebrow">${pack.verified ? "VERIFIED CREATOR" : "LOCAL DEVELOPER"}</p><h2>${escapeHtml(pack.name)}</h2>
-          <div class="marketplace-card-meta"><span>${escapeHtml(pack.author.name)}</span><span>v${escapeHtml(pack.version)}</span><span>${escapeHtml(pack.license)}</span></div>
-        </div>
-      </div>
-      <p>${escapeHtml(pack.fullDescription)}</p>
-      ${artwork
-        ? `<figure class="marketplace-preview"><img src="${escapeHtml(artwork)}" alt="${escapeHtml(`${pack.name} cover artwork`)}" decoding="async" /></figure>`
-        : `<div class="marketplace-preview marketplace-preview-empty" aria-label="No pack artwork available"><span>${escapeHtml(pack.name)}<br><small>No artwork included</small></span></div>`}
-      <div class="marketplace-actions">${chatAction}${primary}
-        ${installed ? `<button class="secondary-button marketplace-configure" type="button" data-pack-id="${escapeHtml(pack.id)}">Configure</button>
-          <button class="secondary-button marketplace-export" type="button" data-pack-id="${escapeHtml(pack.id)}">Export</button>` : ""}
-      </div>
-      ${installed ? `<label class="marketplace-channel">Update channel
-        <select class="marketplace-channel-select" data-pack-id="${escapeHtml(pack.id)}" aria-label="Update channel for ${escapeHtml(pack.name)}">
-          ${["stable", "beta", "nightly"].map((channel) => `<option value="${channel}" ${installed.releaseChannel === channel ? "selected" : ""}>${channel[0].toUpperCase()}${channel.slice(1)}</option>`).join("")}
-        </select>
-        <small>${pack.updateAvailable ? `${escapeHtml(pack.availableVersion)} is available.` : "This channel is up to date."}</small>
-      </label>` : ""}
-      ${installed && app.marketplace?.developerMode ? `<div class="marketplace-actions">
-        ${devWatch
-          ? `<button class="secondary-button marketplace-dev-watch-stop" type="button" data-pack-id="${escapeHtml(pack.id)}">Stop live reload</button>
-             <span class="settings-note">${escapeHtml(devWatch.status)} · ${escapeHtml(devWatch.sourceName)}${devWatch.error ? ` · ${escapeHtml(devWatch.error)}` : ""}</span>`
-          : `<button class="secondary-button marketplace-dev-watch-start" type="button" data-pack-id="${escapeHtml(pack.id)}">Watch source folder</button>`}
-      </div>` : ""}
-      <div class="marketplace-badges">
-        <span class="marketplace-badge ${pack.verified ? "good" : pack.publisherVerification?.valid ? "warn" : ""}">${pack.verified ? "Verified publisher" : pack.publisherVerification?.valid ? "Signed · publisher not trusted" : "Unsigned"}</span>
-        <span class="marketplace-badge">${escapeHtml(pack.platforms.join(" · "))}</span>
-        <span class="marketplace-badge">${Math.ceil(pack.installedSize / 1024)} KB</span>
-      </div>
-      <section class="marketplace-detail-section"><h3>Features</h3><ul>${pack.features.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>
-      <section class="marketplace-detail-section"><h3>Commands</h3>${pack.commands.map((command) => `
-        <div class="marketplace-command-card"><strong>${escapeHtml(command.name)}</strong><p>${escapeHtml(command.description)}</p></div>`).join("")}</section>
-      <section class="marketplace-detail-section"><h3>Example tasks</h3><ul>${pack.examples.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>
-      <section class="marketplace-detail-section"><h3>Permissions</h3>${pack.permissions.map((permission) => `
-        ${permissionMarkup(permission)}
-        ${installed?.grantedPermissions?.includes(permission.id) ? `<button class="secondary-button marketplace-revoke" type="button" data-pack-id="${escapeHtml(pack.id)}" data-permission="${escapeHtml(permission.id)}">Revoke ${escapeHtml(permission.required ? "required permission · disables pack" : "optional permission")}</button>` : ""}
-      `).join("")}</section>
-      ${(pack.dependencies?.length || pack.conflicts?.length) ? `<section class="marketplace-detail-section"><h3>Pack relationships</h3>
-        ${(pack.dependencies || []).map((item) => `<p><strong>Requires</strong> ${escapeHtml(item.id)} ${escapeHtml(item.range)}${item.optional ? " · optional" : ""}</p>`).join("")}
-        ${(pack.conflicts || []).map((item) => `<p><strong>Conflicts</strong> ${escapeHtml(item.id)} ${escapeHtml(item.range)} · ${escapeHtml(item.reason)}</p>`).join("")}
-      </section>` : ""}
-      <section class="marketplace-detail-section"><h3>Compatibility</h3><p>Requires Evolv ${escapeHtml(pack.minEvolvVersion)}+ · Local: ${escapeHtml(pack.models.local.join(", "))} · Cloud: ${escapeHtml(pack.models.cloud.join(", "))}</p></section>
-      <details class="marketplace-detail-section"><summary>Documentation</summary><div>${renderMarkdown(pack.documentation)}</div></details>
-      <details class="marketplace-detail-section"><summary>Changelog</summary><ul>${pack.changelog.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></details>
-      ${installed ? `<section class="marketplace-detail-section marketplace-reviews"><h3>Reviews</h3>
-        <p class="settings-note">${reviewState.backend?.configured
-          ? `Only reviews carrying the configured backend's valid signature are shown as published.${reviewState.fetchedAt ? ` Last checked ${escapeHtml(new Date(reviewState.fetchedAt).toLocaleString())}.` : ""}`
-          : "No trusted review service is configured. Submissions are stored locally and are not presented as published."}</p>
-        ${reviewState.backend?.configured ? `<button class="secondary-button marketplace-review-sync" type="button" data-pack-id="${escapeHtml(pack.id)}">Refresh signed reviews</button>` : ""}
-        <div class="marketplace-review-list">${(reviewState.trustedReviews || []).map((review) => `<article class="marketplace-command-card">
-          <div class="marketplace-card-meta"><span>${"★".repeat(review.rating)}</span><span>${escapeHtml(review.author)}</span><span>${escapeHtml(review.createdAt)}</span></div>
-          <strong>${escapeHtml(review.title)}</strong><p>${escapeHtml(review.body)}</p>
-        </article>`).join("") || '<p class="settings-note">No verified published reviews are cached.</p>'}</div>
-        ${(reviewState.outbox || []).length ? `<details><summary>Local review outbox · ${reviewState.outbox.length}</summary>${reviewState.outbox.map((review) => `<p><strong>${escapeHtml(review.title)}</strong> · ${escapeHtml(review.status)}${review.lastError ? ` · ${escapeHtml(review.lastError)}` : ""}</p>`).join("")}</details>` : ""}
-        <form class="marketplace-review-form" data-pack-id="${escapeHtml(pack.id)}">
-          <label>Rating <select name="rating" required><option value="5">5 · Excellent</option><option value="4">4 · Good</option><option value="3">3 · Okay</option><option value="2">2 · Needs work</option><option value="1">1 · Poor</option></select></label>
-          <label>Title <input name="title" maxlength="160" required /></label>
-          <label>Details <textarea name="body" minlength="10" maxlength="4000" rows="3" required></textarea></label>
-          <button class="secondary-button" type="submit">Save review${reviewState.backend?.configured ? " & send" : " to local outbox"}</button>
-        </form>
-      </section>` : ""}
-      <details class="marketplace-detail-section"><summary>Raw manifest</summary><pre class="marketplace-diagnostics">${escapeHtml(JSON.stringify({
-        schemaVersion: pack.schemaVersion, id: pack.id, name: pack.name, version: pack.version, author: pack.author,
-        category: pack.category, license: pack.license, minEvolvVersion: pack.minEvolvVersion, platforms: pack.platforms,
-        models: pack.models, permissions: pack.permissions.map(({ id, required, reason }) => ({ id, required, reason })),
-        configSchema: pack.configSchema, agents: pack.agents, commands: pack.commands, workflows: pack.workflows
-      }, null, 2))}</pre></details>
-      ${installed ? `<details class="marketplace-detail-section"><summary>Diagnostics</summary><pre class="marketplace-diagnostics">${escapeHtml(JSON.stringify(pack.diagnostics, null, 2))}</pre>
-        <div class="marketplace-actions"><button class="secondary-button marketplace-copy-diagnostics" type="button">Copy diagnostics</button>
-        <button class="secondary-button marketplace-export-diagnostics" type="button" data-pack-id="${escapeHtml(pack.id)}">Export diagnostics</button>
-        <button class="secondary-button marketplace-repair" type="button" data-pack-id="${escapeHtml(pack.id)}">Reload & repair</button>
-        ${pack.diagnostics?.canOpenDirectory ? `<button class="secondary-button marketplace-open-directory" type="button" data-pack-id="${escapeHtml(pack.id)}">Open pack directory</button>` : ""}</div></details>
-        <div class="marketplace-actions"><button class="secondary-button marketplace-uninstall" type="button" data-pack-id="${escapeHtml(pack.id)}">Uninstall</button>
-        <button class="secondary-button" type="button" disabled title="Available with a future remote catalog">Report · remote catalog only</button></div>` : ""}
-    `;
-    // Pack details are replaced every time a card is selected. Bind the main
-    // install/update action to the new button itself so it does not depend on
-    // delegated-dialog behavior in Electron's packaged renderer.
-    $("#marketplace-details").querySelector(".marketplace-install, .marketplace-update")?.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const button = event.currentTarget;
-      if (button.disabled || app.marketplaceInstallInFlight) return;
-      button.disabled = true;
-      button.setAttribute("aria-busy", "true");
-      try {
-        await beginMarketplaceInstall({ id: button.dataset.packId, ...(button.dataset.version ? { version: button.dataset.version } : {}) });
-      } catch (error) {
-        toast(error.message, "error");
-      } finally {
-        button.disabled = false;
-        button.removeAttribute("aria-busy");
-      }
-    });
-    renderMarketplace();
-  } catch (error) {
-    if (!quiet) toast(error.message, "error");
-  }
-}
-
-async function beginMarketplaceInstall(input) {
-  if (app.marketplaceInstallInFlight) return;
-  const preview = await api("/api/marketplace/install/preview", { method: "POST", body: JSON.stringify(input) });
-  app.pendingMarketplaceInstall = { ...input, preview };
-  const error = $("#marketplace-permission-error");
-  error.textContent = "";
-  error.classList.add("hidden");
-  $("#marketplace-permission-title").textContent = `${preview.action === "update" ? "Update" : "Install"} ${preview.manifest.name}`;
-  $("#marketplace-permission-summary").textContent = preview.previousVersion
-    ? `Update ${preview.previousVersion} → ${preview.manifest.version}. Review every permission before continuing.`
-    : `Install ${preview.manifest.version} from the ${input.package ? "local file" : "bundled offline"} catalog.`;
-  const previouslyGranted = preview.grantedPermissions || [];
-  const relationships = preview.relationships || { dependencies: [], conflicts: [] };
-  const relationshipReview = $("#marketplace-relationship-review");
-  const relationshipRows = [
-    ...relationships.dependencies.map((item) => `<div class="marketplace-permission"><span aria-hidden="true">${item.installed && item.enabled && item.satisfies ? "✓" : item.optional ? "○" : "!"}</span><span><strong>${item.optional ? "Optional" : "Requires"} ${escapeHtml(item.id)} ${escapeHtml(item.range)}</strong><small>${item.installed ? `Installed ${escapeHtml(item.version)} · ${item.enabled ? "enabled" : "disabled"} · ${item.satisfies ? "compatible" : "incompatible"}` : "Not installed"}</small></span></div>`),
-    ...relationships.conflicts.map((item) => `<div class="marketplace-permission"><span aria-hidden="true">${item.installed && item.enabled && item.satisfies ? "!" : "✓"}</span><span><strong>Conflicts with ${escapeHtml(item.id)} ${escapeHtml(item.range)}</strong><small>${escapeHtml(item.reason)} · ${item.installed ? `${item.enabled ? "enabled" : "disabled"} ${escapeHtml(item.version)}` : "not installed"}</small></span></div>`)
-  ];
-  relationshipReview.classList.toggle("hidden", relationshipRows.length === 0);
-  relationshipReview.innerHTML = relationshipRows.join("");
-  const publisherReview = $("#marketplace-publisher-review");
-  const verification = preview.verification || {};
-  if (verification.state === "signed") {
-    publisherReview.classList.remove("hidden");
-    publisherReview.innerHTML = `<label class="marketplace-permission">
-      <input id="marketplace-trust-publisher" type="checkbox" />
-      <span><strong>Trust ${escapeHtml(verification.publisher?.name || "this publisher")}</strong>
-      <small>Valid Ed25519 signature · fingerprint ${escapeHtml(verification.keyId || "")}. Trusting this identity marks this and future correctly signed packs as verified.</small></span>
-      <span class="marketplace-risk">publisher trust</span>
-    </label>`;
-  } else {
-    publisherReview.classList.add("hidden");
-    publisherReview.replaceChildren();
-  }
-  $("#marketplace-permission-list").innerHTML = preview.permissions.map((permission) =>
-    permissionMarkup(permission, { selectable: true, granted: previouslyGranted })).join("");
-  $("#marketplace-permission-confirm").textContent = preview.action === "update" ? "Approve & update" : "Approve & install";
-  // Populate the approval card before placing it in Chromium's modal layer.
-  // Opening an empty dialog first can lose the first click in a busy packaged
-  // renderer, which made Install appear to do nothing.
-  showMarketplaceDialog("permissions");
-}
-
-async function confirmMarketplaceInstall(event) {
-  event.preventDefault();
-  const pending = app.pendingMarketplaceInstall;
-  if (!pending || app.marketplaceInstallInFlight) return;
-  const approvedPermissions = [...$("#marketplace-permission-list").querySelectorAll('input[type="checkbox"]')]
-    .filter((input) => input.checked || input.disabled).map((input) => input.value);
-  const trustPublisher = Boolean($("#marketplace-trust-publisher")?.checked);
-  const button = $("#marketplace-permission-confirm");
-  app.marketplaceInstallInFlight = true;
-  button.disabled = true;
-  button.setAttribute("aria-busy", "true");
-  button.textContent = pending.preview.action === "update" ? "Updating…" : "Installing…";
-  try {
-    const request = {
-      ...(pending.id ? { id: pending.id } : {}),
-      ...(pending.version ? { version: pending.version } : {}),
-      ...(pending.package ? { package: pending.package } : {}),
-      approvedPermissions,
-      trustPublisher
-    };
-    const installed = await api("/api/marketplace/install", {
-      method: "POST",
-      body: JSON.stringify(request)
-    });
-    const verified = await api(`/api/marketplace/packs/${encodeURIComponent(installed.id)}`);
-    if (!verified.installedRecord || verified.installedRecord.version !== installed.version || !verified.installedRecord.enabled) {
-      throw new Error("The pack was written but could not be verified as enabled. Open diagnostics and try Repair.");
-    }
-    closeMarketplaceDialog("permissions");
-    app.pendingMarketplaceInstall = null;
-    app.marketplaceSelectedId = installed.id;
-    toast(`${installed.manifest.name} ${installed.version} installed and enabled.`);
-    await refreshMarketplace();
-    // A throttled renderer can deliver the dialog's first animation frame
-    // after the install request finishes. Close once more after rendering so
-    // that delayed focus work cannot leave the approval panel onscreen.
-    closeMarketplaceDialog("permissions");
-  } catch (error) {
-    const output = $("#marketplace-permission-error");
-    output.textContent = error.message;
-    output.classList.remove("hidden");
-    toast(error.message, "error");
-  } finally {
-    app.marketplaceInstallInFlight = false;
-    button.disabled = false;
-    button.removeAttribute("aria-busy");
-    button.textContent = "Approve & install";
-  }
-}
-
-function configurationField(key, definition, value) {
-  const id = `marketplace-config-${key}`;
-  const title = escapeHtml(definition.title || key);
-  const description = escapeHtml(definition.description || "");
-  if (definition.type === "boolean") return `<label><span class="field-label">${title}</span><input id="${id}" name="${escapeHtml(key)}" type="checkbox" data-type="boolean" ${value ? "checked" : ""} /><small>${description}</small></label>`;
-  if (definition.enum) return `<label><span class="field-label">${title}</span><select id="${id}" name="${escapeHtml(key)}" data-type="string">${definition.enum.map((item) => `<option ${item === value ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}</select><small>${description}</small></label>`;
-  if (definition.type === "array") return `<label><span class="field-label">${title}</span><textarea id="${id}" name="${escapeHtml(key)}" data-type="array" rows="3">${escapeHtml((value || []).join("\n"))}</textarea><small>${description} One item per line.</small></label>`;
-  if (definition.format === "model") {
-    const options = (app.models || []).map((model) => `<option value="${escapeHtml(model.name)}">${escapeHtml(model.providerName || model.provider || "")}</option>`).join("");
-    return `<label><span class="field-label">${title}</span><input id="${id}" name="${escapeHtml(key)}" data-type="string" type="search" list="${id}-models" autocomplete="off" value="${escapeHtml(value ?? "")}" /><datalist id="${id}-models">${options}</datalist><small>${description} Search models currently available from the selected provider.</small></label>`;
-  }
-  if (["file", "folder"].includes(definition.format)) {
-    return `<label><span class="field-label">${title}</span><span class="marketplace-picker-row">
-      <input id="${id}" name="${escapeHtml(key)}" data-type="string" data-format="${escapeHtml(definition.format)}" type="text" readonly value="${escapeHtml(value ?? "")}" />
-      <button class="secondary-button marketplace-config-picker" type="button" data-key="${escapeHtml(key)}">Choose ${escapeHtml(definition.format)}</button>
-    </span><small>${description} The desktop dialog is required; the pack cannot choose a path itself.</small></label>`;
-  }
-  return `<label><span class="field-label">${title}</span><input id="${id}" name="${escapeHtml(key)}" data-type="${escapeHtml(definition.type)}" type="${definition.format === "secret" ? "password" : definition.type === "number" ? "number" : "text"}" value="${escapeHtml(value ?? "")}" /><small>${description}</small></label>`;
-}
-
-function marketplaceDialogByName(name) {
-  const suffix = name === "permissions" ? "permission" : name;
-  return $(`#marketplace-${suffix}-dialog`);
-}
-
-function marketplaceDialogs() {
-  return ["permissions", "config", "starter"].map(marketplaceDialogByName).filter(Boolean);
-}
-
-function syncMarketplaceDialogBackdrop() {
-  const open = marketplaceDialogs().some((dialog) => dialog.open || dialog.hasAttribute("open"));
-  $("#marketplace-dialog-backdrop")?.classList.toggle("hidden", !open);
-  document.documentElement.classList.toggle("marketplace-dialog-open", open);
-}
-
-function resetMarketplaceDialogs() {
-  for (const dialog of marketplaceDialogs()) {
-    try { if (dialog.open) dialog.close(); } catch {}
-    dialog.removeAttribute("open");
-    dialog.classList.remove("marketplace-dialog-visible");
-    dialog.dataset.displayState = "closed";
-  }
-  app.marketplaceDialogReturnFocus = null;
-  syncMarketplaceDialogBackdrop();
-}
-
-function showMarketplaceDialog(name) {
-  const dialog = marketplaceDialogByName(name);
-  if (!dialog) return;
-  for (const other of marketplaceDialogs()) {
-    if (other === dialog) continue;
-    try { if (other.open) other.close(); } catch {}
-    other.removeAttribute("open");
-    other.classList.remove("marketplace-dialog-visible");
-  }
-  dialog.dataset.displayState = "opening";
-  app.marketplaceDialogReturnFocus = document.activeElement;
-  dialog.classList.add("marketplace-dialog-visible");
-  dialog.setAttribute("aria-modal", "true");
-  try {
-    if (!dialog.open) dialog.show();
-  } catch {
-    dialog.setAttribute("open", "");
-  }
-  dialog.dataset.displayState = dialog.open ? "visible" : "visible-fallback";
-  syncMarketplaceDialogBackdrop();
-  requestAnimationFrame(() => {
-    if (!dialog.open) return;
-    dialog.dataset.displayState = "visible";
-    const preferred = dialog.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
-    preferred?.focus();
-  });
-}
-
-function closeMarketplaceDialog(name) {
-  const dialog = marketplaceDialogByName(name);
-  if (!dialog) return;
-  dialog.classList.remove("marketplace-dialog-visible");
-  dialog.removeAttribute("aria-modal");
-  dialog.dataset.displayState = "closing";
-  try { if (dialog.open) dialog.close(); } catch {}
-  // Also clear the non-modal fallback used by older embedded Chromium builds.
-  dialog.removeAttribute("open");
-  dialog.dataset.displayState = "closed";
-  syncMarketplaceDialogBackdrop();
-  const target = app.marketplaceDialogReturnFocus;
-  app.marketplaceDialogReturnFocus = null;
-  if (target?.isConnected) target.focus();
-}
-
-async function openMarketplaceConfig(id) {
-  const pack = await api(`/api/marketplace/packs/${encodeURIComponent(id)}`);
-  if (!pack.installedRecord) return;
-  const dialog = $("#marketplace-config-dialog");
-  dialog.dataset.packId = id;
-  dialog.dataset.dirty = "false";
-  $("#marketplace-config-title").textContent = `Configure ${pack.name}`;
-  $("#marketplace-config-fields").innerHTML = Object.entries(pack.configSchema.properties || {})
-    .map(([key, definition]) => configurationField(key, definition, pack.installedRecord.config[key] ?? definition.default)).join("")
-    || '<p class="settings-note">This pack has no configurable fields.</p>';
-  $("#marketplace-config-error").classList.add("hidden");
-  showMarketplaceDialog("config");
-}
-
-function collectMarketplaceConfig() {
-  return Object.fromEntries([...$("#marketplace-config-fields").querySelectorAll("[name]")].map((input) => {
-    const type = input.dataset.type;
-    const value = type === "boolean" ? input.checked : type === "number" ? Number(input.value)
-      : type === "array" ? input.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : input.value;
-    return [input.name, value];
-  }));
-}
-
-function downloadJsonFile(payload, filename) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function activatePackCommand(button) {
-  app.pendingPackCommand = {
-    id: button.dataset.commandId,
-    name: button.dataset.commandName,
-    packName: button.dataset.packName
-  };
-  let badge = $("#pack-command-active");
-  if (!badge) {
-    badge = document.createElement("div");
-    badge.id = "pack-command-active";
-    badge.className = "pack-command-active";
-    elements.prompt.parentElement.insertBefore(badge, elements.prompt);
-  }
-  badge.textContent = `${app.pendingPackCommand.packName} · ${app.pendingPackCommand.name} — type the task, then send`;
-  switchView("chat");
-  elements.prompt.placeholder = `Input for ${app.pendingPackCommand.name}…`;
-  elements.prompt.focus();
-}
-
-async function activatePackChat(button) {
-  const id = String(button.dataset.packId || "");
-  const name = String(button.dataset.packName || "Specialist pack");
-  const artwork = /^\/assets\/marketplace\/[a-z0-9-]+\.(?:jpg|png)$/.test(button.dataset.packArtwork || "")
-    ? button.dataset.packArtwork : (id === "evolv.autonomous-engineer" ? "/assets/marketplace/autonomous-engineer.png" : "");
-  app.pendingPackCommand = null;
-  app.activePack = { id, name, artwork, mode: "free-form" };
-  renderActivePack();
-  await startNewChat({ preservePack: true, title: `${name} chat` });
-  elements.prompt.placeholder = `Tell ${name} what you need…`;
-  elements.prompt.focus();
-  toast(`${name} is active. Describe the goal naturally; it will formulate the task.`);
-}
-
-function renderActivePack() {
-  $("#pack-command-active")?.remove();
-  if (!app.activePack) {
-    elements.prompt.placeholder = "Message Evolv…";
-    return;
-  }
-  const badge = document.createElement("div");
-  badge.id = "pack-command-active";
-  badge.className = "pack-command-active pack-chat-active";
-  const artwork = app.activePack.artwork || (app.activePack.id === "evolv.autonomous-engineer" ? "/assets/marketplace/autonomous-engineer.png" : "");
-  if (artwork) {
-    const image = document.createElement("img");
-    image.src = artwork;
-    image.alt = "";
-    badge.append(image);
-  }
-  const copy = document.createElement("span");
-  const title = document.createElement("strong");
-  title.textContent = app.activePack.name;
-  const note = document.createElement("small");
-  note.textContent = "Free-form pack chat · task inferred from your message";
-  copy.append(title, note);
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "pack-chat-exit";
-  close.textContent = "Exit pack";
-  close.addEventListener("click", clearActivePack);
-  badge.append(copy, close);
-  elements.prompt.parentElement.insertBefore(badge, elements.prompt);
-  elements.prompt.placeholder = `Tell ${app.activePack.name} what you need…`;
-}
-
-function clearActivePack() {
-  app.activePack = null;
-  $("#pack-command-active")?.remove();
-  elements.prompt.placeholder = "Message Evolv…";
-}
-
-function clearPackCommand() {
-  app.pendingPackCommand = null;
-  if (!app.activePack) {
-    $("#pack-command-active")?.remove();
-    elements.prompt.placeholder = "Message Evolv…";
-  }
-}
 
 function activeProject() {
   return app.projects.find((project) => project.id === app.activeProjectId) || app.projects[0] || null;
@@ -2876,14 +2808,30 @@ function switchView(view) {
   $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
   $$(".view").forEach((item) => item.classList.remove("active"));
   $(`#${view}-view`).classList.add("active");
-  if (view === "intelligence") refreshIntelligence().catch((error) => toast(error.message, "error"));
-  if (view === "mind") refreshObsidian().catch((error) => toast(error.message, "error"));
+  // Memory and Behaviour were four views between them — Mind studio, Personal
+  // intelligence, Evolution lab and Mind history — so each now pulls what its
+  // former homes pulled. refreshIntelligence still feeds both: it loads the
+  // memory inbox and the learning evidence, which parted company in the markup
+  // but not in the route behind it.
+  if (view === "memory") {
+    Promise.all([refreshIntelligence(), refreshObsidian()]).catch((error) => toast(error.message, "error"));
+  }
+  if (view === "behaviour") refreshIntelligence().catch((error) => toast(error.message, "error"));
   if (view === "tools") {
     Promise.all([refreshTools(), refreshToolRecipes(), refreshObsidian()]).catch((error) => toast(error.message, "error"));
   }
-  if (view === "marketplace") refreshMarketplace().catch((error) => toast(error.message, "error"));
   if (view === "projects") refreshProjects().catch((error) => toast(error.message, "error"));
   if (view === "agent") refreshAgentWorkspace().catch((error) => toast(error.message, "error"));
+  if (view === "sandbox") refreshSandboxes().catch((error) => toast(error.message, "error"));
+  if (view === "circuit") refreshCircuit().catch((error) => toast(error.message, "error"));
+  else suspendCircuit();
+  if (view === "physics") refreshPhysics().catch((error) => toast(error.message, "error"));
+  // The simulation clock must not keep running for a view nobody is looking at.
+  else suspendPhysics();
+  if (view === "lab") refreshLab().catch((error) => toast(error.message, "error"));
+  // Leaving the lab releases the camera; a webcam light that stays on after you
+  // navigate away is alarming, and rightly so.
+  else suspendLab();
 }
 
 function renderEvolution() {
@@ -3585,9 +3533,8 @@ async function evaluateProposal() {
   }
 }
 
-async function startNewChat({ preservePack = false, title = "New conversation" } = {}) {
+async function startNewChat({ title = "New conversation" } = {}) {
   stopSpeech();
-  if (!preservePack) clearActivePack();
   const conversation = await api("/api/conversations", {
     method: "POST",
     body: JSON.stringify({ title })
@@ -3596,7 +3543,6 @@ async function startNewChat({ preservePack = false, title = "New conversation" }
   app.messages = [];
   saveLocal();
   renderMessages();
-  renderActivePack();
   await refreshConversations();
   switchView("chat");
   elements.prompt.focus();
@@ -3702,9 +3648,31 @@ function bindEvents() {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       elements.composer.requestSubmit();
+      return;
+    }
+    // Up-arrow in an empty composer edits the last thing you said, the way a
+    // shell recalls the last command.
+    if (event.key === "ArrowUp" && !elements.prompt.value && !app.generating) {
+      const offset = [...app.messages].reverse().findIndex((message) => message.role === "user");
+      if (offset >= 0) {
+        event.preventDefault();
+        startEditingMessage(app.messages.length - 1 - offset);
+      }
     }
   });
-  elements.prompt.addEventListener("input", resizePrompt);
+  elements.prompt.addEventListener("input", () => {
+    resizePrompt();
+    renderCommandMenu();
+  });
+  elements.commandMenu?.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-command]");
+    if (!button) return;
+    elements.prompt.value = button.dataset.command;
+    hideCommandMenu();
+    elements.composer.requestSubmit();
+  });
+  elements.editCancel?.addEventListener("click", cancelEditing);
+  elements.saveChat?.addEventListener("click", saveChatToVault);
   elements.stop.addEventListener("click", async () => {
     const activeMessage = [...app.messages].reverse().find((message) => message.streaming && message.agentRun?.id);
     try {
@@ -3722,19 +3690,17 @@ function bindEvents() {
     const button = event.target.closest(".code-copy");
     if (!button) return;
     const code = button.closest(".code-block")?.querySelector("code");
-    try {
-      await navigator.clipboard.writeText(code?.textContent || "");
-      button.textContent = "Copied";
-      setTimeout(() => { button.textContent = "Copy"; }, 1500);
-    } catch {
-      toast("Clipboard is unavailable.", "error");
-    }
+    button.dataset.copiedLabel = "Copied";
+    await copyText(code?.textContent || "", button);
   });
   elements.model.addEventListener("change", () => {
     app.settings.model = elements.model.value;
     configureReasoning(elements.model.value);
+    updateFavoriteButton();
+    warnAboutFit();
     persistAiSettings();
   });
+  elements.favoriteModel.addEventListener("click", toggleFavoriteModel);
   elements.provider.addEventListener("change", async () => {
     app.settings.provider = elements.provider.value;
     app.settings.model = "";
@@ -3765,6 +3731,33 @@ function bindEvents() {
       });
       await refreshIntelligence();
       toast("Intelligence settings saved.");
+    } catch (error) { toast(error.message, "error"); }
+  });
+  // Saved the moment it is flipped rather than under the button below it: that
+  // button says "save specialist models", and a switch that decides whether
+  // specialists run at all is not one of those.
+  $("#agent-specialists-enabled")?.addEventListener("change", async (event) => {
+    const enabled = event.target.checked;
+    try {
+      await api("/api/intelligence/settings", { method: "PATCH", body: JSON.stringify({ agentSpecialists: enabled }) });
+      await refreshIntelligence();
+      toast(enabled
+        ? "Goal steps are shared out between specialists."
+        : "Goals now run as one voice. Runs started from here go into the control column.");
+    } catch (error) {
+      event.target.checked = !enabled;
+      toast(error.message, "error");
+    }
+  });
+  $("#save-agent-models")?.addEventListener("click", async () => {
+    try {
+      // Every specialist is sent, including the ones set back to empty, so
+      // clearing a pin is a change rather than an omission.
+      const agentModels = Object.fromEntries($$("[data-agent-model]").map((select) => [select.dataset.agentModel, select.value]));
+      await api("/api/settings", { method: "PATCH", body: JSON.stringify({ agentModels }) });
+      await renderAgentModelPins();
+      const pinned = Object.values(agentModels).filter(Boolean).length;
+      toast(pinned ? `Saved. ${pinned} specialist${pinned === 1 ? "" : "s"} pinned to a model.` : "Saved. Every specialist uses the goal's own model.");
     } catch (error) { toast(error.message, "error"); }
   });
   $("#intelligence-models")?.addEventListener("click", async (event) => {
@@ -4250,355 +4243,18 @@ function bindEvents() {
       sendMessage("Create one surprising, original idea by connecting two unrelated domains. Make it useful, explain the connection briefly, and clearly label any speculation.");
     });
   });
-  let marketplaceSearchTimer;
-  const refreshMarketplaceFromControls = () => {
-    clearTimeout(marketplaceSearchTimer);
-    marketplaceSearchTimer = setTimeout(() => refreshMarketplace({ preserveDetails: false }).catch((error) => toast(error.message, "error")), 180);
-  };
-  $("#marketplace-search")?.addEventListener("input", refreshMarketplaceFromControls);
-  $("#marketplace-search")?.addEventListener("change", () => {
-    const query = $("#marketplace-search").value.trim();
-    if (query) {
-      const recent = [query, ...loadJson("evolv:marketplace-searches", []).filter((item) => item !== query)].slice(0, 8);
-      localStorage.setItem("evolv:marketplace-searches", JSON.stringify(recent));
-    }
-    refreshMarketplaceFromControls();
-  });
-  for (const selector of ["#marketplace-category", "#marketplace-filter", "#marketplace-sort", "#marketplace-os"]) {
-    $(selector)?.addEventListener("change", refreshMarketplaceFromControls);
-  }
-  $("#marketplace-model-filter")?.addEventListener("input", refreshMarketplaceFromControls);
-  $("#marketplace-clear")?.addEventListener("click", () => {
-    $("#marketplace-search").value = "";
-    $("#marketplace-category").value = "";
-    $("#marketplace-filter").value = "";
-    $("#marketplace-sort").value = "featured";
-    $("#marketplace-os").value = "";
-    $("#marketplace-model-filter").value = "";
-    refreshMarketplace({ preserveDetails: false }).catch((error) => toast(error.message, "error"));
-  });
-  $$(".marketplace-tab").forEach((button) => button.addEventListener("click", () => {
-    app.marketplaceTab = button.dataset.marketplaceTab;
-    refreshMarketplace({ preserveDetails: false }).catch((error) => toast(error.message, "error"));
-  }));
-  $(".marketplace-tabs")?.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const tabs = $$(".marketplace-tab");
-    const current = Math.max(0, tabs.indexOf(document.activeElement));
-    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
-      : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-    event.preventDefault();
-    tabs[next].focus();
-    tabs[next].click();
-  });
-  $("#marketplace-grid")?.addEventListener("click", (event) => {
-    const packChat = event.target.closest(".marketplace-chat-pack");
-    if (packChat) return activatePackChat(packChat).catch((error) => toast(error.message, "error"));
-    const command = event.target.closest(".marketplace-run-command");
-    if (command) return activatePackCommand(command);
-    const card = event.target.closest("[data-pack-id]");
-    if (card) openMarketplaceDetails(card.dataset.packId);
-  });
-  $("#marketplace-grid")?.addEventListener("keydown", (event) => {
-    if (!["Enter", " "].includes(event.key)) return;
-    const card = event.target.closest(".marketplace-card");
-    if (card) { event.preventDefault(); openMarketplaceDetails(card.dataset.packId); }
-  });
-  $("#marketplace-details")?.addEventListener("click", async (event) => {
-    const button = event.target.closest("button");
-    if (!button) return;
-    try {
-      if (button.classList.contains("marketplace-chat-pack")) {
-        await activatePackChat(button);
-      } else if (button.classList.contains("marketplace-install") || button.classList.contains("marketplace-update")) {
-        await beginMarketplaceInstall({ id: button.dataset.packId, ...(button.dataset.version ? { version: button.dataset.version } : {}) });
-      } else if (button.classList.contains("marketplace-toggle")) {
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}`, {
-          method: "PATCH", body: JSON.stringify({ enabled: button.dataset.enabled === "true" })
-        });
-        await refreshMarketplace();
-      } else if (button.classList.contains("marketplace-configure")) {
-        await openMarketplaceConfig(button.dataset.packId);
-      } else if (button.classList.contains("marketplace-dev-watch-start")) {
-        const result = await api(`/api/marketplace/dev-watch/${encodeURIComponent(button.dataset.packId)}`, { method: "PUT", body: "{}" });
-        if (!result.canceled) toast(`Validated live reload started for ${result.sourceName}.`);
-        await refreshMarketplace();
-      } else if (button.classList.contains("marketplace-dev-watch-stop")) {
-        await api(`/api/marketplace/dev-watch/${encodeURIComponent(button.dataset.packId)}`, { method: "DELETE", body: "{}" });
-        toast("Pack live reload stopped.");
-        await refreshMarketplace();
-      } else if (button.classList.contains("marketplace-review-sync")) {
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/reviews/sync`, { method: "POST", body: "{}" });
-        toast("Signed reviews refreshed.");
-        await openMarketplaceDetails(button.dataset.packId);
-      } else if (button.classList.contains("marketplace-export")) {
-        const payload = await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/export`);
-        downloadJsonFile(payload, `${button.dataset.packId}-${payload.manifest.version}.evolvpack`);
-        toast("Pack exported.");
-      } else if (button.classList.contains("marketplace-uninstall")) {
-        if (!window.confirm("Uninstall this pack? Its commands will be removed. Your project files are never deleted.")) return;
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}`, { method: "DELETE", body: "{}" });
-        app.marketplaceSelectedId = "";
-        $("#marketplace-details").innerHTML = '<div class="empty-panel"><div class="empty-glyph">▦</div><h2>Pack uninstalled</h2><p>Its commands and agent are no longer registered.</p></div>';
-        await refreshMarketplace({ preserveDetails: false });
-      } else if (button.classList.contains("marketplace-repair")) {
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/repair`, { method: "POST", body: "{}" });
-        toast("Pack registration repaired.");
-        await openMarketplaceDetails(button.dataset.packId);
-      } else if (button.classList.contains("marketplace-copy-diagnostics")) {
-        await navigator.clipboard.writeText(button.closest("details").querySelector("pre").textContent);
-        toast("Diagnostics copied.");
-      } else if (button.classList.contains("marketplace-export-diagnostics")) {
-        const details = await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}`);
-        downloadJsonFile(details.diagnostics, `${button.dataset.packId}-diagnostics.json`);
-        toast("Diagnostics exported.");
-      } else if (button.classList.contains("marketplace-open-directory")) {
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/open`, { method: "POST", body: "{}" });
-      } else if (button.classList.contains("marketplace-run-command")) {
-        activatePackCommand(button);
-      } else if (button.classList.contains("marketplace-revoke")) {
-        if (!window.confirm(`Revoke ${button.dataset.permission}? Required permission revocation disables the pack.`)) return;
-        await api(`/api/marketplace/packs/${encodeURIComponent(button.dataset.packId)}/permission`, {
-          method: "DELETE", body: JSON.stringify({ permission: button.dataset.permission })
-        });
-        await refreshMarketplace();
-      }
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-details")?.addEventListener("change", async (event) => {
-    const select = event.target.closest(".marketplace-channel-select");
-    if (!select) return;
-    try {
-      await api(`/api/marketplace/packs/${encodeURIComponent(select.dataset.packId)}/channel`, {
-        method: "PATCH", body: JSON.stringify({ channel: select.value })
-      });
-      toast(`Update channel changed to ${select.value}.`);
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); await openMarketplaceDetails(select.dataset.packId); }
-  });
-  $("#marketplace-details")?.addEventListener("submit", async (event) => {
-    const form = event.target.closest(".marketplace-review-form");
-    if (!form) return;
-    event.preventDefault();
-    const payload = Object.fromEntries(new FormData(form));
-    try {
-      const result = await api(`/api/marketplace/packs/${encodeURIComponent(form.dataset.packId)}/reviews`, {
-        method: "POST", body: JSON.stringify(payload)
-      });
-      toast(result.status === "sent" ? "Review accepted by the signed backend." : "Review saved in the local outbox; it has not been published.");
-      await openMarketplaceDetails(form.dataset.packId);
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-permission-form")?.addEventListener("submit", confirmMarketplaceInstall);
-  // Keep an explicit click path as well as form submission. This avoids a
-  // Chromium dialog edge case where clicking the default submitter after a
-  // scroll does not dispatch the form's submit event.
-  $("#marketplace-permission-confirm")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    confirmMarketplaceInstall(event).catch((error) => toast(error.message, "error"));
-  });
-  $("#marketplace-permission-select-optional")?.addEventListener("click", () => {
-    $$("#marketplace-permission-list input[type=\"checkbox\"]:not(:disabled)").forEach((input) => { input.checked = true; });
-  });
-  $("#marketplace-permission-clear-optional")?.addEventListener("click", () => {
-    $$("#marketplace-permission-list input[type=\"checkbox\"]:not(:disabled)").forEach((input) => { input.checked = false; });
-  });
-  $$("[data-marketplace-close]").forEach((button) => button.addEventListener("click", () => {
-    const target = button.dataset.marketplaceClose;
-    if (target === "config" && $("#marketplace-config-dialog").dataset.dirty === "true"
-      && !window.confirm("Discard unsaved pack configuration changes?")) return;
-    closeMarketplaceDialog(target);
-    if (target === "permissions") app.pendingMarketplaceInstall = null;
-  }));
-  $("#marketplace-config-fields")?.addEventListener("input", () => {
-    $("#marketplace-config-dialog").dataset.dirty = "true";
-  });
-  $("#marketplace-config-fields")?.addEventListener("click", async (event) => {
-    const button = event.target.closest(".marketplace-config-picker");
-    if (!button) return;
-    const dialog = $("#marketplace-config-dialog");
-    try {
-      const result = await api(`/api/marketplace/packs/${encodeURIComponent(dialog.dataset.packId)}/picker`, {
-        method: "POST", body: JSON.stringify({ key: button.dataset.key })
-      });
-      if (!result.canceled && result.path) {
-        const input = $(`#marketplace-config-${CSS.escape(button.dataset.key)}`);
-        input.value = result.path;
-        dialog.dataset.dirty = "true";
-      }
-    } catch (error) { toast(error.message, "error"); }
-  });
-  for (const name of ["permissions", "config", "starter"]) {
-    const dialog = marketplaceDialogByName(name);
-    dialog?.addEventListener("cancel", (event) => {
-      event.preventDefault();
-      if (name === "config" && dialog.dataset.dirty === "true"
-        && !window.confirm("Discard unsaved pack configuration changes?")) return;
-      closeMarketplaceDialog(name);
-      if (name === "permissions") app.pendingMarketplaceInstall = null;
-    });
-    dialog?.addEventListener("click", (event) => {
-      if (event.target !== dialog) return;
-      closeMarketplaceDialog(name);
-      if (name === "permissions") app.pendingMarketplaceInstall = null;
-    });
-    dialog?.addEventListener("close", () => {
-      const target = app.marketplaceDialogReturnFocus;
-      app.marketplaceDialogReturnFocus = null;
-      if (target?.isConnected) target.focus();
-    });
-  }
-  const saveMarketplaceConfig = async (event) => {
-    event?.preventDefault();
-    if (app.marketplaceConfigSaveInFlight) return;
-    const id = $("#marketplace-config-dialog").dataset.packId;
-    const button = $("#marketplace-config-confirm");
-    const errorOutput = $("#marketplace-config-error");
-    app.marketplaceConfigSaveInFlight = true;
-    button.disabled = true;
-    button.setAttribute("aria-busy", "true");
-    button.textContent = "Savingâ€¦";
-    errorOutput.classList.add("hidden");
-    try {
-      await api(`/api/marketplace/packs/${encodeURIComponent(id)}/config`, {
-        method: "PUT", body: JSON.stringify({ config: collectMarketplaceConfig() })
-      });
-      closeMarketplaceDialog("config");
-      $("#marketplace-config-dialog").dataset.dirty = "false";
-      toast("Pack configuration saved.");
-      await refreshMarketplace();
-    } catch (error) {
-      errorOutput.textContent = error.message;
-      errorOutput.classList.remove("hidden");
-    } finally {
-      app.marketplaceConfigSaveInFlight = false;
-      button.disabled = false;
-      button.removeAttribute("aria-busy");
-      button.textContent = "Save configuration";
-    }
-  };
-  $("#marketplace-config-form")?.addEventListener("submit", saveMarketplaceConfig);
-  $("#marketplace-config-confirm")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    saveMarketplaceConfig(event).catch((error) => toast(error.message, "error"));
-  });
-  $("#marketplace-dialog-backdrop")?.addEventListener("click", () => {
-    const dialog = marketplaceDialogs().find((item) => item.open || item.hasAttribute("open"));
-    if (!dialog) return;
-    const name = dialog.id.includes("permission") ? "permissions" : dialog.id.includes("config") ? "config" : "starter";
-    if (name === "config" && dialog.dataset.dirty === "true"
-      && !window.confirm("Discard unsaved pack configuration changes?")) return;
-    closeMarketplaceDialog(name);
-    if (name === "permissions") app.pendingMarketplaceInstall = null;
-  });
-  $("#marketplace-config-reset")?.addEventListener("click", async () => {
-    const id = $("#marketplace-config-dialog").dataset.packId;
-    try {
-      await api(`/api/marketplace/packs/${encodeURIComponent(id)}/config`, { method: "DELETE", body: "{}" });
-      closeMarketplaceDialog("config");
-      $("#marketplace-config-dialog").dataset.dirty = "false";
-      toast("Pack configuration reset.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  const setMarketplaceDeveloperMode = async (event) => {
-    try {
-      const result = await api("/api/marketplace/settings", { method: "PATCH", body: JSON.stringify({ developerMode: event.target.checked }) });
-      $("#marketplace-developer-mode").checked = result.developerMode;
-      $("#marketplace-developer-mode-settings").checked = result.developerMode;
-      $("#marketplace-developer-panel").classList.toggle("hidden", !result.developerMode);
-      toast(`Marketplace Developer Mode ${result.developerMode ? "enabled" : "disabled"}.`);
-    } catch (error) { event.target.checked = !event.target.checked; toast(error.message, "error"); }
-  };
-  $("#marketplace-developer-mode")?.addEventListener("change", setMarketplaceDeveloperMode);
-  $("#marketplace-developer-mode-settings")?.addEventListener("change", setMarketplaceDeveloperMode);
-  $("#marketplace-import")?.addEventListener("click", () => $("#marketplace-file").click());
-  $("#marketplace-file")?.addEventListener("change", async (event) => {
-    const file = event.target.files[0];
-    event.target.value = "";
-    if (!file) return;
-    const output = $("#marketplace-validation-output");
-    output.classList.remove("hidden");
-    try {
-      if (file.size > 5 * 1024 * 1024) throw new Error("The .evolvpack file is too large.");
-      const localPackage = JSON.parse(await file.text());
-      const preview = await api("/api/marketplace/validate", { method: "POST", body: JSON.stringify({ package: localPackage }) });
-      output.textContent = JSON.stringify({ valid: true, id: preview.manifest.id, version: preview.manifest.version, permissions: preview.permissions }, null, 2);
-      await beginMarketplaceInstall({ package: localPackage });
-    } catch (error) {
-      output.textContent = `Validation failed\n${error.message}`;
-      toast(error.message, "error");
-    }
-  });
-  $("#marketplace-create")?.addEventListener("click", () => showMarketplaceDialog("starter"));
-  $("#marketplace-catalog-connect")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/catalog", {
-        method: "PUT", body: JSON.stringify({ url: $("#marketplace-catalog-url").value.trim() })
-      });
-      await api("/api/marketplace/catalog/sync", { method: "POST", body: "{}" });
-      toast("Signed remote catalog verified and cached.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); await refreshMarketplace(); }
-  });
-  $("#marketplace-catalog-sync")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/catalog/sync", { method: "POST", body: "{}" });
-      toast("Remote catalog synchronized.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); await refreshMarketplace(); }
-  });
-  $("#marketplace-catalog-disconnect")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/catalog", { method: "DELETE", body: "{}" });
-      toast("Remote catalog disconnected. Installed packs were kept.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-review-connect")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/reviews/backend", {
-        method: "PUT",
-        body: JSON.stringify({
-          url: $("#marketplace-review-url").value.trim(),
-          publisherKeyId: $("#marketplace-review-key").value
-        })
-      });
-      toast("Trusted review service saved.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-review-flush")?.addEventListener("click", async () => {
-    try {
-      const result = await api("/api/marketplace/reviews/outbox/flush", { method: "POST", body: "{}" });
-      toast(`Processed ${result.processed} pending review${result.processed === 1 ? "" : "s"}.`);
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-review-disconnect")?.addEventListener("click", async () => {
-    try {
-      await api("/api/marketplace/reviews/backend", { method: "DELETE", body: "{}" });
-      toast("Review service disconnected. Local outbox entries were kept.");
-      await refreshMarketplace();
-    } catch (error) { toast(error.message, "error"); }
-  });
-  $("#marketplace-starter-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const payload = { ...Object.fromEntries(formData), permissions: formData.getAll("permissions") };
-    try {
-      const starter = await api("/api/marketplace/starter", { method: "POST", body: JSON.stringify(payload) });
-      downloadJsonFile(starter, `${starter.manifest.id}-${starter.manifest.version}.evolvpack`);
-      closeMarketplaceDialog("starter");
-      event.currentTarget.reset();
-      toast("Starter .evolvpack generated.");
-    } catch (error) { toast(error.message, "error"); }
-  });
   window.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
       event.preventDefault();
-      switchView("marketplace");
-      $("#marketplace-search")?.focus();
+      startNewChat().catch((error) => toast(error.message, "error"));
+      return;
+    }
+    // Escape backs out of whatever is in progress, nearest first: the command
+    // menu, then an edit, then a running generation.
+    if (event.key === "Escape") {
+      if (!elements.commandMenu?.classList.contains("hidden")) return hideCommandMenu();
+      if (cancelEditing()) return;
+      if (app.generating) elements.stop.click();
     }
   });
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
@@ -4621,7 +4277,7 @@ function bindEvents() {
         body: JSON.stringify({ proposalId: app.state.pendingProposal.id })
       });
       await refreshState();
-      switchView("versions");
+      switchView("behaviour");
       toast("Upgrade approved and activated.");
     } catch (error) {
       toast(error.message, "error");

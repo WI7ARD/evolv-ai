@@ -10,6 +10,26 @@ function activePlan(run) {
   return run?.plans?.find((plan) => plan.status === "active") || run?.plans?.at(-1) || null;
 }
 
+// A goal is now shared out between specialists, and the plan records which one
+// each step went to. The step rows do not carry it — the whole plan is stored
+// as JSON — so it is matched on the plan's own step id.
+function assignedAgent(plan, step) {
+  return plan?.definition?.steps?.find((item) => item.id === step.externalId)?.agent || "";
+}
+
+function agentLabel(id) {
+  return String(id || "").replace(/(^|[-_])([a-z])/g, (match, separator, letter) => (separator ? " " : "") + letter.toUpperCase());
+}
+
+// The run of specialists, in order, with repeats collapsed: "Researcher →
+// Analyst → Critic" says at a glance what shape the plan is. Not shown when
+// only one is involved, because then it says nothing.
+function handover(plan, run) {
+  const names = (run?.steps || []).map((step) => assignedAgent(plan, step)).filter(Boolean);
+  const sequence = names.filter((name, index) => name !== names[index - 1]);
+  return new Set(sequence).size > 1 ? sequence.map(agentLabel).join(" → ") : "";
+}
+
 function statusLabel(value) {
   return String(value || "unknown").replaceAll("_", " ");
 }
@@ -17,7 +37,10 @@ function statusLabel(value) {
 function budgets(name) {
   if (name === "small") return { maxSteps: 5, maxRuntimeMs: 300000, maxToolCalls: 10, maxRetries: 1, maxTokens: 20000, maxCostUnits: 3 };
   if (name === "focused") return { maxSteps: 8, maxRuntimeMs: 600000, maxToolCalls: 16, maxRetries: 2, maxTokens: 40000, maxCostUnits: 6 };
-  return { maxSteps: 12, maxRuntimeMs: 1200000, maxToolCalls: 24, maxRetries: 2, maxTokens: 65536, maxCostUnits: 10 };
+  // The thorough preset stops rationing tool calls: a step may retry, and a
+  // run that does real work should not stall on a budget rather than on the
+  // work. Steps still bound how long a plan can be.
+  return { maxSteps: 12, maxRuntimeMs: 1200000, maxToolCalls: 100, maxRetries: 2, maxTokens: 262144, maxCostUnits: 10 };
 }
 
 async function populateModels() {
@@ -55,6 +78,8 @@ function renderDetail() {
   const panel = $("#agent-run-detail");
   const run = state.runs.find((item) => item.id === state.selectedId);
   if (!panel || !run) { panel?.classList.add("hidden"); return; }
+  // Which specialist a step was handed to. It lives in the plan rather than on
+  // the step row, so it is matched on the id the plan wrote.
   panel.classList.remove("hidden");
   const plan = activePlan(run);
   const waiting = approvalFrom(run);
@@ -71,8 +96,9 @@ function renderDetail() {
     ${canApprove ? '<div class="agent-actions"><button class="primary-button" data-agent-action="approve-plan" type="button">Approve this plan</button></div>' : ""}
     ${waiting ? `<div class="agent-route-card"><strong>Approval required · ${escapeHtml(waiting.tool)}</strong><br />The action has not executed. Review it before deciding.<div class="agent-actions"><button class="primary-button" data-agent-action="approve-effect" data-tool-run="${escapeHtml(waiting.toolRunId)}" type="button">Approve action</button><button class="secondary-button" data-agent-action="reject-effect" data-tool-run="${escapeHtml(waiting.toolRunId)}" type="button">Reject</button></div></div>` : ""}
     <h3>Plan · revision ${escapeHtml(plan?.revision || 1)}</h3>
+    ${handover(plan, run) ? `<p class="agent-handover">${handover(plan, run)}</p>` : ""}
     <div class="agent-step-list">${(run.steps || []).map((step, index) => `
-      <div class="agent-step ${escapeHtml(step.state)}"><span class="agent-step-index">${index + 1}</span><div><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description)}</p><div class="agent-step-meta"><span class="status-pill">${escapeHtml(step.kind)}</span><span class="status-pill">${escapeHtml(step.approvalPolicy || "safe")}</span><span class="status-pill">${escapeHtml(step.state)}</span>${step.attempts ? `<span class="status-pill">attempt ${step.attempts}</span>` : ""}</div>${step.error?.message ? `<p class="form-error">${escapeHtml(step.error.message)}</p>` : ""}</div>${step.state === "failed" ? `<button class="secondary-button" data-agent-action="retry" data-step-id="${escapeHtml(step.id)}" type="button">Retry</button>` : ""}</div>`).join("")}</div>
+      <div class="agent-step ${escapeHtml(step.state)}"><span class="agent-step-index">${index + 1}</span><div><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description)}</p><div class="agent-step-meta">${assignedAgent(plan, step) ? `<span class="status-pill agent">${escapeHtml(agentLabel(assignedAgent(plan, step)))}</span>` : ""}<span class="status-pill">${escapeHtml(step.kind)}</span><span class="status-pill">${escapeHtml(step.approvalPolicy || "safe")}</span><span class="status-pill">${escapeHtml(step.state)}</span>${step.attempts ? `<span class="status-pill">attempt ${step.attempts}</span>` : ""}</div>${step.error?.message ? `<p class="form-error">${escapeHtml(step.error.message)}</p>` : ""}</div>${step.state === "failed" ? `<button class="secondary-button" data-agent-action="retry" data-step-id="${escapeHtml(step.id)}" type="button">Retry</button>` : ""}</div>`).join("")}</div>
     <div class="agent-actions">
       ${canStart ? '<button class="primary-button" data-agent-action="start" type="button">Start approved plan</button>' : ""}
       ${canResume ? '<button class="primary-button" data-agent-action="resume" type="button">Resume</button>' : ""}
@@ -86,8 +112,8 @@ function renderDetail() {
 
 async function refresh(selectId = "") {
   if (!state.api) return;
-  const [runs, projects, providers, marketplace] = await Promise.all([
-    state.api("/api/runs?limit=100"), state.api("/api/projects"), state.api("/api/providers"), state.api("/api/marketplace").catch(() => ({ installed: [] }))
+  const [runs, projects, providers] = await Promise.all([
+    state.api("/api/runs?limit=100"), state.api("/api/projects"), state.api("/api/providers")
   ]);
   state.runs = (runs.runs || []).filter((run) => run.executor === "goal-runner-v1");
   state.projects = projects.projects || [];
@@ -96,8 +122,6 @@ async function refresh(selectId = "") {
   if (!state.selectedId && state.runs.length) state.selectedId = state.runs[0].id;
   $("#agent-project").innerHTML = state.projects.map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("");
   $("#agent-provider").innerHTML = state.providers.map((provider) => `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.name)}</option>`).join("");
-  const installed = marketplace.installed || marketplace.packs?.filter((pack) => pack.installed) || [];
-  $("#agent-pack").innerHTML = '<option value="">No pack</option>' + installed.map((pack) => `<option value="${escapeHtml(pack.id)}">${escapeHtml(pack.name)}</option>`).join("");
   if (!$("#agent-model").options.length) await populateModels();
   renderRunList(); renderDetail();
 }
@@ -183,7 +207,7 @@ export function initAgentWorkspace({ api, toast, getCsrf }) {
       const values = Object.fromEntries(new FormData(event.currentTarget));
       const created = await api("/api/agent-goals", { method: "POST", body: JSON.stringify({
         objective: values.objective, successCriteria: values.successCriteria, projectId: values.projectId,
-        packId: values.packId, provider: values.provider, model: values.model, budgets: budgets(values.budget)
+        provider: values.provider, model: values.model, budgets: budgets(values.budget)
       }) });
       state.selectedId = created.id;
       toast("Plan proposed. Review every step before approval.");

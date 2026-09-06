@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createDatabase } from "../lib/database.mjs";
 import { ProjectService, extractPdfText, inspectImage } from "../lib/projects.mjs";
+import { canonicalRoot } from "../lib/canonical-path.mjs";
 import { createToolRegistry } from "../lib/tools.mjs";
 import { DesktopProjectHost } from "../electron/project-host.mjs";
 
@@ -160,4 +161,47 @@ test("desktop project picker returns an expiring opaque grant and prevents cross
   host.claimRoot("profile-a", selected);
   assert.throws(() => host.claimRoot("profile-b", selected), /another Evolv profile/);
   assert.throws(() => host.consumeGrant(choice.grant), /expired/);
+});
+
+test("a folder connected by a non-canonical path stays usable afterwards", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "evolv-projects-link-"));
+  const real = path.join(root, "real-project");
+  const link = path.join(root, "link-to-project");
+  await mkdir(real, { recursive: true });
+  try {
+    await symlink(real, link, "junction");
+  } catch {
+    await rm(root, { recursive: true, force: true });
+    t.skip("Directory links are unavailable in this environment.");
+    return;
+  }
+  await writeFile(path.join(real, "notes.md"), "# Linked project\n\nIndexed through a link.\n");
+
+  const database = createDatabase({ dataDir: path.join(root, "profile"), defaultPrompt: "Test" });
+  // Close before removing: Windows refuses to unlink SQLite's open WAL files,
+  // and `after` hooks run in registration order.
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  // A host that hands back the path exactly as the user chose it — a link here,
+  // and on Windows commonly a short 8.3 path such as C:\Users\RUNNER~1\...
+  // Evolv must still recognise the folder on every later call.
+  const host = {
+    consumeGrant() { return link; },
+    claimRoot(_profileId, folder) { return path.resolve(folder); },
+    releaseRoot() {}
+  };
+  const service = new ProjectService({ database, profileId: "profile-link", profileDir: path.join(root, "profile"), host });
+  await service.initialize();
+  const project = service.defaultProject() || service.create({ name: "Linked" });
+  await service.connectGrant(project.id, "grant");
+
+  // This is the regression: verifying the grant used to canonicalise
+  // differently from saving it, so an unchanged folder read as a changed one.
+  const resolvedRoot = await service.rootFor(project.id);
+  assert.equal(resolvedRoot, await canonicalRoot(real));
+  await service.syncFiles(project.id);
+  const results = service.search(project.id, "Indexed");
+  assert.ok(results.length, "the linked project's files must be searchable");
 });

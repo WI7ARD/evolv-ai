@@ -38,7 +38,7 @@ test("Piper discovery requires the runtime, model, and matching JSON configurati
   fs.writeFileSync(path.join(piperDirectory, "piper.exe"), "runtime");
   fs.writeFileSync(path.join(downloadsPath, "voice.onnx"), "model");
   fs.writeFileSync(path.join(downloadsPath, "voice.onnx.json"), "{}");
-  const result = discoverPiperAssets({ downloadsPath });
+  const result = discoverPiperAssets({ downloadsPath, platform: "win32" });
   assert.equal(result.ready, true);
   assert.deepEqual(result.missing, []);
 });
@@ -52,7 +52,7 @@ test("a complete bundled Piper voice takes precedence over an incomplete downloa
   fs.writeFileSync(path.join(bundledRuntime, "piper.exe"), "runtime");
   fs.writeFileSync(path.join(bundledRoot, "en_GB-northern_english_male-medium.onnx"), "model");
   fs.writeFileSync(path.join(bundledRoot, "en_GB-northern_english_male-medium.onnx.json"), "{}");
-  const result = discoverPiperAssets({ downloadsPath, bundledRoot });
+  const result = discoverPiperAssets({ downloadsPath, bundledRoot, platform: "win32" });
   assert.equal(result.ready, true);
   assert.equal(path.basename(result.model), "en_GB-northern_english_male-medium.onnx");
 });
@@ -76,9 +76,9 @@ test("Whisper wake recognition requires the command runtime, model, and SDL micr
   fs.mkdirSync(release);
   fs.writeFileSync(path.join(release, "whisper-command.exe"), "runtime");
   fs.writeFileSync(path.join(release, "SDL2.dll"), "microphone");
-  assert.deepEqual(discoverWhisperAssets(root).missing, ["English speech model"]);
+  assert.deepEqual(discoverWhisperAssets(root, "win32").missing, ["English speech model"]);
   fs.writeFileSync(path.join(root, "ggml-base.en.bin"), "model");
-  const result = discoverWhisperAssets(root);
+  const result = discoverWhisperAssets(root, "win32");
   assert.equal(result.ready, true);
   assert.equal(path.basename(result.runtime), "whisper-command.exe");
 });
@@ -91,7 +91,7 @@ test("Whisper continuous VAD is preferred so wake word and command can be separa
   fs.writeFileSync(path.join(release, "whisper-stream.exe"), "stream");
   fs.writeFileSync(path.join(release, "SDL2.dll"), "microphone");
   fs.writeFileSync(path.join(root, "ggml-base.en.bin"), "model");
-  const result = discoverWhisperAssets(root);
+  const result = discoverWhisperAssets(root, "win32");
   assert.equal(result.mode, "stream");
   assert.equal(path.basename(result.runtime), "whisper-stream.exe");
 });
@@ -102,7 +102,7 @@ test("Whisper push-to-talk discovery requires the offline CLI and model", (t) =>
   fs.mkdirSync(release);
   fs.writeFileSync(path.join(release, "whisper-cli.exe"), "cli");
   fs.writeFileSync(path.join(root, "ggml-base.en.bin"), "model");
-  const result = discoverWhisperAssets(root);
+  const result = discoverWhisperAssets(root, "win32");
   assert.equal(result.transcriptionReady, true);
   assert.equal(path.basename(result.cliRuntime), "whisper-cli.exe");
 });
@@ -114,7 +114,7 @@ test("Whisper discovery prefers a higher-accuracy downloaded English model and h
   fs.writeFileSync(path.join(release, "whisper-cli.exe"), "cli");
   fs.writeFileSync(path.join(root, "ggml-base.en.bin"), "base");
   fs.writeFileSync(path.join(root, "ggml-small.en.bin"), "small");
-  const automatic = discoverWhisperAssets(root);
+  const automatic = discoverWhisperAssets(root, "win32");
   assert.equal(path.basename(automatic.model), "ggml-small.en.bin");
   assert.equal(automatic.modelTier, "improved");
   const selected = discoverWhisperAssets(root, "win32", "", path.join(root, "ggml-base.en.bin"));

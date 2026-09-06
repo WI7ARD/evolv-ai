@@ -6,11 +6,46 @@ Stage 6 local hearing intelligence details: [docs/STAGE-6-HEARING-INTELLIGENCE.m
 
 Stage 7 reliability and release details: [docs/STAGE-7-RELIABILITY-RELEASE.md](docs/STAGE-7-RELIABILITY-RELEASE.md)
 
-Evolv is a local-first chat that runs against local Ollama models or cloud
-providers (OpenAI, Anthropic, Gemini, OpenRouter, or any OpenAI-compatible API),
-with model switching, reasoning controls, safe local tools, persistent SQLite
-conversations, feedback, and reversible behavioral upgrades. It runs in the
-browser (`npm start`) or as a hardened Windows desktop app.
+Evolv is a local-first chat that runs against local Ollama models, with OpenAI
+available for when a local model is not enough. It has model switching,
+reasoning controls, safe local tools, persistent SQLite conversations, feedback,
+reversible behavioral upgrades, and a physics sandbox the assistant can build in
+and read the results of. It runs in the browser (`npm start`) or as a hardened
+Windows desktop app.
+
+## Evolv Circuit
+
+The other half is a hardware bench. **Evolv Circuit** takes a board from a
+sentence to something you can order the parts for, and keeps the whole of it as
+one object.
+
+A board carries its design, its firmware, what it is supposed to do, and the
+record of everything that has happened to it — nine stages from the sentence
+that started it to a reading off the finished thing:
+
+**intent → design → simulate → program → specify → verify → export → build →
+measure**
+
+The schematic is solved by modified nodal analysis with Newton–Raphson, the
+same method SPICE uses, so a red LED behind 220Ω on 5V lands at 2.1V and 13mA
+because that is where the maths puts it. Firmware runs in an interpreter that
+charges clock cycles, so `delay()` costs real time. Expectations are stated
+against the device rather than the code — *this LED reaches half brightness*,
+*this rail never draws more than 30mA* — and checked with the figure that was
+measured. Export produces a KiCad netlist and a bill of materials.
+
+Two properties make it a bench rather than a drawing tool. Every stage records
+itself as it happens, so a history never depends on anyone remembering to save
+it. And each record names the design it judged, so a check or an export whose
+circuit has changed underneath it reads as out of date rather than done — and
+says which part moved.
+
+The last stage is the one that closes the loop: type in what a meter said on
+the real board, and it is shown next to what the solver predicted. It is the
+only reading in Evolv that did not come from the simulation, so it is the only
+one that can prove the simulation wrong.
+
+Open it with `/circuit`.
 
 ## Private adaptive profile
 
@@ -86,13 +121,25 @@ On Windows, you can also double-click `start.cmd`.
 
 Evolv 0.6.3 is the first updater-capable Windows build. In the packaged app,
 open **Settings â†’ Software updates**. Evolv checks the stable release from
-`WI7ARD/evolv-personal`, requires an exact release ZIP and `.sha256` file,
+`WI7ARD/evolv-ai`, requires an exact release ZIP and `.sha256` file,
 verifies the packaged executable and application archive, then replaces the
 portable app folder and restarts. It never installs drafts or prereleases and
 never downloads an update silently.
 
-The GitHub repository and release workflow are prepared locally but cannot be
-published until GitHub CLI is reauthenticated. See
+On Linux, the AppImage updates itself in place and downloads only the parts
+that changed. Most of the image is Electron, which is identical between
+releases, so an update is normally a few megabytes rather than three hundred:
+Evolv fetches a block map published beside the AppImage, finds those blocks in
+the copy already installed, and asks the server only for the rest. The
+assembled file must match the release's published SHA-256 before anything is
+replaced, and the previous AppImage is kept beside the new one until Evolv has
+started successfully once. Updates are offered only when Evolv is running as an
+AppImage; a copy installed by a package manager or run from source owns its own
+updates.
+
+The repository checked for updates is read from `package.json`, so it cannot
+drift from the one the release workflow publishes to. Set
+`EVOLV_UPDATE_REPOSITORY` to override it. See
 [docs/GITHUB-RELEASES.md](docs/GITHUB-RELEASES.md) for the release procedure.
 Version 0.6.3 must be installed manually once; subsequent stable releases can
 be installed inside Evolv.
@@ -121,19 +168,29 @@ add a key for any of:
 | Provider | Notes |
 | --- | --- |
 | Ollama | Local, no key required (default `http://127.0.0.1:11434`) |
-| OpenAI | Chat models via the OpenAI API |
-| Anthropic | Claude models via the Messages API with native token streaming |
-| Google Gemini | Gemini models via the Generative Language API with native token streaming |
-| OpenRouter | Any OpenRouter-hosted model, with capability metadata |
-| Custom | Any OpenAI-compatible endpoint (HTTPS, or HTTP on loopback only) |
+| OpenAI | Chat models via the Responses API, with native tool calling |
+
+Two, deliberately. Evolv used to speak six, and roughly two thirds of the
+provider layer was the seam between their dialects — each one a place to be
+subtly wrong in a way only that provider would notice. Adding a third is a
+decision to be made again, not a table to append to.
 
 API keys are encrypted before they touch disk and are **write-only** — Evolv
-never returns a stored key to the browser or includes one in an export. On the
-desktop app, keys are sealed with the Windows Data Protection API (DPAPI) so
-they can only be decrypted by the same Windows user on the same machine; in the
-browser build they are encrypted with a key held in the server's data directory.
-Custom endpoints are validated to block private, link-local, and loopback
-targets (except explicit `localhost`) and to reject credentials or redirects.
+never returns a stored key to the browser or includes one in an export. Keys are
+sealed by the operating system's own store, which on Windows is the Data
+Protection API, so they can only be decrypted by the same user on the same
+machine.
+
+**Cloud keys are desktop-only.** Running in the browser with `npm start`, there
+is no OS keystore to seal them with, so Evolv refuses to store one rather than
+inventing a weaker scheme and describing it as encryption: the key would end up
+next to the file it protects, which is not encryption at rest, it is a lock with
+its key taped to the door. Browser mode runs against local Ollama models, which
+need no key. Adding a cloud key there answers "Cloud API keys are available in
+the Evolv desktop app."
+
+Outbound provider requests refuse redirects, so a key cannot be forwarded to
+whichever host a redirect names.
 
 Capabilities (tools, vision, thinking) are detected per model and shown as
 badges in the picker, exactly as for local models. All providers stream
@@ -286,6 +343,49 @@ reviewable component changes, risks, and tests. These proposals cannot edit
 files, execute code, expand permissions, or apply themselves. Actual code
 changes remain a separate human-approved development step.
 
+## Sandbox — try the change before making it
+
+Evolv can do the work in a private copy of your project before touching a
+single real file. It mirrors the project's text files into a sandbox, edits
+there, runs syntax checks and approved package scripts there, and leaves your
+project untouched. A simulation that fails is thrown away and costs you
+nothing.
+
+Only one thing can write to your project: approving the promotion, which
+arrives as an ordinary diff approval in chat. Before writing, Evolv re-checks
+every target file and refuses the whole set if anything changed while the
+simulation ran — approved work is never applied on top of an edit you made in
+the meantime, and a multi-file change is all-or-nothing.
+
+Trying a change is automatic; applying it is not. That split is deliberate:
+the model should be free to attempt, fail, and retry without interrupting you,
+so the one approval you see is a result that already passed its checks.
+
+Secrets never enter a sandbox. `.env` files, credentials, keys, hidden folders
+and `node_modules` are excluded by the same rules that protect the project
+tools.
+
+Type `/sandbox` in chat to review open simulations, run their checks, or
+discard them. While any simulation is open, Evolv says so — the project on
+disk is unchanged until you say otherwise.
+
+## Verified goal runner
+
+Type `/agent` in the chat box to plan and run a bounded goal; `/agent <goal>`
+drafts the objective in one step. The command is handled in the browser and is
+never sent to a model.
+
+You state the outcome and its success criteria, and a model of your choice
+proposes a structured plan. Nothing runs until you have read that plan and
+approved it — and you can edit it first. Safe local reads then proceed on their
+own, while network research, file changes, engineering checks, and Obsidian
+note changes each stop for their own approval. A run completes only when a
+final verification step records evidence for the original criteria; a model
+answer without evidence is reported as partial or failed, never as success.
+
+Runs are durable: they survive a restart, can be paused, resumed, replanned,
+or cancelled, and each keeps its own step history, evidence, and budget.
+
 ## Evolv Marketplace
 
 Marketplace turns Evolv into a modular, local-first capability platform. The
@@ -344,6 +444,14 @@ npm run desktop     # run the desktop app in development
 npm run dist:win    # build the distributable Windows ZIP in out/make/
 ```
 
+You do not have to build it yourself to try a change. Every push and pull
+request runs a **Windows package** job that produces the same ZIP and attaches
+it to the run: open the commit or pull request on GitHub, follow its checks to
+the Actions run, and download the `Evolv-Windows-x64` artifact (the ZIP plus its
+`.sha256`). Artifacts are kept for 14 days. Tagged releases, which is what the
+in-app updater consults, are published separately by the Windows release
+workflow — see [docs/GITHUB-RELEASES.md](docs/GITHUB-RELEASES.md).
+
 `dist:win` produces `out/make/zip/win32/x64/Evolv-win32-x64-<version>.zip`,
 bundling Electron, the app in an `asar`, the native `better-sqlite3` binary
 (kept unpacked so it can load at runtime), the generated application icon, and
@@ -367,11 +475,13 @@ instructions, see [LINUX-MINT.md](LINUX-MINT.md).
 
 ### Toolchain notes
 
-The build is pinned to **Electron 41.9.2**, the newest supported Electron line
+The build is pinned to **Electron 41.10.4**, the newest supported Electron line
 with a verified `better-sqlite3` Windows prebuild for this release. Electron 42
 does not have a compatible prebuild, so moving beyond 41 currently requires a
 C++ toolchain or a database-runtime change. `dist:win` fetches the matching
-native binary, so no compiler is needed.
+native binary, so no compiler is needed. Stay on the newest 41.x patch: patch
+releases share the 41 ABI, so the same prebuild applies, and 41.10.3 fixed a
+sandboxed-iframe popup bypass (GHSA-9f4c-93c8-jc8g).
 
 `dist:win` is used instead of `electron-forge make` because, on Node 24+,
 `extract-zip` (via `yauzl`/`fd-slicer`) hangs while unpacking the Electron
@@ -447,7 +557,7 @@ With the app and Ollama running, verify real streamed responses:
 
 ```powershell
 $env:EVOLV_PASSWORD = "your Evolv password"
-npm run smoke            # non-persisted /api/chat round-trip
+npm run smoke            # plain streamed chat round-trip
 npm run smoke:persisted  # persisted chat with a forced tool call
 npm run smoke:models     # every installed model, pass/fail table
 Remove-Item Env:EVOLV_PASSWORD

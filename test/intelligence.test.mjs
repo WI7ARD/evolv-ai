@@ -63,6 +63,44 @@ test("Auto routing never considers cloud providers without explicit opt-in", asy
   assert.deepEqual(calls, ["ollama"]);
 });
 
+test("Auto routing prefers a working model over one that keeps failing", async (t) => {
+  const { root, database } = await fixture();
+  t.after(async () => { database.close(); await rm(root, { recursive: true, force: true }); });
+  const providerService = {
+    list: () => [{ id: "ollama", configured: true }],
+    models: async () => [
+      // The stronger model on paper, and the one Auto would otherwise pick.
+      { id: "big", capabilities: ["completion", "tools", "thinking"], parameterSize: "70B" },
+      // Also tool-capable, or it would be ineligible for this request and the
+      // test would prove nothing about demotion.
+      { id: "small", capabilities: ["completion", "tools"], parameterSize: "8B" }
+    ]
+  };
+  const ask = () => selectAutoModel({ providerService, database, text: "Plan and analyze this architecture trade-off in depth.", images: [], mode: "cognitive", toolsEnabled: true });
+
+  assert.equal((await ask()).model, "big", "nothing is known against it yet");
+
+  database.recordModelResult({ provider: "ollama", model: "big", ok: false, reason: "needs more memory than this computer has" });
+  assert.equal((await ask()).model, "big", "one failure is a bad moment, not a pattern");
+
+  database.recordModelResult({ provider: "ollama", model: "big", ok: false, reason: "needs more memory than this computer has" });
+  const afterFailures = await ask();
+  assert.equal(afterFailures.model, "small", "twice running is reason enough to route around it");
+
+  // Demoted, not excluded: with nothing else to choose from it is still offered
+  // rather than Auto refusing to answer.
+  const onlyBroken = await selectAutoModel({
+    providerService: { list: providerService.list, models: async () => [{ id: "big", capabilities: ["completion", "tools", "thinking"] }] },
+    database, text: "Hello", images: [], mode: "standard", toolsEnabled: false
+  });
+  assert.equal(onlyBroken.model, "big");
+  assert.ok(onlyBroken.reasons.some((reason) => /recently failed/.test(reason)), "and it says why it is a poor choice");
+
+  // A model that answers is working again, whatever it did before.
+  database.recordModelResult({ provider: "ollama", model: "big", ok: true });
+  assert.equal((await ask()).model, "big");
+});
+
 test("Auto routing reports when provider discovery falls back to an available model", async (t) => {
   const { root, database } = await fixture();
   t.after(async () => { database.close(); await rm(root, { recursive: true, force: true }); });

@@ -1,4 +1,4 @@
-# Evolv Personal 0.6.3 User Guide
+# Evolv Personal 0.7.0 User Guide
 
 ## Start and sign in
 
@@ -8,17 +8,13 @@ Open `Evolv.exe`. Create a local account on first launch, use a password of at l
 
 Select a provider and model, or choose **Auto · Balanced**. Auto shows the selected provider, model, reasons, and any fallback. Cloud providers are excluded until enabled in Intelligence settings.
 
+The star beside the model list adds the selected model to **Favourites**, which are grouped at the top of the list. Favourites are per provider, so starring a model from one provider does not star the same name from another.
+
+Evolv also remembers what happened last time each model was asked to answer. A model that fails twice running for its own reason — not installed, out of memory, no tool support, out of context — is labelled with that reason in the list, and **Auto** routes around it in favour of one that works. A single failure is treated as a bad moment rather than a broken model, and any successful reply clears the record. Failures that are not the model's fault, such as Ollama being shut down or a rejected API key, are never counted against it, because they would otherwise mark every model at once.
+
+Models are labelled with what they can do (🔧 tools, 👁 images, 🧠 reasoning) and, for local models, whether they fit in this computer's memory. **⚠ too big for this computer** means the model needs more memory than the machine has; it may fail to load or fall back to swapping. **⚠ tight fit** means it will load but leave little room, which shows up as slowness in long conversations. Neither is a block — a machine with a large GPU may cope — but the warning is shown when the model is selected rather than after a reply has already failed.
+
 Use **Projects** to keep work scoped. **Load verified demo** creates a real local demo with tasks and indexed evidence; it is safe to remove like any other project. Connect a folder only when you want Evolv's bounded read tools to inspect it.
-
-## Marketplace packs
-
-1. Open **Marketplace** and choose a pack.
-2. Select **Install**.
-3. Review required and optional permissions. Required permissions cannot be unchecked; optional permissions remain your choice.
-4. Select **Approve & install** once. Evolv blocks duplicate submissions and verifies the installed version is enabled before reporting success.
-5. Select **Enter chat** on an installed pack and describe what you want. The pack infers a bounded task from the conversation.
-
-If installation fails, the approval panel keeps the exact safe error visible. Close it with **Cancel**, the × button, Escape, or by selecting the backdrop. No pack can silently expand its permissions.
 
 ## Conversation sidebar
 
@@ -53,7 +49,9 @@ Use the generated `Evolv-linux-x64-0.6.3.tar.gz`. Do not relabel a Windows build
 
 ## Run a verified goal
 
-1. Open **Agent** in the left sidebar.
+1. Type `/agent` in the chat box. Adding the goal on the same line — `/agent
+   audit the release checklist` — drafts it for you. The command is handled
+   locally and is never sent to a model.
 2. Enter the goal and one measurable success criterion per line.
 3. Choose the project, optional installed pack, provider/model, and a budget no larger than the balanced preset.
 4. Select **Propose plan**. Read every step. You may edit the structured plan before approval.

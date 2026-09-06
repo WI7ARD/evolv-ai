@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Lets a build be started by hand from the Actions tab. Useful when a run is
+  # wanted without a new commit — re-running a stuck run keeps its original
+  # commit, which is rarely the one you want to check.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,6 +28,142 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install-deps
       - run: npm test
 
+  # Linux is a supported target (see LINUX-MINT.md and `npm run dist:linux`),
+  # so the suite has to stay green there too. Development dependencies are
+  # omitted deliberately: Electron's own postinstall extracts with the
+  # unpatched extract-zip, which hangs on Node >=24 everywhere, and
+  # scripts/patch-extract-zip.mjs can only repair that on Windows. The tests
+  # need no development dependency.
+  test-linux:
+    name: Node ${{ matrix.node }} on Linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - uses: ./.github/actions/install-deps
+        with:
+          args: --omit=dev
+      - run: npm test
+
+  # Builds a real, runnable Windows package on every change and attaches it to
+  # the run, so a build can be downloaded and tested without cutting a tagged
+  # release. The release workflow still owns publishing; this only produces a
+  # workflow artifact. It also means packaging breakage — a bad Electron pin, a
+  # missing native prebuild — surfaces on the pull request that caused it
+  # instead of at release time.
+  package-windows:
+    name: Windows package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          # Node 20 matches the release workflow and avoids the Node >=24
+          # extract-zip path that scripts/patch-extract-zip.mjs works around.
+          node-version: 20
+          cache: npm
+      - uses: ./.github/actions/install-deps
+      # A packaged app whose voice assets are Git LFS pointer stubs looks fine
+      # until Piper or Whisper is used, so fail here rather than ship one.
+      - name: Verify Git LFS assets were materialised
+        shell: pwsh
+        run: |
+          $pointers = Get-ChildItem -Path electron/voice-assets -Recurse -File |
+            Where-Object { $_.Length -lt 1024 } |
+            Where-Object { (Get-Content $_.FullName -TotalCount 1 -ErrorAction SilentlyContinue) -like 'version https://git-lfs*' }
+          if ($pointers) {
+            $pointers | ForEach-Object { Write-Host "LFS pointer: $($_.FullName)" }
+            throw "$($pointers.Count) voice asset(s) are still Git LFS pointers."
+          }
+          Write-Host "All voice assets are real files."
+      - run: npm run dist:win
+      - name: Create SHA-256 checksum
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $zip = "out/make/zip/win32/x64/Evolv-win32-x64-$version.zip"
+          if (-not (Test-Path $zip)) { throw "Package ZIP was not created" }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -Encoding ascii
+          Write-Host "Built $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Evolv-Windows-x64
+          path: |
+            out/make/zip/win32/x64/*.zip
+            out/make/zip/win32/x64/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+
+  # The installers people actually double-click: an NSIS .exe for Windows and an
+  # AppImage for Linux. Both are built on one Linux runner because both formats
+  # cross-build — NSIS is a Linux package and an AppImage is a squashfs image
+  # with a runtime in front of it — and because building them here means the
+  # same job produces the matching pair from the same commit.
+  #
+  # These wrap the packages scripts/pack-win.mjs produces rather than packaging
+  # again. That script swaps in the Electron-ABI better_sqlite3.node and lifts
+  # the voice assets out of the asar; a second pipeline would lose both quietly.
+  installers:
+    name: Installers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          # Node 20 for the same reason the Windows package job pins it.
+          node-version: 20
+          cache: npm
+      - uses: ./.github/actions/install-deps
+      # An installer whose voice assets are LFS pointer stubs installs happily
+      # and then fails the first time someone uses Piper.
+      - name: Verify Git LFS assets were materialised
+        run: |
+          # -size -1024c, in bytes. `-size -1k` looks equivalent and is not:
+          # find rounds sizes up to whole blocks, so a 133-byte pointer counts
+          # as 1k and "less than 1k" matches nothing at all. That form is a
+          # guard that can never fire, which is worse than no guard — it
+          # reports success on a tree with no models in it.
+          pointers=$(find electron/voice-assets -type f -size -1024c -exec grep -l '^version https://git-lfs' {} + || true)
+          if [ -n "$pointers" ]; then echo "$pointers"; echo "Voice assets are still Git LFS pointers."; exit 1; fi
+          echo "All voice assets are real files."
+      - name: Install installer tooling
+        run: sudo apt-get update && sudo apt-get install -y nsis squashfs-tools
+      - run: npm run dist:win
+      - run: npm run installer:win
+      - run: npm run dist:linux
+      - run: npm run installer:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Evolv-Windows-Installer
+          path: |
+            out/make/nsis/win32/x64/*.exe
+            out/make/nsis/win32/x64/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Evolv-Linux-AppImage
+          path: |
+            out/make/appimage/linux/x64/*.AppImage
+            out/make/appimage/linux/x64/*.sha256
+            out/make/appimage/linux/x64/*.blocks
+          if-no-files-found: error
+          retention-days: 14

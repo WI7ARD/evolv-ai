@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createDatabase } from "../lib/database.mjs";
 import { AgentRuntime } from "../lib/agent-runtime.mjs";
-import { validateGoalPlan } from "../lib/goal-contracts.mjs";
+import { parsePlannerJson, validateGoalPlan } from "../lib/goal-contracts.mjs";
 import { ObsidianVaultService } from "../lib/obsidian-vault.mjs";
 
 function samplePlan() {
@@ -85,4 +85,42 @@ test("approved plans create conflict-safe append-only Obsidian run journals", as
   assert.equal(second.appended, 0);
   const eventIds = [...content.matchAll(/evolv-event:([0-9a-f-]+)/g)].map((match) => match[1]);
   assert.equal(new Set(eventIds).size, eventIds.length);
+});
+
+test("planner output is recovered from prose, fences, and leaked reasoning traces", () => {
+  const fence = String.fromCharCode(96, 96, 96);
+  const plan = {
+    summary: "Calculate then verify",
+    steps: [
+      { id: "calc", title: "Calculate", description: "Use the calculator.", type: "tool", tool: "calculate", inputs: { expression: "2+2" } },
+      { id: "verify", title: "Verify", description: "Check the criterion.", type: "verification", dependencies: ["calc"] }
+    ]
+  };
+  const json = JSON.stringify(plan);
+  // A capable model still wraps its answer. None of these are model failures,
+  // so none of them may be reported as one.
+  const wrapped = [
+    json,
+    `${fence}json\n${json}\n${fence}`,
+    `${fence}\n${json}\n${fence}`,
+    `Here is the plan:\n\n${fence}json\n${json}\n${fence}\n\nLet me know.`,
+    `<think>I should keep this bounded.</think>\n${json}`,
+    `Plan:\n${json}`,
+    `${json}\n\nThis plan stays inside the approved tools.`
+  ];
+  for (const content of wrapped) {
+    assert.equal(parsePlannerJson(content).summary, "Calculate then verify", `failed to recover from: ${content.slice(0, 40)}`);
+  }
+
+  // Recovery must not become permissiveness.
+  for (const content of ["I cannot plan this goal.", "", "42", '{"summary": "x", steps: [}', "<think>never closed {\"summary\":\"x\"}"]) {
+    assert.throws(() => parsePlannerJson(content), (error) => error.code === "GOAL_PLANNER_MALFORMED", `wrongly accepted: ${content}`);
+  }
+
+  // A brace inside a string value must not end the object early.
+  const tricky = `Plan:\n${JSON.stringify({ summary: 'Handle {braces} and "quotes"', steps: plan.steps })}`;
+  assert.equal(parsePlannerJson(tricky).summary, 'Handle {braces} and "quotes"');
+
+  // Whatever is recovered still has to pass the real plan gate.
+  assert.equal(validateGoalPlan(parsePlannerJson(`Plan:\n${json}`), { availableTools: ["calculate"] }).steps.length, 2);
 });

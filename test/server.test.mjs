@@ -26,7 +26,17 @@ test.before(async () => {
     },
     stdio: "ignore"
   });
-  await delay(350);
+  // Waiting a fixed 350ms was a guess about how long a machine takes to open a
+  // socket, and it expired the moment the server grew another import: every
+  // test in this file failed on CI while passing locally. Ask instead.
+  let ready = false;
+  for (let attempt = 0; attempt < 60 && !ready; attempt += 1) {
+    try {
+      ready = (await fetch(`${BASE}/api/auth/status`)).ok;
+    } catch {}
+    if (!ready) await delay(100);
+  }
+  if (!ready) throw new Error("Server did not become ready.");
   client = await createAuthenticatedClient(BASE);
 });
 
@@ -45,12 +55,19 @@ test("serves the application shell", async () => {
   assert.doesNotMatch(shell, /id="live-button"/);
   assert.doesNotMatch(shell, /whisper-voice/);
   assert.doesNotMatch(shell, /Open palm/i);
-  assert.match(shell, /id="intelligence-view"/);
+  // Eight nav items became six. Four of the eight were abstractions only the
+  // author understood — Evolution, Intelligence, Versions, Mind — and two of
+  // them were both called Mind-something while being unrelated. Their contents
+  // were not deleted; they were regrouped by what they actually are.
+  assert.match(shell, /id="memory-view"/);
+  assert.match(shell, /id="behaviour-view"/);
+  assert.doesNotMatch(shell, /id="intelligence-view"|id="mind-view"|id="versions-view"|id="evolution-view"/,
+    "the four abstract views are gone as containers");
   assert.match(shell, /Memory Inbox/);
   assert.match(shell, /id="obsidian-status-badge"/);
   assert.match(shell, /id="tool-recipe-generate"/);
-  assert.match(shell, /id="marketplace-view"/);
-  assert.match(shell, /id="marketplace-permission-dialog"/);
+  assert.doesNotMatch(shell, /marketplace/i,
+    "the Marketplace is gone: 1,668 lines of signing, permissions and consent UI serving one pack");
   assert.match(shell, /\/assets\/evolv-logo\.png/);
   assert.match(shell, /CLOUD PROVIDERS ALLOWED TO RECEIVE VAULT EXCERPTS/);
   assert.match(shell, /Run evidence/);
@@ -104,46 +121,6 @@ test("evidence evolution API starts with immutable baseline and blocks unsafe ca
   assert.equal(unsafe.status, 400);
   assert.equal((await unsafe.json()).code, "STRATEGY_BOUNDARY");
   assert.equal((await (await client.fetch("/api/evolution")).json()).activeStrategy.id, "strategy-baseline-v1");
-});
-
-test("Marketplace API browses, installs, configures, disables, and uninstalls a bundled pack", async () => {
-  const catalog = await (await client.fetch("/api/marketplace")).json();
-  assert.equal(catalog.offline, true);
-  assert.equal(catalog.packs.length, 9);
-  assert.ok(catalog.packs.some((item) => item.id === "evolv.autonomous-engineer"));
-  const agentArtwork = await client.fetch("/assets/marketplace/autonomous-engineer.png");
-  assert.equal(agentArtwork.status, 200);
-  assert.equal(agentArtwork.headers.get("content-type"), "image/png");
-  const pack = catalog.packs.find((item) => item.id === "evolv.game-development");
-  assert.ok(pack);
-  const artwork = await client.fetch(pack.screenshots[0]);
-  assert.equal(artwork.status, 200);
-  assert.equal(artwork.headers.get("content-type"), "image/jpeg");
-  assert.ok(Number(artwork.headers.get("content-length")) > 100_000);
-  const previewResponse = await client.fetch("/api/marketplace/install/preview", {
-    method: "POST", body: JSON.stringify({ id: pack.id })
-  });
-  assert.equal(previewResponse.status, 200);
-  const preview = await previewResponse.json();
-  const approvedPermissions = preview.permissions.filter((item) => item.required).map((item) => item.id);
-  const installedResponse = await client.fetch("/api/marketplace/install", {
-    method: "POST", body: JSON.stringify({ id: pack.id, approvedPermissions })
-  });
-  assert.equal(installedResponse.status, 201);
-  const installed = await installedResponse.json();
-  assert.equal(installed.enabled, true);
-  const runtime = await (await client.fetch("/api/marketplace/runtime")).json();
-  assert.ok(runtime.capabilities.some((item) => item.id === "evolv.game-development:debug-system"));
-  const configuredResponse = await client.fetch(`/api/marketplace/packs/${encodeURIComponent(pack.id)}/config`, {
-    method: "PUT", body: JSON.stringify({ config: { engine: "Unity", prototypeBias: false } })
-  });
-  assert.equal(configuredResponse.status, 200);
-  assert.equal((await configuredResponse.json()).config.engine, "Unity");
-  assert.equal((await client.fetch(`/api/marketplace/packs/${encodeURIComponent(pack.id)}`, {
-    method: "PATCH", body: JSON.stringify({ enabled: false })
-  })).status, 200);
-  assert.equal((await (await client.fetch("/api/marketplace/runtime")).json()).capabilities.some((item) => item.packId === pack.id), false);
-  assert.equal((await client.fetch(`/api/marketplace/packs/${encodeURIComponent(pack.id)}`, { method: "DELETE", body: "{}" })).status, 200);
 });
 
 test("browser mode exposes safe Obsidian status but cannot claim an external folder", async () => {
@@ -238,6 +215,39 @@ test("stores knowledge safely and omits raw vectors from client state", async ()
 
   const deleted = await client.fetch(`/api/knowledge/${created.id}`, { method: "DELETE" });
   assert.equal(deleted.status, 200);
+  // Deleting the same record twice reports the second attempt honestly instead
+  // of silently rewriting the table from the request's own stale aggregate.
+  const again = await client.fetch(`/api/knowledge/${created.id}`, { method: "DELETE" });
+  assert.equal(again.status, 404);
+});
+
+test("prompt version activation and proposal discard persist within the request scope", async () => {
+  const before = await (await client.fetch("/api/state")).json();
+  const target = before.versions.at(-1).id;
+  // Activation runs its two writes in one database transaction taken inside the
+  // per-request profile scope, so this also proves that scope survives it.
+  const activated = await client.fetch("/api/versions/activate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ versionId: target })
+  });
+  assert.equal(activated.status, 200);
+  assert.equal((await activated.json()).activeVersionId, target);
+
+  const discarded = await client.fetch("/api/proposals/current", { method: "DELETE" });
+  assert.equal(discarded.status, 200);
+
+  const after = await (await client.fetch("/api/state")).json();
+  assert.equal(after.activeVersionId, target, "the activation must outlive the request that made it");
+  assert.equal(after.pendingProposal, null);
+  assert.equal(after.versions.length, before.versions.length, "activating must not add or drop versions");
+
+  const unknown = await client.fetch("/api/versions/activate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ versionId: "no-such-version" })
+  });
+  assert.equal(unknown.status, 404);
 });
 
 test("supports persisted conversation lifecycle", async () => {
@@ -259,17 +269,149 @@ test("supports persisted conversation lifecycle", async () => {
   assert.equal((await client.fetch(`/api/conversations/${created.id}?permanent=true`, { method: "DELETE" })).status, 200);
 });
 
+test("the roster the interface renders is the roster that runs", async () => {
+  const { agents } = await (await client.fetch("/api/agents")).json();
+
+  assert.deepEqual(agents.map((agent) => agent.id), ["researcher", "engineer", "analyst", "critic", "writer"]);
+  // What each may reach travels with it, so the interface states the boundary
+  // rather than describing one it has invented.
+  assert.equal(agents.find((agent) => agent.id === "critic").tools, "read");
+  assert.equal(agents.find((agent) => agent.id === "engineer").tools, "all");
+  assert.equal(agents.find((agent) => agent.id === "writer").tools, "none");
+  for (const agent of agents) assert.ok(agent.name && agent.description, `${agent.id} is described`);
+
+  // A pin set through settings comes back on the specialist it belongs to.
+  await client.fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agentModels: { critic: "ollama:evolv:max" } })
+  });
+  const pinned = await (await client.fetch("/api/agents")).json();
+  assert.equal(pinned.agents.find((agent) => agent.id === "critic").model, "ollama:evolv:max");
+  assert.equal(pinned.agents.find((agent) => agent.id === "writer").model, "");
+});
+
+test("a model pinned to a specialist is validated before it is stored", async () => {
+  const patch = (agentModels) => client.fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agentModels })
+  });
+
+  assert.equal((await patch({ critic: "openai:gpt-5", researcher: "ollama:evolv:latest" })).status, 200);
+  assert.deepEqual((await (await client.fetch("/api/settings")).json()).agentModels,
+    { critic: "openai:gpt-5", researcher: "ollama:evolv:latest" });
+
+  // It is read straight into a request, so an unrecognised provider or a name
+  // with no provider at all is refused rather than stored and discovered later.
+  assert.equal((await patch({ critic: "claude-sonnet-5" })).status, 400);
+  assert.equal((await patch({ critic: "not-a-provider:model" })).status, 400);
+  assert.equal((await patch({ "../etc": "ollama:x" })).status, 400);
+  assert.equal((await patch({ critic: "x".repeat(300) })).status, 400);
+  assert.equal((await patch("not an object")).status, 400);
+
+  // Empty clears the pin, which is how a specialist goes back to the run's model.
+  assert.equal((await patch({ critic: "" })).status, 200);
+});
+
+test("favouriting a model persists it and survives a bad request", async () => {
+  const favorited = await client.fetch("/api/models/favorite", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider: "ollama", model: "evolv:latest", favorite: true })
+  });
+  assert.equal(favorited.status, 200);
+  assert.deepEqual((await favorited.json()).favoriteModels, ["ollama:evolv:latest"]);
+
+  // Favourites are settings, so they have to be there on the next read rather
+  // than only in the reply that set them.
+  assert.deepEqual((await (await client.fetch("/api/settings")).json()).favoriteModels, ["ollama:evolv:latest"]);
+
+  // A model name with no provider cannot be turned into a favourite key.
+  const rejected = await client.fetch("/api/models/favorite", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "evolv:latest", favorite: true })
+  });
+  assert.equal(rejected.status, 400);
+  assert.deepEqual((await (await client.fetch("/api/settings")).json()).favoriteModels, ["ollama:evolv:latest"]);
+
+  // Settings patches are allowlisted, so the list cannot be filled with junk
+  // through the general settings route.
+  const patched = await client.fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ favoriteModels: ["anything at all"] })
+  });
+  assert.equal(patched.status, 400);
+});
+
+test("rewinding and saving a conversation refuse rather than half-succeed", async () => {
+  const created = await (await client.fetch("/api/conversations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Edit and save" })
+  })).json();
+
+  // Editing rewinds the conversation to a specific message. A message id that
+  // is not in this conversation must change nothing at all.
+  const truncated = await client.fetch(`/api/conversations/${created.id}/truncate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ messageId: "no-such-message" })
+  });
+  assert.equal(truncated.status, 404);
+  assert.equal((await (await client.fetch(`/api/conversations/${created.id}`)).json()).messages.length, 0);
+
+  // Saving a chat writes into the user's vault. With no vault connected it has
+  // to say so, not fail somewhere inside the writer.
+  const saved = await client.fetch(`/api/conversations/${created.id}/vault-note`, { method: "POST", body: "{}" });
+  assert.equal(saved.status, 409);
+  assert.match((await saved.json()).error, /Connect an Obsidian vault/);
+});
+
 test("exposes bounded tool configuration", async () => {
   const response = await client.fetch("/api/tools");
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.ok(payload.tools.some((tool) => tool.name === "calculate"));
   assert.ok(payload.tools.every((tool) => tool.contractVersion === 1 && tool.inputSchema?.type === "object" && tool.outputSchema));
-  assert.ok(payload.tools.every((tool) => ["read", "network-read", "approval-write"].includes(tool.risk)));
+  assert.ok(payload.tools.every((tool) => ["read", "network-read", "sandbox", "record", "approval-write"].includes(tool.risk)));
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "approval-write").map((tool) => tool.name).sort(), [
     "propose_engineering_check", "propose_obsidian_archive", "propose_obsidian_create", "propose_obsidian_edit", "propose_obsidian_move",
-    "propose_web_research", "propose_workspace_create", "propose_workspace_edit"
+    "propose_sandbox_promotion", "propose_web_research", "propose_workspace_create", "propose_workspace_edit"
   ]);
+  // Sandbox tools run without approval because they cannot reach the real
+  // project; the approval belongs to promoting the result. The physics and
+  // circuit tools are here for the same reason turned up further: their world
+  // is memory, so there is nothing to promote and nothing to undo.
+  //
+  // Running, checking and exporting a circuit now also write a line in the open
+  // board's history, and that does not move them out of this tier. The design
+  // still lives only in memory; what gets written is Evolv's own account of
+  // what it just did, which is the same bookkeeping the tool-run log has always
+  // kept for every call. A tool becomes effectful by changing the world, not by
+  // being remembered.
+  //
+  // Listed by name on purpose. This is a permission surface, and a tool that
+  // quietly joined the automatic tier would be exactly the change nobody
+  // notices — so adding one has to be a deliberate edit here.
+  assert.deepEqual(payload.tools.filter((tool) => tool.risk === "sandbox").map((tool) => tool.name).sort(), [
+    "bench_link", "bench_run_coupled",
+    "circuit_adjust", "circuit_build", "circuit_check", "circuit_conditions", "circuit_expect", "circuit_export", "circuit_firmware", "circuit_probe", "circuit_run", "circuit_wire",
+    "open_sandbox", "physics_adjust", "physics_build", "physics_connect", "physics_run",
+    "sandbox_validate", "sandbox_write_file"
+  ]);
+  assert.ok(payload.tools.filter((tool) => tool.risk === "sandbox").every((tool) => tool.riskPolicy?.automatic === true));
+  // The record tier: writes that land in Evolv's own store and nowhere else. A
+  // board's name, what it is for, and a figure read off a meter. Automatic
+  // because none of it reaches the user's files or the network and all of it is
+  // undone by deleting a row — and pinned by name here for the same reason the
+  // sandbox list is.
+  assert.deepEqual(payload.tools.filter((tool) => tool.risk === "record").map((tool) => tool.name).sort(), [
+    "board_measure", "board_save"
+  ]);
+  assert.ok(payload.tools.filter((tool) => tool.risk === "record").every((tool) => tool.riskPolicy?.automatic === true));
   assert.deepEqual(payload.tools.filter((tool) => tool.risk === "network-read").map((tool) => tool.name).sort(), [
     "convert_currency", "get_kanye_quote", "get_weather", "search_wikipedia"
   ]);

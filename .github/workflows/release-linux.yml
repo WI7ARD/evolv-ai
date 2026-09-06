@@ -1,0 +1,63 @@
+name: Linux release
+
+# Publishes the AppImage into the same GitHub release the Windows job creates.
+# Whichever job reaches the tag first creates the release and the other adds its
+# assets, so neither has to wait for the other and either can be re-run alone.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Verify tag and package version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "${{ github.ref_name }}" ]; then echo "Tag must equal v$version"; exit 1; fi
+      - uses: ./.github/actions/install-deps
+      - run: npm test
+      - name: Install installer tooling
+        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
+      - run: npm run dist:linux
+      - run: npm run installer:linux
+      # The block map is what makes the next update a few megabytes instead of
+      # three hundred. A release published without it still installs; it just
+      # costs every user a full download.
+      - name: Verify the release assets exist
+        run: |
+          version=$(node -p "require('./package.json').version")
+          dir=out/make/appimage/linux/x64
+          for file in "Evolv-$version-x86_64.AppImage" "Evolv-$version-x86_64.AppImage.sha256" "Evolv-$version-x86_64.AppImage.blocks"; do
+            if [ ! -s "$dir/$file" ]; then echo "Missing release asset: $file"; exit 1; fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Evolv-Linux-${{ github.ref_name }}
+          path: |
+            out/make/appimage/linux/x64/*.AppImage
+            out/make/appimage/linux/x64/*.sha256
+            out/make/appimage/linux/x64/*.blocks
+          if-no-files-found: error
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          dir=out/make/appimage/linux/x64
+          assets="$dir/Evolv-$version-x86_64.AppImage $dir/Evolv-$version-x86_64.AppImage.sha256 $dir/Evolv-$version-x86_64.AppImage.blocks"
+          # --clobber so re-running the job replaces its own assets rather than
+          # failing on the second attempt.
+          gh release create "v$version" $assets --title "Evolv $version" --generate-notes --verify-tag \
+            || gh release upload "v$version" $assets --clobber

@@ -265,3 +265,100 @@ test("export includes every conversation past the pagination cap", async (t) => 
   assert.equal(exported.conversations.length, 150);
   assert.ok(exported.conversations.every((conversation) => conversation.messages.length === 1));
 });
+
+test("a stale aggregate cannot destroy records written after it was read", async (t) => {
+  const { root, database } = await fixture();
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  // Two overlapping requests: both read the aggregate, then both write. This is
+  // an ordinary second browser tab, and it used to cost the first writer its
+  // record because saving replaced whole tables from a snapshot.
+  const firstRequest = database.getState();
+  const secondRequest = database.getState();
+
+  database.addFeedback({
+    id: "feedback-first", rating: "up", note: "from the first request",
+    versionId: firstRequest.activeVersionId, createdAt: new Date().toISOString()
+  });
+  database.addKnowledge({
+    id: "knowledge-first", title: "First", domain: "Test", content: "Written by the first request"
+  });
+  database.addArchitectureProposal({ id: "proposal-first", title: "First", request: "one" });
+
+  // The second request still holds an aggregate from before any of that.
+  database.addFeedback({
+    id: "feedback-second", rating: "down", note: "from the second request",
+    versionId: secondRequest.activeVersionId, createdAt: new Date().toISOString()
+  });
+  database.addKnowledge({
+    id: "knowledge-second", title: "Second", domain: "Test", content: "Written by the second request"
+  });
+  database.addArchitectureProposal({ id: "proposal-second", title: "Second", request: "two" });
+
+  const stored = database.getState();
+  assert.deepEqual(stored.feedback.map((item) => item.id).sort(), ["feedback-first", "feedback-second"]);
+  assert.deepEqual(stored.knowledge.map((item) => item.id).sort(), ["knowledge-first", "knowledge-second"]);
+  assert.deepEqual(stored.architectureProposals.map((item) => item.id).sort(), ["proposal-first", "proposal-second"]);
+
+  // Deleting is explicit and reports honestly against the database, not against
+  // whatever the caller happened to have read earlier.
+  assert.equal(database.deleteKnowledge("knowledge-first"), true);
+  assert.equal(database.deleteKnowledge("knowledge-first"), false);
+  assert.deepEqual(database.getState().knowledge.map((item) => item.id), ["knowledge-second"]);
+
+  // And a bulk merge adds without removing what it never knew about.
+  database.saveState({ ...firstRequest, knowledge: [{ id: "knowledge-merged", title: "Merged", domain: "Test", content: "From an import" }] });
+  assert.deepEqual(
+    database.getState().knowledge.map((item) => item.id).sort(),
+    ["knowledge-merged", "knowledge-second"]
+  );
+});
+
+test("bounded tables keep their newest records when the ceiling is reached", async (t) => {
+  const { root, database } = await fixture();
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  for (let index = 0; index < 6; index += 1) {
+    database.addFeedback({
+      id: `feedback-${index}`, rating: "up", note: `note ${index}`,
+      createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString()
+    }, { keep: 3 });
+  }
+  assert.deepEqual(database.getState().feedback.map((item) => item.id), ["feedback-3", "feedback-4", "feedback-5"]);
+});
+
+test("prompt versions are appended and promoted without rewriting the table", async (t) => {
+  const { root, database } = await fixture();
+  t.after(async () => {
+    database.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const baseline = database.getState();
+  assert.equal(baseline.activeVersionId, "v1");
+
+  database.addPromptVersion({
+    id: "v2-upgrade", number: 2, prompt: "Improved prompt", summary: "Upgrade",
+    rationale: "Because", tests: [{ input: "a", expected: "b" }], source: "feedback-upgrade"
+  });
+  database.setActiveVersion("v2-upgrade");
+  database.setPendingProposal(null);
+
+  const stored = database.getState();
+  assert.deepEqual(stored.versions.map((version) => version.id), ["v1", "v2-upgrade"]);
+  assert.equal(stored.activeVersionId, "v2-upgrade");
+  assert.equal(stored.pendingProposal, null);
+  assert.deepEqual(stored.versions.at(-1).tests, [{ input: "a", expected: "b" }]);
+
+  const proposal = { id: "proposal-1", prompt: "Draft", baseVersionId: "v2-upgrade" };
+  database.setPendingProposal(proposal);
+  assert.deepEqual(database.getState().pendingProposal, proposal);
+
+  // Rolling back to an earlier version keeps every recorded version intact.
+  database.setActiveVersion("v1");
+  assert.equal(database.getState().activeVersionId, "v1");
+  assert.equal(database.getState().versions.length, 2);
+});
